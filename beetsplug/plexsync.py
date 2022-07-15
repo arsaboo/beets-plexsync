@@ -8,22 +8,10 @@ Put something like the following in your config.yaml to configure:
         token: token
 """
 
-from urllib.parse import urlencode, urljoin
-from xml.etree import ElementTree
-
-import requests
 from beets import config
 from beets.plugins import BeetsPlugin
 from beets.ui import Subcommand
 from plexapi.server import PlexServer
-
-
-def get_protocol(secure):
-    if secure:
-        return 'https'
-    else:
-        return 'http'
-
 
 class PlexSync(BeetsPlugin):
     data_source = 'Plex'
@@ -42,8 +30,7 @@ class PlexSync(BeetsPlugin):
 
         config['plex']['token'].redact = True
         plex = PlexServer(config['plex']['host'], config['plex']['token'])
-        music = plex.library.section(config['plex']['library_name'])
-        self.register_listener('database_change', self.listen_for_db_change)
+        self.music = plex.library.section(config['plex']['library_name'])
 
     def commands(self):
         plexupdate_cmd = ui.Subcommand(
