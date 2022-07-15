@@ -68,14 +68,10 @@ class PlexSync(MetadataSourcePlugin, BeetsPlugin):
             'plexupdate', help=f'Update {self.data_source} library'
         )
 
-        # spotifysync command
-        sync_cmd = ui.Subcommand('plexupdate',
-                                 help=f'Update {self.data_source} library')
-
         def func(lib, args):
             self._plexupdate(music)
 
-        sync_cmd.func = func
+        plexupdate_cmd.func = func
         return [plexupdate_cmd]
 
     def _plexupdate(music_lib):
