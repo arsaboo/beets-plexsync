@@ -14,6 +14,7 @@ from xml.etree import ElementTree
 import requests
 from beets import config
 from beets.plugins import BeetsPlugin
+from beets.ui import Subcommand
 from plexapi.server import PlexServer
 
 
