@@ -24,7 +24,7 @@ def get_protocol(secure):
         return 'http'
 
 
-class PlexSync(MetadataSourcePlugin, BeetsPlugin):
+class PlexSync(BeetsPlugin):
     data_source = 'Plex'
 
     def __init__(self):
