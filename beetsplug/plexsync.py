@@ -45,18 +45,7 @@ class PlexSync(BeetsPlugin):
         music = plex.library.section(config['plex']['library_name'])
         self.register_listener('database_change', self.listen_for_db_change)
 
-    def listen_for_db_change(self):
-        """Listens for beets db change and register the update for the end"""
-        self.register_listener('cli_exit', self.music.update())
-
     def commands(self):
-        # autotagger import command
-        def queries(lib, opts, args):
-            success = self._parse_opts(opts)
-            if success:
-                results = self._match_library_tracks(lib, ui.decargs(args))
-                self._output_match_results(results)
-
         plexupdate_cmd = ui.Subcommand(
             'plexupdate', help=f'Update {self.data_source} library'
         )
