@@ -74,7 +74,7 @@ class PlexSync(MetadataSourcePlugin, BeetsPlugin):
         plexupdate_cmd.func = func
         return [plexupdate_cmd]
 
-    def _plexupdate(music_lib):
+    def _plexupdate(self, music_lib):
         """Update Plex music library."""
 
         self._log.info('Music section {}', music_lib.key)
