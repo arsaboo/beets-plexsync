@@ -17,14 +17,6 @@ from beets.plugins import BeetsPlugin
 from plexapi.server import PlexServer
 
 
-def append_token(url, token):
-    """Appends the Plex Home token to the api call if required.
-    """
-    if token:
-        url += '?' + urlencode({'X-Plex-Token': token})
-    return url
-
-
 def get_protocol(secure):
     if secure:
         return 'https'
@@ -74,8 +66,8 @@ class PlexSync(MetadataSourcePlugin, BeetsPlugin):
         plexupdate_cmd.func = func
         return [plexupdate_cmd]
 
-    def _plexupdate(self, music_lib):
+    def _plexupdate(self, music):
         """Update Plex music library."""
 
-        self._log.info('Music section {}', music_lib.key)
-        music_lib.update()
+        self._log.info('Music section {}', music.key)
+        music.update()
