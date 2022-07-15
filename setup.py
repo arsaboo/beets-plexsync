@@ -11,5 +11,5 @@ setup(
     license='MIT',
     platforms='ALL',
     packages=['beetsplug'],
-    install_requires=['beets>=1.6.0'],
+    install_requires=['beets>=1.6.0', 'plexapi'],
 )
