@@ -32,7 +32,9 @@ def get_protocol(secure):
         return 'http'
 
 
-class PlexSync(BeetsPlugin):
+class PlexSync(MetadataSourcePlugin, BeetsPlugin):
+    data_source = 'Plex'
+
     def __init__(self):
         super().__init__()
 
@@ -46,11 +48,38 @@ class PlexSync(BeetsPlugin):
             'ignore_cert_errors': False})
 
         config['plex']['token'].redact = True
-        self.register_listener('database_change', self.listen_for_db_change)
         plex = PlexServer(config['plex']['host'], config['plex']['token'])
         music = plex.library.section(config['plex']['library_name'])
-        self._log.info('Music section {}', music.key)
+        self.register_listener('database_change', self.listen_for_db_change)
 
-    def listen_for_db_change(self, lib, model):
+    def listen_for_db_change(self):
         """Listens for beets db change and register the update for the end"""
-        self.register_listener('cli_exit', self.plex.update())
+        self.register_listener('cli_exit', self.music.update())
+
+    def commands(self):
+        # autotagger import command
+        def queries(lib, opts, args):
+            success = self._parse_opts(opts)
+            if success:
+                results = self._match_library_tracks(lib, ui.decargs(args))
+                self._output_match_results(results)
+
+        plexupdate_cmd = ui.Subcommand(
+            'plexupdate', help=f'Update {self.data_source} library'
+        )
+
+        # spotifysync command
+        sync_cmd = ui.Subcommand('plexupdate',
+                                 help=f'Update {self.data_source} library')
+
+        def func(lib, args):
+            self._plexupdate(music)
+
+        sync_cmd.func = func
+        return [plexupdate_cmd]
+
+    def _plexupdate(music_lib):
+        """Update Plex music library."""
+
+        self._log.info('Music section {}', music_lib.key)
+        music_lib.update()
