@@ -13,6 +13,6 @@ setup(
     packages=['beetsplug'],
     install_requires=[
         'beets>=1.6.0',
-        'plexapi',
+        'plexapi>=4.11.2',
     ],
 )
