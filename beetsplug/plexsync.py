@@ -152,7 +152,7 @@ class PlexSync(BeetsPlugin):
         return [plexupdate_cmd, sync_cmd, playlistadd_cmd, playlistrem_cmd,
                 syncrecent_cmd, playlistimport_cmd]
 
-    def parse_title(title_orig):
+    def parse_title(self, title_orig):
         if "(From \"" in title_orig:
             title = re.sub(r'\(From.*\)', '', title_orig)
             album = re.sub(r'^[^"]+"|(?<!^)"[^"]+"|"[^"]+$', '', title_orig)
@@ -164,7 +164,7 @@ class PlexSync(BeetsPlugin):
             album = ""
         return title, album
 
-    def import_apple_playlist(self,url):
+    def import_apple_playlist(self, url):
         # Send a GET request to the URL and get the HTML content
         response = requests.get(url)
         content = response.text
