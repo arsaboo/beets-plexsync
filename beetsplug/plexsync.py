@@ -78,6 +78,7 @@ class PlexSync(BeetsPlugin):
 
 
     def import_spotify_playlist(self, playlist_id):
+        self.setup_spotify()
         songs = self.get_playlist_tracks(playlist_id)
         song_list = []
         for song in songs:
@@ -118,7 +119,7 @@ class PlexSync(BeetsPlugin):
         Returns:
             list: tracks in a Spotify playlist
         """
-        self.setup_spotify()
+
         tracks_response = self.sp.playlist_tracks(playlist_id)
         tracks = tracks_response["items"]
         while tracks_response["next"]:
