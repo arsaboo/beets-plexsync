@@ -161,17 +161,14 @@ class PlexSync(BeetsPlugin):
             items = lib.items(ui.decargs(args))
             self._fetch_plex_info(items, ui.should_write(),
                                   opts.force_refetch)
-
         sync_cmd.func = func_sync
 
         # plexplaylistadd command
         playlistadd_cmd = ui.Subcommand('plexplaylistadd',
                                         help="add tracks to Plex playlist")
-
         playlistadd_cmd.parser.add_option('-m', '--playlist',
                                           default='Beets',
                                           help='add playlist to Plex')
-
         def func_playlist_add(lib, opts, args):
             items = lib.items(ui.decargs(args))
             self._plex_add_playlist_item(items, opts.playlist)
@@ -181,11 +178,9 @@ class PlexSync(BeetsPlugin):
         # plexplaylistremove command
         playlistrem_cmd = ui.Subcommand('plexplaylistremove',
                                         help="Plex playlist to edit")
-
         playlistrem_cmd.parser.add_option('-m', '--playlist',
                                           default='Beets',
                                           help='Plex playlist to edit')
-
         def func_playlist_rem(lib, opts, args):
             items = lib.items(ui.decargs(args))
             self._plex_remove_playlist_item(items, opts.playlist)
