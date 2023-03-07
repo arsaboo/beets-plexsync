@@ -468,4 +468,4 @@ class PlexSync(BeetsPlugin):
             if self.search_plex_song(song) is not None:
                 found = self.search_plex_song(song)
                 print (found.parentTitle + " - " + found.title)
-        self._plex_add_playlist_songs(songs, playlist)
+                self._plex_add_playlist_songs(found, playlist)
