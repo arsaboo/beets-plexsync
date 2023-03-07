@@ -251,18 +251,18 @@ class PlexSync(BeetsPlugin):
             tracks = []
             # Loop through each div element
             for div in result:
-            # Find the span element with class "s_name"
-            span = div.find("span", {"class": "t_over"})
-            # Get the text content of the span element
-            title_tmp = span.text.strip()
-            title = re.sub("^Premium  ", "", title_tmp)
-            div_art = div.find("div", {"class": "_art"})
-            artist = div_art.text.strip()
-            div_alb = div.find("div", {"class": "_alb"})
-            album = div_alb.text.strip()
-            song_dict = {"title": title, "album": album, "artist": artist}
-            # Append the title to the tracks list
-            tracks.append(song_dict)
+                # Find the span element with class "s_name"
+                span = div.find("span", {"class": "t_over"})
+                # Get the text content of the span element
+                title_tmp = span.text.strip()
+                title = re.sub("^Premium  ", "", title_tmp)
+                div_art = div.find("div", {"class": "_art"})
+                artist = div_art.text.strip()
+                div_alb = div.find("div", {"class": "_alb"})
+                album = div_alb.text.strip()
+                song_dict = {"title": title, "album": album, "artist": artist}
+                # Append the title to the tracks list
+                tracks.append(song_dict)
             # Return the tracks as a list of strings
             return tracks
         else:
