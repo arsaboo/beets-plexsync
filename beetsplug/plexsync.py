@@ -327,7 +327,7 @@ class PlexSync(BeetsPlugin):
             playlist_set = set()
         for song in songs:
             try:
-                plex_set.add(song.ratingKey)
+                plex_set.add(int(song.ratingKey))
             except (exceptions.NotFound, AttributeError) as e:
                 self._log.warning('{} not found in Plex library. Error: {}',
                                   song, e)
