@@ -323,10 +323,10 @@ class PlexSync(BeetsPlugin):
         self._log.info('Adding tracks from {} into {} playlist',
                        playlist_url, playlist)
         if "apple" in playlist_url:
-            songs = import_apple_playlist(playlist_url)
+            songs = self.import_apple_playlist(playlist_url)
         elif "jiosaavn" in playlist_url:
-            songs = import_jiosaavn_playlist(playlist_url)
+            songs = self.import_jiosaavn_playlist(playlist_url)
         elif "spotify" in playlist_url:
-            songs = import_spotify_playlist(get_playlist_id(playlist_url))
+            songs = self.import_spotify_playlist(get_playlist_id(playlist_url))
         for song in songs:
             print (song['album'] + " - " + song['title'])
