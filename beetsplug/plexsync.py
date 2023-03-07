@@ -11,6 +11,7 @@ import re
 import time
 
 import requests
+import spotipy
 from beets import config, ui
 from beets.dbcore import types
 from beets.dbcore.query import MatchQuery
@@ -19,6 +20,7 @@ from beets.plugins import BeetsPlugin
 from bs4 import BeautifulSoup
 from plexapi import exceptions
 from plexapi.server import PlexServer
+from spotipy.oauth2 import SpotifyClientCredentials
 
 
 class PlexSync(BeetsPlugin):
