@@ -140,8 +140,7 @@ class PlexSync(BeetsPlugin):
         playlistimport_cmd.parser.add_option('-m', '--playlist',
                                              default='Beets',
                                              help='name of the playlist to be added in Plex')
-        playlistimport_cmd.parser.add_option('-u', '--url', dest='url',
-                                             action='store_true',
+        playlistimport_cmd.parser.add_option('-l', '--url', default='',
                                              help='playlist URL to be imported in Plex')
         def func_playlist_import(lib, opts, args):
             self._plex_import_playlist(opts.playlist, opts.url)
@@ -277,7 +276,7 @@ class PlexSync(BeetsPlugin):
                     self._log.debug("Please sync Plex library again")
                     continue
 
-    def _plex_import_playlist(self, playlist, url):
+    def _plex_import_playlist(self, playlist, playlist_url):
         """Import playlist into Plex."""
         self._log.info('Adding tracks from {} into {} playlist',
-                       url, playlist)
+                       playlist_url, playlist)
