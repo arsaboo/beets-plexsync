@@ -10,6 +10,7 @@ Put something like the following in your config.yaml to configure:
 import re
 import time
 
+import dateutil.parser
 import requests
 import spotipy
 from beets import config, ui
@@ -76,7 +77,26 @@ class PlexSync(BeetsPlugin):
         self.sp = spotipy.Spotify(client_credentials_manager=self.auth_manager)
 
     def import_spotify_playlist(self, playlist_id):
-        self.setup_spotify()
+        songs = get_playlist_tracks(playlist_id)
+        song_list = []
+        for song in songs:
+            # Find and store the song title
+            if (song["track"]["name"] in song["track"]["album"]["name"]) and (("From \"" in song["track"]["name"]) or ("From &quot" in song["track"]["name"])):
+                title_orig = song["track"]["name"].replace("&quot;", "\"")
+                title, album = self.parse_title(title_orig)
+            else:
+                title = song["track"]["name"]
+                album = song["track"]["album"]["name"]
+            year = dateutil.parser.parse(song["track"]["album"]["release_date"], ignoretz=True)
+            # Find and store the song artist
+            artist = song["track"]["artists"][0]["name"]
+            # Find and store the song duration
+            #duration = song.find("div", class_="songs-list-row__length").text.strip()
+            # Create a dictionary with the song information
+            song_dict = {"title": title.strip(), "album": album.strip(), "artist": artist.strip(), "year": year}
+            # Append the dictionary to the list of songs
+            song_list.append(song_dict)
+        return song_list
 
     def get_playlist_id(self, url):
         # split the url by "/"
