@@ -65,6 +65,11 @@ class PlexSync(BeetsPlugin):
             raise ui.UserError(f"{config['plex']['library_name']} \
                 library not found")
         self.register_listener('database_change', self.listen_for_db_change)
+        CLIENT_ID=config["spotify"]["client_id"]
+        CLIENT_SECRET=config["spotify"]["client_secret"]
+        self.auth_manager = SpotifyClientCredentials(client_id=CLIENT_ID,client_secret=CLIENT_SECRET)
+
+        sp = spotipy.Spotify(client_credentials_manager=auth_manager)
 
     def listen_for_db_change(self, lib, model):
         """Listens for beets db change and register the update for the end."""
