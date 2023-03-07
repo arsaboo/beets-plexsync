@@ -40,6 +40,12 @@ class PlexSync(BeetsPlugin):
         'plex_updated': DateType(),
     }
 
+    class dotdict(dict):
+        """dot.notation access to dictionary attributes"""
+        __getattr__ = dict.get
+        __setattr__ = dict.__setitem__
+        __delattr__ = dict.__delitem__
+
     def __init__(self):
         """Initialize plexsync plugin."""
         super().__init__()
@@ -316,31 +322,6 @@ class PlexSync(BeetsPlugin):
             self._log.debug('Track {} not found in Plex library', item)
             return None
 
-    def _plex_add_playlist_songs(self, songs, playlist):
-        """Add songs to Plex playlist."""
-        plex_set = set()
-        try:
-            plst = self.plex.playlist(playlist)
-            playlist_set = set(plst.items())
-        except exceptions.NotFound:
-            plst = None
-            playlist_set = set()
-        for song in songs:
-            try:
-                plex_set.add(self.plex.fetchItem(int(song)))
-            except (exceptions.NotFound, AttributeError) as e:
-                self._log.warning('{} not found in Plex library. Error: {}',
-                                  song, e)
-                continue
-        to_add = plex_set - playlist_set
-        self._log.info('Adding {} tracks to {} playlist',
-                       len(to_add), playlist)
-        if plst is None:
-            self._log.info('{} playlist will be created', playlist)
-            self.plex.createPlaylist(playlist, items=list(to_add))
-        else:
-            plst.addItems(items=list(to_add))
-
     def _plex_add_playlist_item(self, items, playlist):
         """Add items to Plex playlist."""
         plex_set = set()
@@ -470,12 +451,5 @@ class PlexSync(BeetsPlugin):
                 found = self.search_plex_song(song)
                 song_dict = {"title": found.title, "album": found.parentTitle,
                              "plex_ratingkey": found.ratingKey}
-                print (found.parentTitle + " - " + found.title)
                 song_list.append(self.dotdict(song_dict))
         self._plex_add_playlist_item(song_list, playlist)
-
-    class dotdict(dict):
-        """dot.notation access to dictionary attributes"""
-        __getattr__ = dict.get
-        __setattr__ = dict.__setitem__
-        __delattr__ = dict.__delitem__
