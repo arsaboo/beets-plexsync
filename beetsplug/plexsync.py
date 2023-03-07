@@ -237,6 +237,38 @@ class PlexSync(BeetsPlugin):
             album = album_orig
         return album
 
+    def import_gaana_playlist(playlist_url):
+        # Make a GET request to the playlist url
+        response = requests.get(playlist_url)
+        # Check if the response is successful
+        if response.status_code == 200:
+            # Parse the html data from the response
+            soup = BeautifulSoup(response.text, "html.parser")
+            # Find all the div elements with class "s_c"
+            result = soup.find_all("ul", {"class": "_row list_data"})
+            print(len(result))
+            # Create an empty list to store the tracks
+            tracks = []
+            # Loop through each div element
+            for div in result:
+            # Find the span element with class "s_name"
+            span = div.find("span", {"class": "t_over"})
+            # Get the text content of the span element
+            title_tmp = span.text.strip()
+            title = re.sub("^Premium  ", "", title_tmp)
+            div_art = div.find("div", {"class": "_art"})
+            artist = div_art.text.strip()
+            div_alb = div.find("div", {"class": "_alb"})
+            album = div_alb.text.strip()
+            song_dict = {"title": title, "album": album, "artist": artist}
+            # Append the title to the tracks list
+            tracks.append(song_dict)
+            # Return the tracks as a list of strings
+            return tracks
+        else:
+            # Raise an exception if the response is not successful
+            raise Exception(f"Gaana website returned status code {response.status_code}")
+
     def import_apple_playlist(self, url):
         # Send a GET request to the URL and get the HTML content
         response = requests.get(url)
@@ -438,6 +470,8 @@ class PlexSync(BeetsPlugin):
             songs = self.import_apple_playlist(playlist_url)
         elif "jiosaavn" in playlist_url:
             songs = self.import_jiosaavn_playlist(playlist_url)
+        elif "gaana.com" in playlist_url:
+            songs = self.import_gaana_playlist(playlist_url)
         elif "spotify" in playlist_url:
             songs = self.import_spotify_playlist(self.get_playlist_id(playlist_url))
         song_list = []
