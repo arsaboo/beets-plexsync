@@ -330,16 +330,16 @@ class PlexSync(BeetsPlugin):
                 plex_set.add(self.plex.fetchItem(song.ratingKey))
             except (exceptions.NotFound, AttributeError) as e:
                 self._log.warning('{} not found in Plex library. Error: {}',
-                                  item, e)
+                                  song, e)
                 continue
         to_add = plex_set - playlist_set
         self._log.info('Adding {} tracks to {} playlist',
                        len(to_add), playlist)
         if plst is None:
             self._log.info('{} playlist will be created', playlist)
-            self.plex.createPlaylist(playlist, items=list(to_add))
+            self.plex.createPlaylist(playlist, songs=list(to_add))
         else:
-            plst.addItems(items=list(to_add))
+            plst.addItems(songs=list(to_add))
 
     def _plex_add_playlist_item(self, items, playlist):
         """Add items to Plex playlist."""
