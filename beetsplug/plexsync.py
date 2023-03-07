@@ -90,7 +90,7 @@ class PlexSync(BeetsPlugin):
                 title, album = self.parse_title(title_orig)
             else:
                 title = song["track"]["name"]
-                album = song["track"]["album"]["name"]
+                album = song["track"]["album"]["name"].replace("(Original Motion Picture Soundtrack)", "").strip()
             year = dateutil.parser.parse(song["track"]["album"]["release_date"], ignoretz=True)
             # Find and store the song artist
             artist = song["track"]["artists"][0]["name"]
