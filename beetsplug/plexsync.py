@@ -468,6 +468,8 @@ class PlexSync(BeetsPlugin):
         for song in songs:
             if self.search_plex_song(song) is not None:
                 found = self.search_plex_song(song)
+                song_dict = {"title": found.title, "album": found.parentTitle,
+                             "plex_ratingkey": found.ratingKey}
                 print (found.parentTitle + " - " + found.title)
-                song_list.append(found)
+                song_list.append(song_dict)
         self._plex_add_playlist_item(song_list, playlist)
