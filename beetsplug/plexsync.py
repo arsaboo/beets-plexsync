@@ -90,7 +90,7 @@ class PlexSync(BeetsPlugin):
                 title, album = self.parse_title(title_orig)
             else:
                 title = song["track"]["name"]
-                album = song["track"]["album"]["name"].replace("(Original Motion Picture Soundtrack)", "").strip()
+                album = self.clean_album_name(song["track"]["album"]["name"])
             year = dateutil.parser.parse(song["track"]["album"]["release_date"], ignoretz=True)
             # Find and store the song artist
             artist = song["track"]["artists"][0]["name"]
@@ -226,6 +226,16 @@ class PlexSync(BeetsPlugin):
             title = title_orig
             album = ""
         return title, album
+
+    def clean_album_name(self, album_orig):
+        album_orig = album_orig.replace("(Original Motion Picture Soundtrack)", "").strip()
+        if "(From \"" in album_orig:
+            album = re.sub(r'^[^"]+"|(?<!^)"[^"]+"|"[^"]+$', '', album_orig)
+        elif "[From \"" in album_orig:
+            album = re.sub(r'^[^"]+"|(?<!^)"[^"]+"|"[^"]+$', '', album_orig)
+        else:
+            album = album_orig
+        return album
 
     def import_apple_playlist(self, url):
         # Send a GET request to the URL and get the HTML content
