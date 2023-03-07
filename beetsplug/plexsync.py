@@ -71,7 +71,7 @@ class PlexSync(BeetsPlugin):
         CLIENT_SECRET=config["spotify"]["client_secret"]
         self.auth_manager = SpotifyClientCredentials(client_id=CLIENT_ID,client_secret=CLIENT_SECRET)
 
-        sp = spotipy.Spotify(client_credentials_manager=auth_manager)
+        sp = spotipy.Spotify(client_credentials_manager=self.auth_manager)
 
     def listen_for_db_change(self, lib, model):
         """Listens for beets db change and register the update for the end."""
