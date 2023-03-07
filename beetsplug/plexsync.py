@@ -471,5 +471,11 @@ class PlexSync(BeetsPlugin):
                 song_dict = {"title": found.title, "album": found.parentTitle,
                              "plex_ratingkey": found.ratingKey}
                 print (found.parentTitle + " - " + found.title)
-                song_list.append(song_dict)
+                song_list.append(self.dotdict(song_dict))
         self._plex_add_playlist_item(song_list, playlist)
+
+    class dotdict(dict):
+        """dot.notation access to dictionary attributes"""
+        __getattr__ = dict.get
+        __setattr__ = dict.__setitem__
+        __delattr__ = dict.__delitem__
