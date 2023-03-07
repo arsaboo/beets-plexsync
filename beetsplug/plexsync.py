@@ -237,7 +237,7 @@ class PlexSync(BeetsPlugin):
             album = album_orig
         return album
 
-    def import_gaana_playlist(playlist_url):
+    def import_gaana_playlist(self, playlist_url):
         # Make a GET request to the playlist url
         response = requests.get(playlist_url)
         # Check if the response is successful
