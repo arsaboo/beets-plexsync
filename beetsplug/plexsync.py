@@ -78,7 +78,7 @@ class PlexSync(BeetsPlugin):
     def import_spotify_playlist(playlist_id):
         self.setup_spotify()
 
-    def get_playlist_id(url):
+    def get_playlist_id(self, url):
         # split the url by "/"
         parts = url.split("/")
         # find the index of "playlist"
