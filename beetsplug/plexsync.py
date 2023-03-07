@@ -78,6 +78,15 @@ class PlexSync(BeetsPlugin):
     def import_spotify_playlist(playlist_id):
         self.setup_spotify()
 
+    def get_playlist_id(url):
+        # split the url by "/"
+        parts = url.split("/")
+        # find the index of "playlist"
+        index = parts.index("playlist")
+        # get the next part as the playlist id
+        playlist_id = parts[index + 1]
+        # return the playlist id
+        return playlist_id
     def get_playlist_tracks(playlist_id):
         """This function returns a list of tracks in a Spotify playlist.
 
