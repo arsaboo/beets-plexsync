@@ -73,7 +73,7 @@ class PlexSync(BeetsPlugin):
         CLIENT_ID = config["spotify"]["client_id"]
         CLIENT_SECRET = config["spotify"]["client_secret"]
         self.auth_manager = SpotifyClientCredentials(client_id=CLIENT_ID, client_secret=CLIENT_SECRET)
-        sp = spotipy.Spotify(client_credentials_manager=self.auth_manager)
+        self.sp = spotipy.Spotify(client_credentials_manager=self.auth_manager)
 
     def import_spotify_playlist(playlist_id):
         self.setup_spotify()
@@ -87,7 +87,7 @@ class PlexSync(BeetsPlugin):
         Returns:
             list: tracks in a Spotify playlist
         """
-        tracks_response = sp.playlist_tracks(playlist_id)
+        tracks_response = self.sp.playlist_tracks(playlist_id)
         tracks = tracks_response["items"]
         while tracks_response["next"]:
             tracks_response = sp.next(tracks_response)
