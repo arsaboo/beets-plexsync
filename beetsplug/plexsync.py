@@ -7,6 +7,7 @@ Put something like the following in your config.yaml to configure:
         token: token
 """
 
+import difflib
 import re
 import time
 
@@ -378,6 +379,44 @@ class PlexSync(BeetsPlugin):
                     self._log.debug("Please sync Plex library again")
                     continue
 
+    # Define a function that takes a title string and a list of tuples as input
+    def find_closest_match(self, title, lst):
+        # Initialize an empty list to store the matches and their scores
+        matches = []
+        # Loop through each tuple in the list
+        for t in lst:
+            # Use the SequenceMatcher class to compare the title with the first element of the tuple
+            # The ratio method returns a score between 0 and 1 indicating how similar the two strings are based on the Levenshtein distance
+            score = difflib.SequenceMatcher(None, title, t.title).ratio()
+            # Append the tuple and the score to the matches list
+            matches.append((t, score))
+        # Sort the matches list by the score in descending order
+        matches.sort(key=lambda x: x[1], reverse=True)
+        # Return only the first element of each tuple in the matches list as a new list
+        return [m[0] for m in matches]
+
+    def search_plex_song(self, song):
+        """Fetch the Plex track key."""
+        if song['album'] == "":
+            tracks = music.searchTracks(**{'track.title': song['title']})
+        else:
+            tracks = music.searchTracks(**{'album.title': song['album'], 'track.title': song['title']})
+        artist = song['artist'].split(",")[0]
+        if len(tracks) == 1:
+            return tracks[0]
+        elif len(tracks) > 1:
+            sorted_tracks = self.find_closest_match(song['title'], tracks)
+            for track in sorted_tracks:
+                if track.originalTitle is not None:
+                    plex_artist = track.originalTitle
+                else:
+                    plex_artist = track.artist().title
+                if artist in plex_artist:
+                    return track
+        else:
+            print('Track {} not found in Plex library', song['title'])
+            return None
+
     def _plex_import_playlist(self, playlist, playlist_url):
         """Import playlist into Plex."""
         if "http://" not in playlist_url and "https://" not in playlist_url:
@@ -391,4 +430,6 @@ class PlexSync(BeetsPlugin):
         elif "spotify" in playlist_url:
             songs = self.import_spotify_playlist(self.get_playlist_id(playlist_url))
         for song in songs:
-            print (song['album'] + " - " + song['title'] + " - " + song['ratingKey'])
+            if search_plex_song(song) is not None:
+                found = self.search_plex_song(song)
+            print (found.parentTitle + " - " + found.title)
