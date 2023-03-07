@@ -10,9 +10,7 @@ Put something like the following in your config.yaml to configure:
 import re
 import time
 
-import dateutil.parser
 import requests
-import spotipy
 from beets import config, ui
 from beets.dbcore import types
 from beets.dbcore.query import MatchQuery
@@ -21,7 +19,6 @@ from beets.plugins import BeetsPlugin
 from bs4 import BeautifulSoup
 from plexapi import exceptions
 from plexapi.server import PlexServer
-from spotipy.oauth2 import SpotifyClientCredentials
 
 
 class PlexSync(BeetsPlugin):
@@ -68,10 +65,6 @@ class PlexSync(BeetsPlugin):
             raise ui.UserError(f"{config['plex']['library_name']} \
                 library not found")
         self.register_listener('database_change', self.listen_for_db_change)
-        CLIENT_ID=self.config['spotify']['client_id']
-        CLIENT_SECRET=self.config['spotify']['client_secret']
-        spotify_username = self.config['spotify']['username']
-        self.auth_manager = SpotifyClientCredentials(client_id=CLIENT_ID,client_secret=CLIENT_SECRET)
 
     def listen_for_db_change(self, lib, model):
         """Listens for beets db change and register the update for the end."""
@@ -194,56 +187,6 @@ class PlexSync(BeetsPlugin):
             #duration = song.find("div", class_="songs-list-row__length").text.strip()
             # Create a dictionary with the song information
             song_dict = {"title": title.strip(), "album": album.strip(), "artist": artist.strip()}
-            # Append the dictionary to the list of songs
-            song_list.append(song_dict)
-        return song_list
-
-    def get_playlist_tracks(self, playlist_id):
-        """This function returns a list of tracks in a Spotify playlist.
-
-        Args:
-            playlist_id (string): Spotify playlist ID
-
-        Returns:
-            list: tracks in a Spotify playlist
-        """
-        sp = spotipy.Spotify(client_credentials_manager=self.auth_manager)
-        tracks_response = sp.playlist_tracks(playlist_id)
-        tracks = tracks_response["items"]
-        while tracks_response["next"]:
-            tracks_response = sp.next(tracks_response)
-            tracks.extend(tracks_response["items"])
-        return tracks
-
-    def get_playlist_id(self, url):
-        # split the url by "/"
-        parts = url.split("/")
-        # find the index of "playlist"
-        index = parts.index("playlist")
-        # get the next part as the playlist id
-        playlist_id = parts[index + 1]
-        # return the playlist id
-        return playlist_id
-
-    def import_spotify_playlist(self, playlist_id):
-        songs = self.get_playlist_tracks(playlist_id)
-        song_list = []
-        for song in songs:
-            # Find and store the song title
-
-            if (song["track"]["name"] in song["track"]["album"]["name"]) and (("From \"" in song["track"]["name"]) or ("From &quot" in song["track"]["name"])):
-                title_orig = song["track"]["name"].replace("&quot;", "\"")
-                title, album = parse_title(title_orig)
-            else:
-                title = song["track"]["name"]
-                album = song["track"]["album"]["name"]
-            year = dateutil.parser.parse(song["track"]["album"]["release_date"], ignoretz=True)
-            # Find and store the song artist
-            artist = song["track"]["artists"][0]["name"]
-            # Find and store the song duration
-            #duration = song.find("div", class_="songs-list-row__length").text.strip()
-            # Create a dictionary with the song information
-            song_dict = {"title": title.strip(), "album": album.strip(), "artist": artist.strip(), "year": year}
             # Append the dictionary to the list of songs
             song_list.append(song_dict)
         return song_list
