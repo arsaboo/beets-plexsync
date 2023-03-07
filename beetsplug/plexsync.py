@@ -430,6 +430,6 @@ class PlexSync(BeetsPlugin):
         elif "spotify" in playlist_url:
             songs = self.import_spotify_playlist(self.get_playlist_id(playlist_url))
         for song in songs:
-            if search_plex_song(song) is not None:
+            if self.search_plex_song(song) is not None:
                 found = self.search_plex_song(song)
             print (found.parentTitle + " - " + found.title)
