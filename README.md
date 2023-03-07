@@ -17,8 +17,17 @@ Then, [configure](#configuration) the plugin in your
 
 ## Configuration
 
-This plugin requires you to add and configure the [`plexupdate`](https://beets.readthedocs.io/en/latest/plugins/plexupdate.html) plugin. Next, add `plexsync` to your list of enabled plugins and you should be able to get started.
+Add `plexsync` to your list of enabled plugins.
 
 ```yaml
 plugins: plexsync
+```
+
+Next, you can configure your Plex server and library like following (see instructions to obtain Plex token [here](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/)).
+
+```yaml
+plex:
+    baseurl: 'http://192.168.2.212:32400'
+    token: PLEX_TOKEN
+    library_name: 'Music'
 ```

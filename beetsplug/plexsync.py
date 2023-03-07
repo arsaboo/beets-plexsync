@@ -1,6 +1,6 @@
-"""Syncs Plex library and updates Plex library when  beets library is changed.
+"""Update and sync Plex music library.
 
-Plex Home users enter the Plex Token to enable updating.
+Plex users enter the Plex Token to enable updating.
 Put something like the following in your config.yaml to configure:
     plex:
         host: localhost
@@ -9,8 +9,8 @@ Put something like the following in your config.yaml to configure:
 
 import os
 
-import beets.ui
-from beets import config
+from beets import config, ui
+from beets.dbcore import types
 from beets.plugins import BeetsPlugin
 from plexapi import exceptions
 from plexapi.server import PlexServer
@@ -18,6 +18,15 @@ from plexapi.server import PlexServer
 
 class PlexSync(BeetsPlugin):
     data_source = 'Plex'
+
+    item_types = {
+        'plex_key': types.STRING,
+        'plex_guid': types.STRING,
+        'plex_ratingkey': types.INTEGER,
+        'plex_userrating': types.FLOAT,
+        'plex_skipcount': types.INTEGER,
+        'plex_viewcount': types.INTEGER,
+    }
 
     def __init__(self):
         super().__init__()
@@ -33,15 +42,15 @@ class PlexSync(BeetsPlugin):
 
         config['plex']['token'].redact = True
         try:
-            plex = PlexServer(config['plex']['baseurl'].get(),
+            self.plex = PlexServer(config['plex']['baseurl'].get(),
                           config['plex']['token'].get())
         except exceptions.Unauthorized:
-            raise beets.ui.UserError('Plex token request failed')
+            raise ui.UserError('Plex authorization failed')
         try:
-            self.music = plex.library.section(config['plex']['library_name']
-                                              .get())
+            self.music = self.plex.library.section(
+                config['plex']['library_name'].get())
         except exceptions.NotFound:
-            raise beets.ui.UserError(f"{config['plex']['library_name']} library not found")
+            raise ui.UserError(f"{config['plex']['library_name']} library not found")
         self.register_listener('database_change', self.listen_for_db_change)
 
     def listen_for_db_change(self, lib, model):
@@ -49,7 +58,7 @@ class PlexSync(BeetsPlugin):
         self.register_listener('cli_exit', self._plexupdate)
 
     def commands(self):
-        plexupdate_cmd = beets.ui.Subcommand(
+        plexupdate_cmd = ui.Subcommand(
             'plexupdate', help=f'Update {self.data_source} library'
         )
 
@@ -59,22 +68,50 @@ class PlexSync(BeetsPlugin):
         plexupdate_cmd.func = func
 
         # plexsync command
-        sync_cmd = beets.ui.Subcommand('plexsync',
-                                       help="fetch track attributes from Plex")
+        sync_cmd = ui.Subcommand('plexsync',
+                                 help="fetch track attributes from Plex")
         sync_cmd.parser.add_option(
             '-f', '--force', dest='force_refetch',
             action='store_true', default=False,
-            help='re-download data when already present'
+            help='re-sync Plex data when already present'
         )
 
         def func_sync(lib, opts, args):
-            items = lib.items(beets.ui.decargs(args))
-            self._fetch_plex_info(items, beets.ui.should_write(),
+            items = lib.items(ui.decargs(args))
+            self._fetch_plex_info(items, ui.should_write(),
                                   opts.force_refetch)
 
         sync_cmd.func = func_sync
 
-        return [plexupdate_cmd, sync_cmd]
+        # plexplaylistadd command
+        playlistadd_cmd = ui.Subcommand('plexplaylistadd',
+                                     help="add tracks to Plex playlist")
+
+        playlistadd_cmd.parser.add_option('-p', '--playlist',
+                                          default='Beets',
+                                          help='add playlist to Plex')
+
+        def func_playlist_add(lib, opts, args):
+            items = lib.items(ui.decargs(args))
+            self._plex_add_playlist_item(items, opts.playlist)
+
+        playlistadd_cmd.func = func_playlist_add
+
+        # plexplaylistremove command
+        playlistrem_cmd = ui.Subcommand('plexplaylistremove',
+                                     help="add tracks to Plex playlist")
+
+        playlistrem_cmd.parser.add_option('-p', '--playlist',
+                                          default='Beets',
+                                          help='add playlist to Plex')
+
+        def func_playlist_rem(lib, opts, args):
+            items = lib.items(ui.decargs(args))
+            self._plex_remove_playlist_item(items, opts.playlist)
+
+        playlistrem_cmd.func = func_playlist_rem
+
+        return [plexupdate_cmd, sync_cmd, playlistadd_cmd, playlistrem_cmd]
 
     def _plexupdate(self):
         """Update Plex music library."""
@@ -88,8 +125,6 @@ class PlexSync(BeetsPlugin):
 
     def _fetch_plex_info(self, items, write, force):
         """Obtain track information from Plex."""
-
-        self._log.info('Total {} tracks', len(items))
 
         for index, item in enumerate(items, start=1):
             self._log.info('Processing {}/{} tracks - {} ',
@@ -107,8 +142,10 @@ class PlexSync(BeetsPlugin):
                 continue
             item.plex_key = plex_track.key
             item.plex_guid = plex_track.guid
-            self._log.info('Rating: {}', plex_track.userRating)
+            item.plex_ratingkey = plex_track.ratingKey
             item.plex_userrating = plex_track.userRating
+            item.plex_skipcount = plex_track.skipCount
+            item.plex_viewcount = plex_track.viewCount
             item.store()
             if write:
                 item.try_write()
@@ -127,7 +164,6 @@ class PlexSync(BeetsPlugin):
                     return track
         else:
             return None
-        self._log.info('tracks: {}', len(tracks))
         if len(tracks) == 0:
             return None
         elif len(tracks) == 1:
@@ -143,3 +179,37 @@ class PlexSync(BeetsPlugin):
             return True
         else:
             return False
+
+    def _plex_add_playlist_item(self, items, playlist):
+        """Add items to Plex playlist."""
+        self._log.info('Adding {} tracks to {} playlist',
+                       len(items), playlist)
+        try:
+            plst = self.plex.playlist(playlist)
+            playlist_set = set(plst.items())
+        except exceptions.NotFound:
+            plst = None
+            playlist_set = set()
+        plex_set = {self.plex.fetchItem(item.plex_ratingkey)
+                    for item in items}
+        to_add = plex_set - playlist_set
+        if plst is None:
+            self._log.info('{} playlist will be created', playlist)
+            self.plex.createPlaylist(playlist, items = list(to_add))
+        else:
+            plst.addItems(items = list(to_add))
+
+    def _plex_remove_playlist_item(self, items, playlist):
+        """Remove items from Plex playlist."""
+        self._log.info('Removing {} tracks from {} playlist',
+                       len(items), playlist)
+        try:
+            plst = self.plex.playlist(playlist)
+            playlist_set = set(plst.items())
+        except exceptions.NotFound:
+            self._log.error('{} playlist not found', playlist)
+            return
+        plex_set = {self.plex.fetchItem(item.plex_ratingkey)
+                    for item in items}
+        to_remove = plex_set.intersection(playlist_set)
+        plst.removeItems(items = list(to_remove))
