@@ -474,8 +474,8 @@ class PlexSync(BeetsPlugin):
 
     def _plex_add_playlist_songs2(self, playlist_name, ratingkeys):
         # Get or create the playlist object
-        playlist = plex.playlist(playlist_name) if plex.playlist(playlist_name) else plex.createPlaylist(playlist_name, [])
+        playlist = self.plex.playlist(playlist_name) if self.plex.playlist(playlist_name) else self.plex.createPlaylist(playlist_name, [])
         # Get the song objects by ratingkey
-        songs = [plex.fetchItem(ratingkey) for ratingkey in ratingkeys]
+        songs = [self.plex.fetchItem(ratingkey) for ratingkey in ratingkeys]
         # Add the songs to the playlist
         playlist.addItems(songs)
