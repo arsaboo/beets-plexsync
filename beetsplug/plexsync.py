@@ -76,8 +76,9 @@ class PlexSync(BeetsPlugin):
         self.auth_manager = SpotifyClientCredentials(client_id=CLIENT_ID, client_secret=CLIENT_SECRET)
         self.sp = spotipy.Spotify(client_credentials_manager=self.auth_manager)
 
+
     def import_spotify_playlist(self, playlist_id):
-        songs = get_playlist_tracks(playlist_id)
+        songs = self.get_playlist_tracks(playlist_id)
         song_list = []
         for song in songs:
             # Find and store the song title
@@ -107,7 +108,8 @@ class PlexSync(BeetsPlugin):
         playlist_id = parts[index + 1]
         # return the playlist id
         return playlist_id
-    def get_playlist_tracks(playlist_id):
+
+    def get_playlist_tracks(self, playlist_id):
         """This function returns a list of tracks in a Spotify playlist.
 
         Args:
