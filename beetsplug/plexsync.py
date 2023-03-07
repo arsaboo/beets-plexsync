@@ -337,9 +337,9 @@ class PlexSync(BeetsPlugin):
                        len(to_add), playlist)
         if plst is None:
             self._log.info('{} playlist will be created', playlist)
-            self.plex.createPlaylist(playlist, songs=list(to_add))
+            self.plex.createPlaylist(playlist, items=list(to_add))
         else:
-            plst.addItems(songs=list(to_add))
+            plst.addItems(items=list(to_add))
 
     def _plex_add_playlist_item(self, items, playlist):
         """Add items to Plex playlist."""
