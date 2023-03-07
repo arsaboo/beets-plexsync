@@ -7,17 +7,18 @@ Put something like the following in your config.yaml to configure:
         token: token
 """
 
+import re
 import time
 
-from plexapi import exceptions
-from plexapi.server import PlexServer
-
+import requests
 from beets import config, ui
 from beets.dbcore import types
 from beets.dbcore.query import MatchQuery
 from beets.library import DateType
 from beets.plugins import BeetsPlugin
-
+from bs4 import BeautifulSoup
+from plexapi import exceptions
+from plexapi.server import PlexServer
 
 class PlexSync(BeetsPlugin):
     """Define plexsync class."""
@@ -151,6 +152,45 @@ class PlexSync(BeetsPlugin):
         return [plexupdate_cmd, sync_cmd, playlistadd_cmd, playlistrem_cmd,
                 syncrecent_cmd, playlistimport_cmd]
 
+    def parse_title(title_orig):
+        if "(From \"" in title_orig:
+            title = re.sub(r'\(From.*\)', '', title_orig)
+            album = re.sub(r'^[^"]+"|(?<!^)"[^"]+"|"[^"]+$', '', title_orig)
+        elif "[From \"" in title_orig:
+            title = re.sub(r'\[From.*\]', '', title_orig)
+            album = re.sub(r'^[^"]+"|(?<!^)"[^"]+"|"[^"]+$', '', title_orig)
+        else:
+            title = title_orig
+            album = ""
+        return title, album
+
+    def import_apple_playlist(url):
+        # Send a GET request to the URL and get the HTML content
+        response = requests.get(url)
+        content = response.text
+
+        # Create a BeautifulSoup object with the HTML content
+        soup = BeautifulSoup(content, "html.parser")
+
+        # Find all the song elements on the page
+        songs = soup.find_all("div", class_="songs-list-row")
+        # Create an empty list to store the songs
+        song_list = []
+        # Loop through each song element
+        for song in songs:
+            # Find and store the song title
+            title_orig = song.find("div", class_="songs-list-row__song-name").text.strip()
+            title, album = parse_title(title_orig)
+            # Find and store the song artist
+            artist = song.find("div", class_="songs-list-row__by-line").text.strip().replace("\n", "").replace("  ", "")
+            # Find and store the song duration
+            #duration = song.find("div", class_="songs-list-row__length").text.strip()
+            # Create a dictionary with the song information
+            song_dict = {"title": title.strip(), "album": album.strip(), "artist": artist.strip()}
+            # Append the dictionary to the list of songs
+            song_list.append(song_dict)
+        return song_list
+
     def _plexupdate(self):
         """Update Plex music library."""
         try:
@@ -278,7 +318,15 @@ class PlexSync(BeetsPlugin):
 
     def _plex_import_playlist(self, playlist, playlist_url):
         """Import playlist into Plex."""
-        if playlist_url is None: #"http://" not in playlist_url and "https://" not in playlist_url:
+        if "http://" not in playlist_url and "https://" not in playlist_url:
             raise ui.UserError('Playlist URL not provided')
         self._log.info('Adding tracks from {} into {} playlist',
                        playlist_url, playlist)
+        if "apple" in playlist_url:
+            songs = import_apple_playlist(playlist_url)
+        elif "jiosaavn" in playlist_url:
+            songs = import_jiosaavn_playlist(playlist_url)
+        elif "spotify" in playlist_url:
+            songs = import_spotify_playlist(get_playlist_id(playlist_url))
+        for song in songs:
+            print (song['album'] + " - " + song['title'])
