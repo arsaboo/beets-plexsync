@@ -180,7 +180,7 @@ class PlexSync(BeetsPlugin):
         for song in songs:
             # Find and store the song title
             title_orig = song.find("div", class_="songs-list-row__song-name").text.strip()
-            title, album = parse_title(title_orig)
+            title, album = self.parse_title(title_orig)
             # Find and store the song artist
             artist = song.find("div", class_="songs-list-row__by-line").text.strip().replace("\n", "").replace("  ", "")
             # Find and store the song duration
