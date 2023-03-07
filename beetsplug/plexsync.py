@@ -74,7 +74,7 @@ class PlexSync(BeetsPlugin):
         CLIENT_ID = config["spotify"]["client_id"]
         CLIENT_SECRET = config["spotify"]["client_secret"]
         self.auth_manager = SpotifyClientCredentials(client_id=CLIENT_ID, client_secret=CLIENT_SECRET)
-        sp = spotipy.Spotify(client_credentials_manager=self.auth_manager)
+        self.sp = spotipy.Spotify(client_credentials_manager=self.auth_manager)
 
 
     def import_spotify_playlist(self, playlist_id):
