@@ -164,7 +164,7 @@ class PlexSync(BeetsPlugin):
             album = ""
         return title, album
 
-    def import_apple_playlist(url):
+    def import_apple_playlist(self,url):
         # Send a GET request to the URL and get the HTML content
         response = requests.get(url)
         content = response.text
