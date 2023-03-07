@@ -62,7 +62,6 @@ class PlexSync(BeetsPlugin):
         config['plex']['token'].redact = True
         baseurl = "http://" + config['plex']['host'].get() + ":" \
             + str(config['plex']['port'].get())
-        self._log.info(baseurl)
         try:
             self.plex = PlexServer(baseurl,
                                    config['plex']['token'].get())
@@ -77,7 +76,7 @@ class PlexSync(BeetsPlugin):
         self.register_listener('database_change', self.listen_for_db_change)
 
     def setup_spotify(self):
-        print("Setting up Spotify")
+        self._log.debug("Setting up Spotify")
         ID = config["spotify"]["client_id"].get()
         SECRET = config["spotify"]["client_secret"].get()
         self.auth_manager = SpotifyClientCredentials(client_id=ID,
@@ -430,7 +429,8 @@ class PlexSync(BeetsPlugin):
                 if artist in plex_artist:
                     return track
         else:
-            self._log.info('Track {} not found in Plex library', song['title'])
+            self._log.info('Track {} - {} not found in Plex',
+                           song['album'], song['title'])
             return None
 
     def _plex_import_playlist(self, playlist, playlist_url):
