@@ -71,14 +71,14 @@ class PlexSync(BeetsPlugin):
 
     def setup_spotify(self):
         print("Setting up Spotify")
-        CLIENT_ID = config["spotify"]["client_id"].get()
-        CLIENT_SECRET = config["spotify"]["client_secret"].get()
-        print(CLIENT_ID)
-        self.auth_manager = SpotifyClientCredentials(client_id=CLIENT_ID, client_secret=CLIENT_SECRET)
+        ID = config["spotify"]["client_id"].get()
+        SECRET = config["spotify"]["client_secret"].get()
+        self.auth_manager = SpotifyClientCredentials(client_id=ID,
+                                                     client_secret=SECRET)
         self.sp = spotipy.Spotify(client_credentials_manager=self.auth_manager)
 
-
     def import_spotify_playlist(self, playlist_id):
+        """This function returns a list of tracks in a Spotify playlist."""
         self.setup_spotify()
         songs = self.get_playlist_tracks(playlist_id)
         song_list = []
@@ -391,4 +391,4 @@ class PlexSync(BeetsPlugin):
         elif "spotify" in playlist_url:
             songs = self.import_spotify_playlist(self.get_playlist_id(playlist_url))
         for song in songs:
-            print (song['album'] + " - " + song['title'])
+            print (song['album'] + " - " + song['title'] + " - " + song['ratingKey'])
