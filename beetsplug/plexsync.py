@@ -430,7 +430,7 @@ class PlexSync(BeetsPlugin):
                 if artist in plex_artist:
                     return track
         else:
-            print('Track {} not found in Plex library', song['title'])
+            self._log.info('Track {} not found in Plex library', song['title'])
             return None
 
     def _plex_import_playlist(self, playlist, playlist_url):
