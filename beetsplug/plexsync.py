@@ -50,6 +50,7 @@ class PlexSync(BeetsPlugin):
         config['plex']['token'].redact = True
         baseurl = "http://" + config['plex']['host'].get() + ":" \
             + str(config['plex']['port'].get())
+        self._log.info(baseurl)
         try:
             self.plex = PlexServer(baseurl,
                                    config['plex']['token'].get())
