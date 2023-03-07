@@ -469,15 +469,5 @@ class PlexSync(BeetsPlugin):
             if self.search_plex_song(song) is not None:
                 found = self.search_plex_song(song)
                 print (found.parentTitle + " - " + found.title)
-                song_list.append(found.ratingKey)
-        self._plex_add_playlist_songs(song_list, playlist)
-
-    def _plex_add_playlist_songs2(self, playlist_name, ratingkeys):
-        # Get or create the playlist object
-
-        try:
-            playlist = self.plex.playlist(playlist_name)
-        except exceptions.NotFound:
-            self.plex.createPlaylist(playlist_name, [])
-        songs = [self.plex.fetchItem(ratingkey) for ratingkey in ratingkeys]
-        playlist.addItems(songs)
+                song_list.append(found)
+        self._plex_add_playlist_item(song_list, playlist)
