@@ -259,7 +259,7 @@ class PlexSync(BeetsPlugin):
                 title, album = self.parse_title(title_orig)
             else:
                 title = song['title']
-                album = song['more_info']['album']
+                album = self.clean_album_name(song['more_info']['album'])
             year = song['year']
             # Find and store the song artist
             artist = song['more_info']['artistMap']['primary_artists'][0]['name']
