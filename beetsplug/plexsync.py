@@ -256,7 +256,7 @@ class PlexSync(BeetsPlugin):
             # Find and store the song title
             if (song['title'] in song['more_info']['album']) and (("From \"" in song['title']) or ("From &quot" in song['title'])):
                 title_orig = song['title'].replace("&quot;", "\"")
-                title, album = parse_title(title_orig)
+                title, album = self.parse_title(title_orig)
             else:
                 title = song['title']
                 album = song['more_info']['album']
