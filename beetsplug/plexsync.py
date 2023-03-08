@@ -259,10 +259,10 @@ class PlexSync(BeetsPlugin):
                 title_tmp = span.text.strip()
                 title_orig = re.sub("^Premium  ", "", title_tmp)
                 if "(From \"" in title_orig or "[From \"" in title_orig:
-                    title, album = self.parse_title(title_orig).strip()
+                    title, album = self.parse_title(title_orig)
                 else:
                     title = title_orig.strip()
-                song_dict = {"title": title, "album": album, "artist": artist}
+                song_dict = {"title": title.strip(), "album": album.strip(), "artist": artist}
                 # Append the title to the tracks list
                 tracks.append(song_dict)
             # Return the tracks as a list of strings
