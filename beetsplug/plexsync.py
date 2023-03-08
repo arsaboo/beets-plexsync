@@ -13,7 +13,6 @@ import re
 import time
 
 import dateutil.parser
-import nest_asyncio
 import requests
 import spotipy
 from beets import config, ui
