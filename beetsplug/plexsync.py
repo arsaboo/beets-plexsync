@@ -7,11 +7,13 @@ Put something like the following in your config.yaml to configure:
         token: token
 """
 
+import asyncio
 import difflib
 import re
 import time
 
 import dateutil.parser
+import nest_asyncio
 import requests
 import spotipy
 from beets import config, ui
@@ -20,6 +22,7 @@ from beets.dbcore.query import MatchQuery
 from beets.library import DateType
 from beets.plugins import BeetsPlugin
 from bs4 import BeautifulSoup
+from jiosaavn import JioSaavn
 from plexapi import exceptions
 from plexapi.server import PlexServer
 from spotipy.oauth2 import SpotifyClientCredentials
@@ -237,6 +240,54 @@ class PlexSync(BeetsPlugin):
             album = album_orig
         return album
 
+    saavn = JioSaavn()
+
+    # Define a function to get playlist songs by id
+    async def get_playlist_songs(playlist_url):
+        # Use the async method from saavn
+        songs = await saavn.get_playlist_songs(playlist_url)
+        # Return a list of songs with details
+        return songs
+
+    def import_jiosaavn_playlist(playlist_url):
+        data = asyncio.run(saavn.get_playlist_songs(playlist_url, page=1, limit=100))
+        songs = data['data']['list']
+        song_list = []
+        for song in songs:
+            # Find and store the song title
+            if (song['title'] in song['more_info']['album']) and (("From \"" in song['title']) or ("From &quot" in song['title'])):
+                title_orig = song['title'].replace("&quot;", "\"")
+                title, album = parse_title(title_orig)
+            else:
+                title = song['title']
+                album = song['more_info']['album']
+            year = song['year']
+            # Find and store the song artist
+            artist = song['more_info']['artistMap']['primary_artists'][0]['name']
+            # Find and store the song duration
+            #duration = song.find("div", class_="songs-list-row__length").text.strip()
+            # Create a dictionary with the song information
+            song_dict = {"title": title.strip(), "album": album.strip(), "artist": artist.strip(), "year": year}
+            # Append the dictionary to the list of songs
+            song_list.append(song_dict)
+        return song_list
+
+    # Define a function that takes a title string and a list of tuples as input
+    def find_closest_match(self, title, lst):
+        # Initialize an empty list to store the matches and their scores
+        matches = []
+        # Loop through each tuple in the list
+        for t in lst:
+            # Use the SequenceMatcher class to compare the title with the first element of the tuple
+            # The ratio method returns a score between 0 and 1 indicating how similar the two strings are based on the Levenshtein distance
+            score = difflib.SequenceMatcher(None, title, t.title).ratio()
+            # Append the tuple and the score to the matches list
+            matches.append((t, score))
+        # Sort the matches list by the score in descending order
+        matches.sort(key=lambda x: x[1], reverse=True)
+        # Return only the first element of each tuple in the matches list as a new list
+        return [m[0] for m in matches]
+
     def import_gaana_playlist(self, playlist_url):
         # Make a GET request to the playlist url
         response = requests.get(playlist_url)
@@ -422,22 +473,6 @@ class PlexSync(BeetsPlugin):
                 else:
                     self._log.debug("Please sync Plex library again")
                     continue
-
-    # Define a function that takes a title string and a list of tuples as input
-    def find_closest_match(self, title, lst):
-        # Initialize an empty list to store the matches and their scores
-        matches = []
-        # Loop through each tuple in the list
-        for t in lst:
-            # Use the SequenceMatcher class to compare the title with the first element of the tuple
-            # The ratio method returns a score between 0 and 1 indicating how similar the two strings are based on the Levenshtein distance
-            score = difflib.SequenceMatcher(None, title, t.title).ratio()
-            # Append the tuple and the score to the matches list
-            matches.append((t, score))
-        # Sort the matches list by the score in descending order
-        matches.sort(key=lambda x: x[1], reverse=True)
-        # Return only the first element of each tuple in the matches list as a new list
-        return [m[0] for m in matches]
 
     def search_plex_song(self, song):
         """Fetch the Plex track key."""
