@@ -249,7 +249,7 @@ class PlexSync(BeetsPlugin):
         return songs
 
     def import_jiosaavn_playlist(self, playlist_url):
-        data = asyncio.run(saavn.get_playlist_songs(playlist_url, page=1, limit=100))
+        data = asyncio.run(self.saavn.get_playlist_songs(playlist_url, page=1, limit=100))
         songs = data['data']['list']
         song_list = []
         for song in songs:
