@@ -230,7 +230,7 @@ class PlexSync(BeetsPlugin):
         return title, album
 
     def clean_album_name(self, album_orig):
-        album_orig = album_orig.replace("(Original Motion Picture Soundtrack)", "").strip()
+        album_orig = album_orig.replace("(Original Motion Picture Soundtrack)", "").replace("- Hindi","").strip()
         if "(From \"" in album_orig:
             album = re.sub(r'^[^"]+"|(?<!^)"[^"]+"|"[^"]+$', '', album_orig)
         elif "[From \"" in album_orig:
@@ -312,7 +312,9 @@ class PlexSync(BeetsPlugin):
                     title, album = self.parse_title(title_orig)
                 else:
                     title = title_orig.strip()
-                song_dict = {"title": title.strip(), "album": album.strip(), "artist": artist}
+                song_dict = {"title": title.strip(),
+                             "album": self.clean_album_name(album.strip()),
+                             "artist": artist}
                 # Append the title to the tracks list
                 tracks.append(song_dict)
             # Return the tracks as a list of strings
