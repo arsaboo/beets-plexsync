@@ -106,9 +106,22 @@ class PlexSync(BeetsPlugin):
         # Create a Spotify object with the auth_manager
         self.sp = spotipy.Spotify(auth_manager=self.auth_manager)
 
+    # write a function to check if the spotify object is authenticated and refresh the token if not
+    def check_spotify_auth(self):
+        # check if the spotify object is authenticated
+        if not self.sp.auth_manager.is_token_expired(self.sp):
+            # if authenticated, return True
+            print("Authenticated")
+            return True
+        else:
+            # if not authenticated, refresh the token
+            self.sp.auth_manager.refresh_access_token()
+            print("Refreshed")
+            # return True
+            return True
     def import_spotify_playlist(self, playlist_id):
         """This function returns a list of tracks in a Spotify playlist."""
-        self.authenticate_spotify()
+        self.check_spotify_auth()
         songs = self.get_playlist_tracks(playlist_id)
         song_list = []
         for song in songs:
