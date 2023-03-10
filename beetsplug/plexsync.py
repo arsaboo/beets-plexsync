@@ -7,10 +7,13 @@ Put something like the following in your config.yaml to configure:
         token: token
 """
 
+import asyncio
 import difflib
+import os
 import re
 import time
 
+import confuse
 import dateutil.parser
 import requests
 import spotipy
@@ -20,9 +23,10 @@ from beets.dbcore.query import MatchQuery
 from beets.library import DateType
 from beets.plugins import BeetsPlugin
 from bs4 import BeautifulSoup
+from jiosaavn import JioSaavn
 from plexapi import exceptions
 from plexapi.server import PlexServer
-from spotipy.oauth2 import SpotifyClientCredentials
+from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
 
 
 class PlexSync(BeetsPlugin):
@@ -59,6 +63,12 @@ class PlexSync(BeetsPlugin):
             'secure': False,
             'ignore_cert_errors': False})
 
+        config['plexsync'].add({
+            'tokenfile': 'spotify_plexsync.json'})
+        self.plexsync_token = config['plexsync']['tokenfile'].get(
+            confuse.Filename(in_app_dir=True)
+        )
+
         config['plex']['token'].redact = True
         baseurl = "http://" + config['plex']['host'].get() + ":" \
             + str(config['plex']['port'].get())
@@ -75,17 +85,53 @@ class PlexSync(BeetsPlugin):
                 library not found")
         self.register_listener('database_change', self.listen_for_db_change)
 
-    def setup_spotify(self):
-        self._log.debug("Setting up Spotify")
+    # def setup_spotify(self):
+    #     self._log.debug("Setting up Spotify")
+    #     ID = config["spotify"]["client_id"].get()
+    #     SECRET = config["spotify"]["client_secret"].get()
+    #     self.auth_manager = SpotifyClientCredentials(client_id=ID,
+    #                                                  client_secret=SECRET)
+    #     self.sp = spotipy.Spotify(client_credentials_manager=self.auth_manager)
+
+    def authenticate_spotify_old(self):
         ID = config["spotify"]["client_id"].get()
         SECRET = config["spotify"]["client_secret"].get()
-        self.auth_manager = SpotifyClientCredentials(client_id=ID,
-                                                     client_secret=SECRET)
-        self.sp = spotipy.Spotify(client_credentials_manager=self.auth_manager)
+        redirect_uri = "http://localhost/"
+        scope = "user-read-private user-read-email"
+        # Create a SpotifyOAuth object with your credentials and scope
+        self.auth_manager = SpotifyOAuth(client_id=ID,
+                                    client_secret=SECRET,
+                                    redirect_uri=redirect_uri,
+                                    scope=scope, open_browser=False,cache_path=self.plexsync_token)
+        # Create a Spotify object with the auth_manager
+        self.sp = spotipy.Spotify(auth_manager=self.auth_manager)
+
+    def authenticate_spotify(self):
+        ID = config["spotify"]["client_id"].get()
+        SECRET = config["spotify"]["client_secret"].get()
+        redirect_uri = "http://localhost/"
+        scope = "user-read-private user-read-email"
+
+        # Create a SpotifyOAuth object with your credentials and scope
+        self.auth_manager = SpotifyOAuth(client_id=ID,
+                                    client_secret=SECRET,
+                                    redirect_uri=redirect_uri,
+                                    scope=scope, open_browser=False,cache_path=self.plexsync_token)
+        self.token_info = self.auth_manager.get_cached_token()
+        need_token = (self.token_info is None or
+                      self.auth_manager.is_token_expired(self.token_info))
+        if need_token:
+            new_token = self.auth_manager.refresh_access_token(self.token_info['refresh_token'])
+            self.token_info = new_token
+            self._log.info("Spotify token refreshed")
+        else:
+            self._log.info("Spotify token not refreshed")
+        # Create a Spotify object with the auth_manager
+        self.sp = spotipy.Spotify(auth=self.token_info.get('access_token'))
 
     def import_spotify_playlist(self, playlist_id):
         """This function returns a list of tracks in a Spotify playlist."""
-        self.setup_spotify()
+        self.authenticate_spotify()
         songs = self.get_playlist_tracks(playlist_id)
         song_list = []
         for song in songs:
@@ -130,7 +176,7 @@ class PlexSync(BeetsPlugin):
         tracks_response = self.sp.playlist_tracks(playlist_id)
         tracks = tracks_response["items"]
         while tracks_response["next"]:
-            tracks_response = sp.next(tracks_response)
+            tracks_response = self.sp.next(tracks_response)
             tracks.extend(tracks_response["items"])
         return tracks
 
@@ -228,7 +274,7 @@ class PlexSync(BeetsPlugin):
         return title, album
 
     def clean_album_name(self, album_orig):
-        album_orig = album_orig.replace("(Original Motion Picture Soundtrack)", "").strip()
+        album_orig = album_orig.replace("(Original Motion Picture Soundtrack)", "").replace("- Hindi","").strip()
         if "(From \"" in album_orig:
             album = re.sub(r'^[^"]+"|(?<!^)"[^"]+"|"[^"]+$', '', album_orig)
         elif "[From \"" in album_orig:
@@ -236,6 +282,54 @@ class PlexSync(BeetsPlugin):
         else:
             album = album_orig
         return album
+
+    saavn = JioSaavn()
+
+    # Define a function to get playlist songs by id
+    async def get_playlist_songs(playlist_url):
+        # Use the async method from saavn
+        songs = await saavn.get_playlist_songs(playlist_url)
+        # Return a list of songs with details
+        return songs
+
+    def import_jiosaavn_playlist(self, playlist_url):
+        data = asyncio.run(self.saavn.get_playlist_songs(playlist_url, page=1, limit=100))
+        songs = data['data']['list']
+        song_list = []
+        for song in songs:
+            # Find and store the song title
+            if (("From \"" in song['title']) or ("From &quot" in song['title'])):
+                title_orig = song['title'].replace("&quot;", "\"")
+                title, album = self.parse_title(title_orig)
+            else:
+                title = song['title']
+                album = self.clean_album_name(song['more_info']['album'])
+            year = song['year']
+            # Find and store the song artist
+            artist = song['more_info']['artistMap']['primary_artists'][0]['name']
+            # Find and store the song duration
+            #duration = song.find("div", class_="songs-list-row__length").text.strip()
+            # Create a dictionary with the song information
+            song_dict = {"title": title.strip(), "album": album.strip(), "artist": artist.strip(), "year": year}
+            # Append the dictionary to the list of songs
+            song_list.append(song_dict)
+        return song_list
+
+    # Define a function that takes a title string and a list of tuples as input
+    def find_closest_match(self, title, lst):
+        # Initialize an empty list to store the matches and their scores
+        matches = []
+        # Loop through each tuple in the list
+        for t in lst:
+            # Use the SequenceMatcher class to compare the title with the first element of the tuple
+            # The ratio method returns a score between 0 and 1 indicating how similar the two strings are based on the Levenshtein distance
+            score = difflib.SequenceMatcher(None, title, t.title).ratio()
+            # Append the tuple and the score to the matches list
+            matches.append((t, score))
+        # Sort the matches list by the score in descending order
+        matches.sort(key=lambda x: x[1], reverse=True)
+        # Return only the first element of each tuple in the matches list as a new list
+        return [m[0] for m in matches]
 
     def import_gaana_playlist(self, playlist_url):
         # Make a GET request to the playlist url
@@ -262,7 +356,9 @@ class PlexSync(BeetsPlugin):
                     title, album = self.parse_title(title_orig)
                 else:
                     title = title_orig.strip()
-                song_dict = {"title": title.strip(), "album": album.strip(), "artist": artist}
+                song_dict = {"title": title.strip(),
+                             "album": self.clean_album_name(album.strip()),
+                             "artist": artist}
                 # Append the title to the tracks list
                 tracks.append(song_dict)
             # Return the tracks as a list of strings
@@ -422,22 +518,6 @@ class PlexSync(BeetsPlugin):
                 else:
                     self._log.debug("Please sync Plex library again")
                     continue
-
-    # Define a function that takes a title string and a list of tuples as input
-    def find_closest_match(self, title, lst):
-        # Initialize an empty list to store the matches and their scores
-        matches = []
-        # Loop through each tuple in the list
-        for t in lst:
-            # Use the SequenceMatcher class to compare the title with the first element of the tuple
-            # The ratio method returns a score between 0 and 1 indicating how similar the two strings are based on the Levenshtein distance
-            score = difflib.SequenceMatcher(None, title, t.title).ratio()
-            # Append the tuple and the score to the matches list
-            matches.append((t, score))
-        # Sort the matches list by the score in descending order
-        matches.sort(key=lambda x: x[1], reverse=True)
-        # Return only the first element of each tuple in the matches list as a new list
-        return [m[0] for m in matches]
 
     def search_plex_song(self, song):
         """Fetch the Plex track key."""
