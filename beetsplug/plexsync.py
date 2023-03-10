@@ -24,7 +24,7 @@ from bs4 import BeautifulSoup
 from jiosaavn import JioSaavn
 from plexapi import exceptions
 from plexapi.server import PlexServer
-from spotipy.oauth2 import SpotifyClientCredentials
+from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
 
 
 class PlexSync(BeetsPlugin):
