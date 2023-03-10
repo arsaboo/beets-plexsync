@@ -85,13 +85,13 @@ class PlexSync(BeetsPlugin):
                 library not found")
         self.register_listener('database_change', self.listen_for_db_change)
 
-    def setup_spotify(self):
-        self._log.debug("Setting up Spotify")
-        ID = config["spotify"]["client_id"].get()
-        SECRET = config["spotify"]["client_secret"].get()
-        self.auth_manager = SpotifyClientCredentials(client_id=ID,
-                                                     client_secret=SECRET)
-        self.sp = spotipy.Spotify(client_credentials_manager=self.auth_manager)
+    # def setup_spotify(self):
+    #     self._log.debug("Setting up Spotify")
+    #     ID = config["spotify"]["client_id"].get()
+    #     SECRET = config["spotify"]["client_secret"].get()
+    #     self.auth_manager = SpotifyClientCredentials(client_id=ID,
+    #                                                  client_secret=SECRET)
+    #     self.sp = spotipy.Spotify(client_credentials_manager=self.auth_manager)
 
     def authenticate_spotify(self):
         ID = config["spotify"]["client_id"].get()
@@ -105,7 +105,6 @@ class PlexSync(BeetsPlugin):
                                     scope=scope, open_browser=False,cache_path=self.plexsync_token)
         # Create a Spotify object with the auth_manager
         self.sp = spotipy.Spotify(auth_manager=self.auth_manager)
-
 
     def import_spotify_playlist(self, playlist_id):
         """This function returns a list of tracks in a Spotify playlist."""
@@ -522,7 +521,6 @@ class PlexSync(BeetsPlugin):
 
     def _plex_import_playlist(self, playlist, playlist_url):
         """Import playlist into Plex."""
-        print(self.plexsync_token)
         if "http://" not in playlist_url and "https://" not in playlist_url:
             raise ui.UserError('Playlist URL not provided')
         self._log.info('Adding tracks from {} into {} playlist',
