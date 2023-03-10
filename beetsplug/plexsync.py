@@ -120,12 +120,12 @@ class PlexSync(BeetsPlugin):
         self.token_info = self.auth_manager.get_cached_token()
         need_token = (self.token_info is None or
                       self.auth_manager.is_token_expired(self.token_info))
-        print(need_token)
-        print(self.token_info.get('access_token'))
         if need_token:
             new_token = self.auth_manager.refresh_access_token(self.token_info['refresh_token'])
             self.token_info = new_token
-            print("Token refreshed")
+            self._log.info("Spotify token refreshed")
+        else:
+            self._log.info("Spotify token not refreshed")
         # Create a Spotify object with the auth_manager
         self.sp = spotipy.Spotify(auth=self.token_info.get('access_token'))
 
