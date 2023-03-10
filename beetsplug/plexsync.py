@@ -102,7 +102,7 @@ class PlexSync(BeetsPlugin):
 
     def import_spotify_playlist(self, playlist_id):
         """This function returns a list of tracks in a Spotify playlist."""
-        self.authenticate_spotify()
+        self.setup_spotify()
         songs = self.get_playlist_tracks(playlist_id)
         song_list = []
         for song in songs:
