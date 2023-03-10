@@ -9,6 +9,7 @@ Put something like the following in your config.yaml to configure:
 
 import asyncio
 import difflib
+import os
 import re
 import time
 
@@ -514,6 +515,7 @@ class PlexSync(BeetsPlugin):
 
     def _plex_import_playlist(self, playlist, playlist_url):
         """Import playlist into Plex."""
+        print(os.getcwd())
         if "http://" not in playlist_url and "https://" not in playlist_url:
             raise ui.UserError('Playlist URL not provided')
         self._log.info('Adding tracks from {} into {} playlist',
