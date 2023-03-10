@@ -106,23 +106,29 @@ class PlexSync(BeetsPlugin):
         # Create a Spotify object with the auth_manager
         self.sp = spotipy.Spotify(auth_manager=self.auth_manager)
 
-    # write a function to check if the spotify object is authenticated and refresh the token if not
-    def check_spotify_auth(self):
-        # check if the spotify object is authenticated
-        self.authenticate_spotify()
-        if not self.sp.auth_manager.is_token_expired(self.sp):
-            # if authenticated, return True
-            print("Authenticated")
-            return True
-        else:
-            # if not authenticated, refresh the token
-            self.sp.auth_manager.refresh_access_token()
-            print("Refreshed")
-            # return True
-            return True
+    def authenticate_spotify2(self):
+        ID = config["spotify"]["client_id"].get()
+        SECRET = config["spotify"]["client_secret"].get()
+        redirect_uri = "http://localhost/"
+        scope = "user-read-private user-read-email"
+
+        # Create a SpotifyOAuth object with your credentials and scope
+        self.auth_manager = SpotifyOAuth(client_id=ID,
+                                    client_secret=SECRET,
+                                    redirect_uri=redirect_uri,
+                                    scope=scope, open_browser=False,cache_path=self.plexsync_token)
+        self.token_info = self.auth_manager.get_cached_token()
+        need_token = (self.token_info is None or
+                      self.auth_manager.is_token_expired(self.token_info))
+        if need_token:
+            new_token = self.auth_manager.refresh_access_token(self.token_info['refresh_token'])
+            self.token_info = new_token
+        # Create a Spotify object with the auth_manager
+        self.sp = spotipy.Spotify(auth=self._token_info.get('access_token'))
+
     def import_spotify_playlist(self, playlist_id):
         """This function returns a list of tracks in a Spotify playlist."""
-        self.check_spotify_auth()
+        self.authenticate_spotify2()
         songs = self.get_playlist_tracks(playlist_id)
         song_list = []
         for song in songs:
