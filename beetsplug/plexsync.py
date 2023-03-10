@@ -63,6 +63,12 @@ class PlexSync(BeetsPlugin):
             'secure': False,
             'ignore_cert_errors': False})
 
+        config['plexsync'].add({
+            'tokenfile': 'spotify_plexsync.json'})
+        self.plexsync_token = config['plexsync']['tokenfile'].get(
+            confuse.Filename(in_app_dir=True)
+        )
+
         config['plex']['token'].redact = True
         baseurl = "http://" + config['plex']['host'].get() + ":" \
             + str(config['plex']['port'].get())
@@ -516,7 +522,7 @@ class PlexSync(BeetsPlugin):
 
     def _plex_import_playlist(self, playlist, playlist_url):
         """Import playlist into Plex."""
-        print(confuse.Filename(in_app_dir=True))
+        print(self.plexsync_token)
         if "http://" not in playlist_url and "https://" not in playlist_url:
             raise ui.UserError('Playlist URL not provided')
         self._log.info('Adding tracks from {} into {} playlist',
