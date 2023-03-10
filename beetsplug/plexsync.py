@@ -94,7 +94,7 @@ class PlexSync(BeetsPlugin):
         self.auth_manager = SpotifyOAuth(client_id=ID,
                                     client_secret=SECRET,
                                     redirect_uri=redirect_uri,
-                                    scope=scope)
+                                    scope=scope, open_browser=False)
         # Create a Spotify object with the auth_manager
         self.sp = spotipy.Spotify(auth_manager=self.auth_manager)
 
