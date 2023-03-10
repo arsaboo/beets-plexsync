@@ -516,7 +516,7 @@ class PlexSync(BeetsPlugin):
     def _plex_import_playlist(self, playlist, playlist_url):
         """Import playlist into Plex."""
         print(os.path.abspath(os.path.join(
-                config['playlist_dir'].as_filename())
+                config['playlist_dir'].as_filename())))
         if "http://" not in playlist_url and "https://" not in playlist_url:
             raise ui.UserError('Playlist URL not provided')
         self._log.info('Adding tracks from {} into {} playlist',
