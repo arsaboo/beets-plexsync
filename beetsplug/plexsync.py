@@ -124,7 +124,7 @@ class PlexSync(BeetsPlugin):
             new_token = self.auth_manager.refresh_access_token(self.token_info['refresh_token'])
             self.token_info = new_token
         # Create a Spotify object with the auth_manager
-        self.sp = spotipy.Spotify(auth=self._token_info.get('access_token'))
+        self.sp = spotipy.Spotify(auth=self.token_info.get('access_token'))
 
     def import_spotify_playlist(self, playlist_id):
         """This function returns a list of tracks in a Spotify playlist."""
