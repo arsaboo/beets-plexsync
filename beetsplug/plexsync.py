@@ -154,7 +154,7 @@ class PlexSync(BeetsPlugin):
         tracks_response = self.sp.playlist_tracks(playlist_id)
         tracks = tracks_response["items"]
         while tracks_response["next"]:
-            tracks_response = sp.next(tracks_response)
+            tracks_response = self.sp.next(tracks_response)
             tracks.extend(tracks_response["items"])
         return tracks
 
