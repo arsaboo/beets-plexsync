@@ -85,9 +85,23 @@ class PlexSync(BeetsPlugin):
                                                      client_secret=SECRET)
         self.sp = spotipy.Spotify(client_credentials_manager=self.auth_manager)
 
+    def authenticate_spotify(self):
+        ID = config["spotify"]["client_id"].get()
+        SECRET = config["spotify"]["client_secret"].get()
+        redirect_uri = "http://localhost/"
+        scope = "user-read-private user-read-email"
+        # Create a SpotifyOAuth object with your credentials and scope
+        self.auth_manager = SpotifyOAuth(client_id=ID,
+                                    client_secret=SECRET,
+                                    redirect_uri=redirect_uri,
+                                    scope=scope)
+        # Create a Spotify object with the auth_manager
+        self.sp = spotipy.Spotify(auth_manager=self.auth_manager)
+
+
     def import_spotify_playlist(self, playlist_id):
         """This function returns a list of tracks in a Spotify playlist."""
-        self.setup_spotify()
+        self.authenticate_spotify()
         songs = self.get_playlist_tracks(playlist_id)
         song_list = []
         for song in songs:
