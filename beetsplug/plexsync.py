@@ -102,14 +102,14 @@ class PlexSync(BeetsPlugin):
         self.auth_manager = SpotifyOAuth(client_id=ID,
                                     client_secret=SECRET,
                                     redirect_uri=redirect_uri,
-                                    scope=scope, open_browser=False)
+                                    scope=scope, open_browser=False,cache_path=self.plexsync_token)
         # Create a Spotify object with the auth_manager
         self.sp = spotipy.Spotify(auth_manager=self.auth_manager)
 
 
     def import_spotify_playlist(self, playlist_id):
         """This function returns a list of tracks in a Spotify playlist."""
-        self.setup_spotify()
+        self.authenticate_spotify()
         songs = self.get_playlist_tracks(playlist_id)
         song_list = []
         for song in songs:
