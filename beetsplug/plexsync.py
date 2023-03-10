@@ -121,6 +121,7 @@ class PlexSync(BeetsPlugin):
         need_token = (self.token_info is None or
                       self.auth_manager.is_token_expired(self.token_info))
         print(need_token)
+        print(self.token_info.get('access_token'))
         if need_token:
             new_token = self.auth_manager.refresh_access_token(self.token_info['refresh_token'])
             self.token_info = new_token
