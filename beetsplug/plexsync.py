@@ -109,6 +109,7 @@ class PlexSync(BeetsPlugin):
     # write a function to check if the spotify object is authenticated and refresh the token if not
     def check_spotify_auth(self):
         # check if the spotify object is authenticated
+        self.authenticate_spotify()
         if not self.sp.auth_manager.is_token_expired(self.sp):
             # if authenticated, return True
             print("Authenticated")
