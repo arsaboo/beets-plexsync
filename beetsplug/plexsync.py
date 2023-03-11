@@ -118,6 +118,9 @@ class PlexSync(BeetsPlugin):
                                     redirect_uri=redirect_uri,
                                     scope=scope, open_browser=False,cache_path=self.plexsync_token)
         self.token_info = self.auth_manager.get_cached_token()
+        if self.token_info is None:
+            print("No token found")
+            self.auth_manager.get_access_token(as_dict=True)
         need_token = (self.token_info is None or
                       self.auth_manager.is_token_expired(self.token_info))
         if need_token:
