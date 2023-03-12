@@ -304,7 +304,10 @@ class PlexSync(BeetsPlugin):
                 album = self.clean_album_name(song['more_info']['album'])
             year = song['year']
             # Find and store the song artist
-            artist = song['more_info']['artistMap']['primary_artists'][0]['name']
+            try:
+                artist = song['more_info']['artistMap']['primary_artists'][0]['name']
+            except:
+                continue
             # Find and store the song duration
             #duration = song.find("div", class_="songs-list-row__length").text.strip()
             # Create a dictionary with the song information
