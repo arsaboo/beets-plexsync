@@ -143,8 +143,6 @@ class PlexSync(BeetsPlugin):
             year = dateutil.parser.parse(song["track"]["album"]["release_date"], ignoretz=True)
             # Find and store the song artist
             artist = song["track"]["artists"][0]["name"]
-            # Find and store the song duration
-            #duration = song.find("div", class_="songs-list-row__length").text.strip()
             # Create a dictionary with the song information
             song_dict = {"title": title.strip(), "album": album.strip(), "artist": artist.strip(), "year": year}
             # Append the dictionary to the list of songs
@@ -256,8 +254,20 @@ class PlexSync(BeetsPlugin):
 
         playlistimport_cmd.func = func_playlist_import
 
+        # plexplaylistclear command
+        playlistclear_cmd = ui.Subcommand('plexplaylistclear',
+                                           help="clear Plex playlist")
+
+        playlistclear_cmd.parser.add_option('-c', '--clear',
+                                             default='',
+                                             help='name of the Plex playlist to be cleared')
+        def func_playlist_clear(lib, opts, args):
+            self._plex_clear_playlist(opts.playlist)
+
+        playlistimport_cmd.func = func_playlist_clear
+
         return [plexupdate_cmd, sync_cmd, playlistadd_cmd, playlistrem_cmd,
-                syncrecent_cmd, playlistimport_cmd]
+                syncrecent_cmd, playlistimport_cmd, playlistclear_cmd]
 
     def parse_title(self, title_orig):
         if "(From \"" in title_orig:
@@ -565,3 +575,14 @@ class PlexSync(BeetsPlugin):
                              "plex_ratingkey": found.ratingKey}
                 song_list.append(self.dotdict(song_dict))
         self._plex_add_playlist_item(song_list, playlist)
+
+    def _plex_clear_playlist(self, playlist):
+        """Clear Plex playlist."""
+        # Get the playlist
+        plist = self.plex.playlist(playlist)
+        # Get a list of all the tracks in the playlist
+        tracks = plist.items()
+        # Loop through each track
+        for track in tracks:
+            # Remove the track from the playlist
+            plist.removeItems(track)
