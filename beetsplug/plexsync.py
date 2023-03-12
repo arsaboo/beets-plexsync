@@ -261,7 +261,7 @@ class PlexSync(BeetsPlugin):
         playlistclear_cmd.parser.add_option('-m', '--playlist',
                                              default='',
                                              help='name of the Plex playlist to be cleared')
-        def func_playlist_clear(opts, args):
+        def func_playlist_clear(lib, opts, args):
             self._plex_clear_playlist(opts.playlist)
 
         playlistclear_cmd.func = func_playlist_clear
