@@ -264,7 +264,7 @@ class PlexSync(BeetsPlugin):
         def func_playlist_clear(lib, opts, args):
             self._plex_clear_playlist(opts.playlist)
 
-        playlistimport_cmd.func = func_playlist_clear
+        playlistclear_cmd.func = func_playlist_clear
 
         return [plexupdate_cmd, sync_cmd, playlistadd_cmd, playlistrem_cmd,
                 syncrecent_cmd, playlistimport_cmd, playlistclear_cmd]
