@@ -141,8 +141,10 @@ class PlexSync(BeetsPlugin):
             else:
                 title = song["track"]["name"]
                 album = self.clean_album_name(song["track"]["album"]["name"])
-            print(song["track"]["album"]["release_date"])
-            year = dateutil.parser.parse(song["track"]["album"]["release_date"], ignoretz=True)
+            try:
+                year = dateutil.parser.parse(song["track"]["album"]["release_date"], ignoretz=True)
+            except ValueError:
+                year = None
             # Find and store the song artist
             artist = song["track"]["artists"][0]["name"]
             # Create a dictionary with the song information
