@@ -251,7 +251,8 @@ class PlexSync(BeetsPlugin):
 
         playlistimport_cmd.parser.add_option('-m', '--playlist',
                                              default='Beets',
-                                             help='name of the playlist to be added in Plex')
+                                             help='name of the playlist to be \
+                                                 added in Plex')
         playlistimport_cmd.parser.add_option('-u', '--url', default='',
                                              help='playlist URL to be imported in Plex')
         def func_playlist_import(lib, opts, args):
@@ -287,7 +288,8 @@ class PlexSync(BeetsPlugin):
         return title, album
 
     def clean_album_name(self, album_orig):
-        album_orig = album_orig.replace("(Original Motion Picture Soundtrack)", "").replace("- Hindi","").strip()
+        album_orig = album_orig.replace("(Original Motion Picture Soundtrack)",
+                                        "").replace("- Hindi","").strip()
         if "(From \"" in album_orig:
             album = re.sub(r'^[^"]+"|(?<!^)"[^"]+"|"[^"]+$', '', album_orig)
         elif "[From \"" in album_orig:
@@ -306,7 +308,8 @@ class PlexSync(BeetsPlugin):
         return songs
 
     def import_jiosaavn_playlist(self, playlist_url):
-        data = asyncio.run(self.saavn.get_playlist_songs(playlist_url, page=1, limit=100))
+        data = asyncio.run(self.saavn.get_playlist_songs(playlist_url,
+                                                         page=1, limit=100))
         songs = data['data']['list']
         song_list = []
         for song in songs:
