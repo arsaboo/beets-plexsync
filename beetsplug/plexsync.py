@@ -134,17 +134,22 @@ class PlexSync(BeetsPlugin):
         song_list = []
         for song in songs:
             # Find and store the song title
-            if (("From \"" in song["track"]["name"]) or ("From &quot" in song["track"]["name"])):
+            if (("From \"" in song["track"]["name"]) or \
+                ("From &quot" in song["track"]["name"])):
                 title_orig = song["track"]["name"].replace("&quot;", "\"")
                 title, album = self.parse_title(title_orig)
             else:
                 title = song["track"]["name"]
                 album = self.clean_album_name(song["track"]["album"]["name"])
-            year = dateutil.parser.parse(song["track"]["album"]["release_date"], ignoretz=True)
+            try:
+                year = dateutil.parser.parse(song["track"]["album"]["release_date"], ignoretz=True)
+            except ValueError:
+                year = None
             # Find and store the song artist
             artist = song["track"]["artists"][0]["name"]
             # Create a dictionary with the song information
-            song_dict = {"title": title.strip(), "album": album.strip(), "artist": artist.strip(), "year": year}
+            song_dict = {"title": title.strip(),
+                         "album": album.strip(), "artist": artist.strip(), "year": year}
             # Append the dictionary to the list of songs
             song_list.append(song_dict)
         return song_list
@@ -246,7 +251,8 @@ class PlexSync(BeetsPlugin):
 
         playlistimport_cmd.parser.add_option('-m', '--playlist',
                                              default='Beets',
-                                             help='name of the playlist to be added in Plex')
+                                             help='name of the playlist to be \
+                                                 added in Plex')
         playlistimport_cmd.parser.add_option('-u', '--url', default='',
                                              help='playlist URL to be imported in Plex')
         def func_playlist_import(lib, opts, args):
@@ -282,7 +288,8 @@ class PlexSync(BeetsPlugin):
         return title, album
 
     def clean_album_name(self, album_orig):
-        album_orig = album_orig.replace("(Original Motion Picture Soundtrack)", "").replace("- Hindi","").strip()
+        album_orig = album_orig.replace("(Original Motion Picture Soundtrack)",
+                                        "").replace("- Hindi","").strip()
         if "(From \"" in album_orig:
             album = re.sub(r'^[^"]+"|(?<!^)"[^"]+"|"[^"]+$', '', album_orig)
         elif "[From \"" in album_orig:
@@ -301,7 +308,8 @@ class PlexSync(BeetsPlugin):
         return songs
 
     def import_jiosaavn_playlist(self, playlist_url):
-        data = asyncio.run(self.saavn.get_playlist_songs(playlist_url, page=1, limit=100))
+        data = asyncio.run(self.saavn.get_playlist_songs(playlist_url,
+                                                         page=1, limit=100))
         songs = data['data']['list']
         song_list = []
         for song in songs:
