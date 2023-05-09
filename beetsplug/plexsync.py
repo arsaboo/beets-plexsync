@@ -134,17 +134,20 @@ class PlexSync(BeetsPlugin):
         song_list = []
         for song in songs:
             # Find and store the song title
-            if (("From \"" in song["track"]["name"]) or ("From &quot" in song["track"]["name"])):
+            if (("From \"" in song["track"]["name"]) or \
+                ("From &quot" in song["track"]["name"])):
                 title_orig = song["track"]["name"].replace("&quot;", "\"")
                 title, album = self.parse_title(title_orig)
             else:
                 title = song["track"]["name"]
                 album = self.clean_album_name(song["track"]["album"]["name"])
+            self._log.debug("Release date: %s", song["track"]["album"]["release_date"])
             year = dateutil.parser.parse(song["track"]["album"]["release_date"], ignoretz=True)
             # Find and store the song artist
             artist = song["track"]["artists"][0]["name"]
             # Create a dictionary with the song information
-            song_dict = {"title": title.strip(), "album": album.strip(), "artist": artist.strip(), "year": year}
+            song_dict = {"title": title.strip(),
+                         "album": album.strip(), "artist": artist.strip(), "year": year}
             # Append the dictionary to the list of songs
             song_list.append(song_dict)
         return song_list
