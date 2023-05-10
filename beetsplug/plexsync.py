@@ -618,7 +618,7 @@ class PlexSync(BeetsPlugin):
                        'days', interval)
         tot = grid * grid
         # Get the most played albums in the last 10 days
-        albums = self.music.getTopAlbums(time=interval, limit=tot)
+        albums = self.music.most_played(type='album')
         print(albums)
         # Create a list of album art
         album_art = []
