@@ -283,7 +283,7 @@ class PlexSync(BeetsPlugin):
         collage_cmd.parser.add_option('-g', '--grid', default=3,
                                       help='dimension of the collage grid')
         def func_collage(lib, opts, args):
-            self._plex_collage(opts.option)
+            self._plex_collage(opts.interval, opts.grid)
 
         collage_cmd.func = func_collage
 
