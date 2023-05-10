@@ -24,6 +24,7 @@ from beets.library import DateType
 from beets.plugins import BeetsPlugin
 from bs4 import BeautifulSoup
 from jiosaavn import JioSaavn
+from PIL import Image
 from plexapi import exceptions
 from plexapi.server import PlexServer
 from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
@@ -266,14 +267,29 @@ class PlexSync(BeetsPlugin):
 
         playlistclear_cmd.parser.add_option('-m', '--playlist',
                                              default='',
-                                             help='name of the Plex playlist to be cleared')
+                                             help='name of the Plex playlist \
+                                                 to be cleared')
         def func_playlist_clear(lib, opts, args):
             self._plex_clear_playlist(opts.playlist)
 
         playlistclear_cmd.func = func_playlist_clear
 
+        # plexcollage command
+        collage_cmd = ui.Subcommand('plexcollage', help="create album collage \
+            based on Plex history")
+
+        collage_cmd.parser.add_option('-i', '--interval', default='7',
+                                      help='days to look back for history')
+        collage_cmd.parser.add_option('-g', '--grid', default=3,
+                                      help='dimension of the collage grid')
+        def func_collage(lib, opts, args):
+            self._plex_collage(opts.option)
+
+        collage_cmd.func = func_collage
+
         return [plexupdate_cmd, sync_cmd, playlistadd_cmd, playlistrem_cmd,
-                syncrecent_cmd, playlistimport_cmd, playlistclear_cmd]
+                syncrecent_cmd, playlistimport_cmd, playlistclear_cmd,
+                collage_cmd]
 
     def parse_title(self, title_orig):
         if "(From \"" in title_orig:
@@ -404,7 +420,8 @@ class PlexSync(BeetsPlugin):
             title_orig = song.find("div", class_="songs-list-row__song-name").text.strip()
             title, album = self.parse_title(title_orig)
             # Find and store the song artist
-            artist = song.find("div", class_="songs-list-row__by-line").text.strip().replace("\n", "").replace("  ", "")
+            artist = song.find("div",
+                               class_="songs-list-row__by-line").text.strip().replace("\n", "").replace("  ", "")
             # Find and store the song duration
             #duration = song.find("div", class_="songs-list-row__length").text.strip()
             # Create a dictionary with the song information
@@ -594,3 +611,50 @@ class PlexSync(BeetsPlugin):
         for track in tracks:
             # Remove the track from the playlist
             plist.removeItems(track)
+
+    def _plex_collage(self, interval, grid):
+        """Get the most played albums from Plex in the last 10 days."""
+        self._log.info('Creating collage of most played albums in the last {} '
+                       'days', interval)
+        tot = grid * grid
+        # Get the most played albums in the last 10 days
+        albums = self.plex.library.section('Music').getTopAlbums(time=interval,
+                                                                 limit=tot)
+        print(albums)
+        # Create a list of album art
+        album_art = []
+        for album in albums:
+            album_art.append(album.thumb)
+        collage = self.create_collage(album_art, grid)
+        # Save the collage
+        collage.save('plex_collage.png')
+
+def create_collage(images, dimension):
+    # Open the images
+    images = [Image.open(x) for x in images]
+
+    # Resize the images
+    size = (dimension, dimension)
+    for i in range(len(images)):
+        images[i].thumbnail(size)
+
+    # Create a new image with the size of the collage
+    rows = int(len(images) ** 0.5)
+    if len(images) % rows != 0:
+        rows += 1
+    collage_width = size[0] * rows
+    collage_height = size[1] * rows
+    collage_image = Image.new('RGB', (collage_width, collage_height))
+
+    # Paste the images into the new image
+    x_offset = 0
+    y_offset = 0
+    for i in range(len(images)):
+        if i % rows == 0 and i != 0:
+            y_offset += size[1]
+            x_offset = 0
+        collage_image.paste(images[i], (x_offset, y_offset))
+        x_offset += size[0]
+
+    # Return the collage image
+    return collage_image
