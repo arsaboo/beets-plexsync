@@ -659,7 +659,7 @@ class PlexSync(BeetsPlugin):
             try:
                 response = requests.get(url)
                 img = Image.open(BytesIO(response.content))
-                img.resize((thumbnail_size, thumbnail_size))
+                img = img.resize((thumbnail_size, thumbnail_size))
                 images.append(img)
             except Exception:
                 self._log.debug('Unable to fetch image from {}', url)
