@@ -618,42 +618,60 @@ class PlexSync(BeetsPlugin):
                        'days', interval)
         tot = grid * grid
         # Get the most played albums in the last 10 days
-        albums = self.music.most_played(type='album')
-        print(albums)
+        albums = self.music.search(filters={'track.lastViewedAt>>': interval+'d'},
+                                   sort="viewCount:desc", libtype='album',
+                                   maxresults=tot)
+        sorted = self._plex_most_played_albums(albums, interval)
         # Create a list of album art
         album_art = []
-        for album in albums:
+        for album in sorted:
             album_art.append(album.thumb)
         collage = self.create_collage(album_art, grid)
         # Save the collage
         collage.save('plex_collage.png')
 
-def create_collage(images, dimension):
-    # Open the images
-    images = [Image.open(x) for x in images]
+    # write a python function to return a sorted list of albums according to number of plays in the last X days
+    def _plex_most_played_albums(self, albums, interval):
+        from datetime import datetime
+        now = datetime.now
+        for album in albums:
+            history = album.history()
+            count = 0
+            for h in history:
+                # count the number of times the album was played in th last 7 days
+                if (now() - h.lastViewedAt).days <= interval:
+                    count += 1
+            album.count = count
+        # sort the albums according to the number of times they were played
+        sorted_albums = sorted(albums, key=lambda x: x.count, reverse=True)
+        return sorted_albums
 
-    # Resize the images
-    size = (dimension, dimension)
-    for i in range(len(images)):
-        images[i].thumbnail(size)
+    def create_collage(images, dimension):
+        # Open the images
+        images = [Image.open(x) for x in images]
 
-    # Create a new image with the size of the collage
-    rows = int(len(images) ** 0.5)
-    if len(images) % rows != 0:
-        rows += 1
-    collage_width = size[0] * rows
-    collage_height = size[1] * rows
-    collage_image = Image.new('RGB', (collage_width, collage_height))
+        # Resize the images
+        size = (dimension, dimension)
+        for i in range(len(images)):
+            images[i].thumbnail(size)
 
-    # Paste the images into the new image
-    x_offset = 0
-    y_offset = 0
-    for i in range(len(images)):
-        if i % rows == 0 and i != 0:
-            y_offset += size[1]
-            x_offset = 0
-        collage_image.paste(images[i], (x_offset, y_offset))
-        x_offset += size[0]
+        # Create a new image with the size of the collage
+        rows = int(len(images) ** 0.5)
+        if len(images) % rows != 0:
+            rows += 1
+        collage_width = size[0] * rows
+        collage_height = size[1] * rows
+        collage_image = Image.new('RGB', (collage_width, collage_height))
 
-    # Return the collage image
-    return collage_image
+        # Paste the images into the new image
+        x_offset = 0
+        y_offset = 0
+        for i in range(len(images)):
+            if i % rows == 0 and i != 0:
+                y_offset += size[1]
+                x_offset = 0
+            collage_image.paste(images[i], (x_offset, y_offset))
+            x_offset += size[0]
+
+        # Return the collage image
+        return collage_image
