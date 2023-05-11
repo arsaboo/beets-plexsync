@@ -629,14 +629,18 @@ class PlexSync(BeetsPlugin):
         for album in sorted:
             album_art.append(album.thumbUrl)
         collage = self.create_collage(album_art, int(grid))
-        collage.save(os.path.join(self.config_dir, 'collage.png'))
+        try:
+            collage.save(os.path.join(self.config_dir, 'collage.png'))
+        except Exception as e:
+            self._log.error('Unable to save collage. Error: {}', e)
+            return
 
     def _plex_most_played_albums(self, albums, interval):
         from datetime import datetime, timedelta
         now = datetime.now
         for album in albums:
-            fromdt = now() - timedelta(days=interval)
-            history = album.history(mindate=fromdt)
+            frm_dt = now() - timedelta(days=interval)
+            history = album.history(mindate=frm_dt)
             album.count = len(history)
         # sort the albums according to the number of times they were played
         sorted_albums = sorted(albums, key=lambda x: x.count, reverse=True)
