@@ -268,8 +268,8 @@ class PlexSync(BeetsPlugin):
         playlistclear_cmd.func = func_playlist_clear
 
         # plexcollage command
-        collage_cmd = ui.Subcommand('plexcollage', help="create album collage \
-            based on Plex history")
+        collage_cmd = ui.Subcommand(
+            'plexcollage', help="create album collage based on Plex history")
 
         collage_cmd.parser.add_option('-i', '--interval', default=7,
                                       help='days to look back for history')
