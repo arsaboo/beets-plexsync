@@ -629,7 +629,7 @@ class PlexSync(BeetsPlugin):
         album_art = []
         for album in sorted:
             album_art.append(album.thumbUrl)
-        collage = self.create_collage(album_art, grid)
+        collage = self.create_collage(album_art, int(grid))
         collage.save(os.path.join(self.config_dir, 'collage.png'))
 
     def _plex_most_played_albums(self, albums, interval):
