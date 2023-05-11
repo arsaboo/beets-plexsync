@@ -618,7 +618,7 @@ class PlexSync(BeetsPlugin):
         """Get the most played albums from Plex in the last 10 days."""
         self._log.info('Creating collage of most played albums in the last {} '
                        'days', interval)
-        tot = grid * grid
+        tot = int(grid) ** 2
         # Get the most played albums in the last 10 days
         interval2 = str(interval) + 'd'
         albums = self.music.search(filters={'album.lastViewedAt>>': interval2},
