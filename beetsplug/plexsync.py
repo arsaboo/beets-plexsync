@@ -656,7 +656,7 @@ class PlexSync(BeetsPlugin):
         images = []
         for url in list_image_urls:
             response = requests.get(url)
-            img = Image.open(BytesIO(response.content))
+            img = Image.open(BytesIO(response.content)).resize((300, 300))
             images.append(img)
         # Calculate the size of the grid
         width, height = images[0].size
