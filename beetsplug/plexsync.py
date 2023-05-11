@@ -87,24 +87,15 @@ class PlexSync(BeetsPlugin):
                 library not found")
         self.register_listener('database_change', self.listen_for_db_change)
 
-    # def setup_spotify(self):
-    #     self._log.debug("Setting up Spotify")
-    #     ID = config["spotify"]["client_id"].get()
-    #     SECRET = config["spotify"]["client_secret"].get()
-    #     self.auth_manager = SpotifyClientCredentials(client_id=ID,
-    #                                                  client_secret=SECRET)
-    #     self.sp = spotipy.Spotify(client_credentials_manager=self.auth_manager)
-
     def authenticate_spotify_old(self):
         ID = config["spotify"]["client_id"].get()
         SECRET = config["spotify"]["client_secret"].get()
         redirect_uri = "http://localhost/"
         scope = "user-read-private user-read-email"
         # Create a SpotifyOAuth object with your credentials and scope
-        self.auth_manager = SpotifyOAuth(client_id=ID,
-                                    client_secret=SECRET,
-                                    redirect_uri=redirect_uri,
-                                    scope=scope, open_browser=False,cache_path=self.plexsync_token)
+        self.auth_manager = SpotifyOAuth(
+            client_id=ID, client_secret=SECRET, redirect_uri=redirect_uri,
+            scope=scope, open_browser=False,cache_path=self.plexsync_token)
         # Create a Spotify object with the auth_manager
         self.sp = spotipy.Spotify(auth_manager=self.auth_manager)
 
@@ -115,16 +106,16 @@ class PlexSync(BeetsPlugin):
         scope = "user-read-private user-read-email"
 
         # Create a SpotifyOAuth object with your credentials and scope
-        self.auth_manager = SpotifyOAuth(client_id=ID,
-                                    client_secret=SECRET,
-                                    redirect_uri=redirect_uri,
-                                    scope=scope, open_browser=False,cache_path=self.plexsync_token)
+        self.auth_manager = SpotifyOAuth(
+            client_id=ID, client_secret=SECRET, redirect_uri=redirect_uri,
+            scope=scope, open_browser=False,cache_path=self.plexsync_token)
         self.token_info = self.auth_manager.get_cached_token()
         if self.token_info is None:
             self.auth_manager.get_access_token(as_dict=True)
         need_token = self.auth_manager.is_token_expired(self.token_info)
         if need_token:
-            new_token = self.auth_manager.refresh_access_token(self.token_info['refresh_token'])
+            new_token = self.auth_manager.refresh_access_token(
+                self.token_info['refresh_token'])
             self.token_info = new_token
         # Create a Spotify object with the auth_manager
         self.sp = spotipy.Spotify(auth=self.token_info.get('access_token'))
@@ -144,7 +135,8 @@ class PlexSync(BeetsPlugin):
                 title = song["track"]["name"]
                 album = self.clean_album_name(song["track"]["album"]["name"])
             try:
-                year = dateutil.parser.parse(song["track"]["album"]["release_date"], ignoretz=True)
+                year = dateutil.parser.parse(
+                    song["track"]["album"]["release_date"], ignoretz=True)
             except ValueError:
                 year = None
             # Find and store the song artist
@@ -305,8 +297,9 @@ class PlexSync(BeetsPlugin):
         return title, album
 
     def clean_album_name(self, album_orig):
-        album_orig = album_orig.replace("(Original Motion Picture Soundtrack)",
-                                        "").replace("- Hindi","").strip()
+        album_orig = album_orig.replace(
+            "(Original Motion Picture Soundtrack)",
+            "").replace("- Hindi","").strip()
         if "(From \"" in album_orig:
             album = re.sub(r'^[^"]+"|(?<!^)"[^"]+"|"[^"]+$', '', album_orig)
         elif "[From \"" in album_orig:
@@ -346,7 +339,9 @@ class PlexSync(BeetsPlugin):
             # Find and store the song duration
             #duration = song.find("div", class_="songs-list-row__length").text.strip()
             # Create a dictionary with the song information
-            song_dict = {"title": title.strip(), "album": album.strip(), "artist": artist.strip(), "year": year}
+            song_dict = {"title": title.strip(),
+                         "album": album.strip(),
+                         "artist": artist.strip(), "year": year}
             # Append the dictionary to the list of songs
             song_list.append(song_dict)
         return song_list
@@ -357,8 +352,10 @@ class PlexSync(BeetsPlugin):
         matches = []
         # Loop through each tuple in the list
         for t in lst:
-            # Use the SequenceMatcher class to compare the title with the first element of the tuple
-            # The ratio method returns a score between 0 and 1 indicating how similar the two strings are based on the Levenshtein distance
+            # Use the SequenceMatcher class to compare the title with the
+            # first element of the tuple
+            # The ratio method returns a score between 0 and 1 indicating how
+            # similar the two strings are based on the Levenshtein distance
             score = difflib.SequenceMatcher(None, title, t.title).ratio()
             # Append the tuple and the score to the matches list
             matches.append((t, score))
@@ -421,12 +418,14 @@ class PlexSync(BeetsPlugin):
             title_orig = song.find("div", class_="songs-list-row__song-name").text.strip()
             title, album = self.parse_title(title_orig)
             # Find and store the song artist
-            artist = song.find("div",
-                               class_="songs-list-row__by-line").text.strip().replace("\n", "").replace("  ", "")
+            artist = song.find(
+                "div",
+                class_="songs-list-row__by-line").text.strip().replace("\n", "").replace("  ", "")
             # Find and store the song duration
             #duration = song.find("div", class_="songs-list-row__length").text.strip()
             # Create a dictionary with the song information
-            song_dict = {"title": title.strip(), "album": album.strip(), "artist": artist.strip()}
+            song_dict = {"title": title.strip(),
+                         "album": album.strip(), "artist": artist.strip()}
             # Append the dictionary to the list of songs
             song_list.append(song_dict)
         return song_list
@@ -561,7 +560,8 @@ class PlexSync(BeetsPlugin):
         if song['album'] == "":
             tracks = self.music.searchTracks(**{'track.title': song['title']})
         else:
-            tracks = self.music.searchTracks(**{'album.title': song['album'], 'track.title': song['title']})
+            tracks = self.music.searchTracks(
+                **{'album.title': song['album'], 'track.title': song['title']})
         artist = song['artist'].split(",")[0]
         if len(tracks) == 1:
             return tracks[0]
@@ -644,6 +644,10 @@ class PlexSync(BeetsPlugin):
             album.count = len(history)
         # sort the albums according to the number of times they were played
         sorted_albums = sorted(albums, key=lambda x: x.count, reverse=True)
+        # print the top 10 albums
+        for album in sorted_albums[:10]:
+            self._log.error('{} - {} played {} times', album.parentTitle,
+                           album.title, album.count)
         return sorted_albums
 
 
