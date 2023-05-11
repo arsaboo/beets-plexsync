@@ -278,7 +278,7 @@ class PlexSync(BeetsPlugin):
         collage_cmd = ui.Subcommand('plexcollage', help="create album collage \
             based on Plex history")
 
-        collage_cmd.parser.add_option('-i', '--interval', default='7',
+        collage_cmd.parser.add_option('-i', '--interval', default=7,
                                       help='days to look back for history')
         collage_cmd.parser.add_option('-g', '--grid', default=3,
                                       help='dimension of the collage grid')
