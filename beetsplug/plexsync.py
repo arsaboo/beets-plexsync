@@ -619,14 +619,14 @@ class PlexSync(BeetsPlugin):
         tot = grid * grid
         # Get the most played albums in the last 10 days
         interval2 = str(interval) + 'd'
-        albums = self.music.search(filters={'track.lastViewedAt>>': interval2},
+        albums = self.music.search(filters={'album.lastViewedAt>>': interval2},
                                    sort="viewCount:desc", libtype='album',
                                    maxresults=tot)
         sorted = self._plex_most_played_albums(albums, interval)
         # Create a list of album art
         album_art = []
         for album in sorted:
-            album_art.append(album.thumb)
+            album_art.append(album.thumbUrl)
         collage = self.create_collage(album_art, grid)
         # Save the collage
         collage.save('plex_collage.png')
@@ -634,15 +634,12 @@ class PlexSync(BeetsPlugin):
     # write a python function to return a sorted list of albums according to number of plays in the last X days
     def _plex_most_played_albums(self, albums, interval):
         from datetime import datetime
+        from datetime import timedelta
         now = datetime.now
         for album in albums:
-            history = album.history()
-            count = 0
-            for h in history:
-                # count the number of times the album was played in th last 7 days
-                if (now() - h.lastViewedAt).days <= interval:
-                    count += 1
-            album.count = count
+            fromdt = now() - timedelta(days=interval)
+            history = album.history(mindate=fromdt)
+            album.count = len(history)
         # sort the albums according to the number of times they were played
         sorted_albums = sorted(albums, key=lambda x: x.count, reverse=True)
         return sorted_albums
