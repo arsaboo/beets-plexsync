@@ -618,7 +618,8 @@ class PlexSync(BeetsPlugin):
                        'days', interval)
         tot = grid * grid
         # Get the most played albums in the last 10 days
-        albums = self.music.search(filters={'track.lastViewedAt>>': interval+'d'},
+        interval2 = str(interval) + 'd'
+        albums = self.music.search(filters={'track.lastViewedAt>>': interval2},
                                    sort="viewCount:desc", libtype='album',
                                    maxresults=tot)
         sorted = self._plex_most_played_albums(albums, interval)
