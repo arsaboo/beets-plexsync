@@ -55,6 +55,8 @@ class PlexSync(BeetsPlugin):
         """Initialize plexsync plugin."""
         super().__init__()
 
+        self.config_dir = config.config_dir()
+
         # Adding defaults.
         config['plex'].add({
             'host': 'localhost',
@@ -629,9 +631,10 @@ class PlexSync(BeetsPlugin):
             album_art.append(album.thumbUrl)
         collage = self.create_collage(album_art, grid)
         # Save the collage
-        collage.save('plex_collage.png')
+        tempimg = os.path.join(self.config_dir, 'collage.png')
+        with open(tempimg, 'wb') as f:
+            f.write(collage)
 
-    # write a python function to return a sorted list of albums according to number of plays in the last X days
     def _plex_most_played_albums(self, albums, interval):
         from datetime import datetime
         from datetime import timedelta
@@ -644,32 +647,28 @@ class PlexSync(BeetsPlugin):
         sorted_albums = sorted(albums, key=lambda x: x.count, reverse=True)
         return sorted_albums
 
-    def create_collage(self, images, dimension):
-        # Open the images
-        images = [Image.open(x) for x in images]
 
-        # Resize the images
-        size = (dimension, dimension)
-        for i in range(len(images)):
-            images[i].thumbnail(size)
-
-        # Create a new image with the size of the collage
-        rows = int(len(images) ** 0.5)
-        if len(images) % rows != 0:
-            rows += 1
-        collage_width = size[0] * rows
-        collage_height = size[1] * rows
-        collage_image = Image.new('RGB', (collage_width, collage_height))
-
-        # Paste the images into the new image
-        x_offset = 0
-        y_offset = 0
-        for i in range(len(images)):
-            if i % rows == 0 and i != 0:
-                y_offset += size[1]
-                x_offset = 0
-            collage_image.paste(images[i], (x_offset, y_offset))
-            x_offset += size[0]
-
-        # Return the collage image
-        return collage_image
+    def create_collage(self, list_image_urls, dimension):
+        """Create a collage from a list of image urls."""
+        import math
+        import requests
+        from PIL import Image
+        from io import BytesIO
+        from itertools import cycle
+        # Create a list of images
+        images = []
+        for url in list_image_urls:
+            response = requests.get(url)
+            img = Image.open(BytesIO(response.content))
+            images.append(img)
+        # Calculate the size of the grid
+        width, height = images[0].size
+        grid_width = int(math.sqrt(dimension))
+        grid_height = int(math.ceil(float(dimension) / grid_width))
+        # Create the new image
+        grid = Image.new('RGB', size=(grid_width * width, grid_height * height))
+        # Paste the images into the grid
+        for index, image in enumerate(images):
+            grid.paste(image, box=(width * int(index % grid_width),
+                                   height * int(index / grid_width)))
+        return grid
