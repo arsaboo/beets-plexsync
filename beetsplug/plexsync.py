@@ -624,7 +624,7 @@ class PlexSync(BeetsPlugin):
         albums = self.music.search(filters={'album.lastViewedAt>>': interval2},
                                    sort="viewCount:desc", libtype='album',
                                    maxresults=tot)
-        sorted = self._plex_most_played_albums(albums, interval)
+        sorted = self._plex_most_played_albums(albums, int(interval))
         # Create a list of album art
         album_art = []
         for album in sorted:
