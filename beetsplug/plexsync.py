@@ -653,17 +653,17 @@ class PlexSync(BeetsPlugin):
         from io import BytesIO
         from itertools import cycle
         # Create a list of images
-        thumbnail_width = 300
+        thumbnail_size = 300
         images = []
         for url in list_image_urls:
             response = requests.get(url)
-            img = Image.open(BytesIO(response.content)).resize((thumbnail_width, thumbnail_width))
+            img = Image.open(BytesIO(response.content)).resize((thumbnail_size, thumbnail_size))
             images.append(img)
         # Calculate the size of the grid
-        grid_height, grid_width = thumbnail_width * dimension
+        grid_size = thumbnail_size * dimension
         # Create the new image
-        grid = Image.new('RGB', size=(grid_width, grid_height))
+        grid = Image.new('RGB', size=(grid_size, grid_size))
         # Paste the images into the grid
         for index, image in enumerate(images):
-            grid.paste(image, box=(thumbnail_width * (index % dimension), thumbnail_width * math.floor(index / dimension)))
+            grid.paste(image, box=(thumbnail_size * (index % dimension), thumbnail_size * math.floor(index / dimension)))
         return grid
