@@ -647,7 +647,7 @@ class PlexSync(BeetsPlugin):
         sorted_albums = sorted(albums, key=lambda x: x.count, reverse=True)
         return sorted_albums
 
-    def create_collage(images, dimension):
+    def create_collage(self, images, dimension):
         # Open the images
         images = [Image.open(x) for x in images]
 
