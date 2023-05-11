@@ -24,7 +24,6 @@ from beets.library import DateType
 from beets.plugins import BeetsPlugin
 from bs4 import BeautifulSoup
 from jiosaavn import JioSaavn
-from PIL import Image
 from plexapi import exceptions
 from plexapi.server import PlexServer
 from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
@@ -633,8 +632,7 @@ class PlexSync(BeetsPlugin):
         collage.save(os.path.join(self.config_dir, 'collage.png'))
 
     def _plex_most_played_albums(self, albums, interval):
-        from datetime import datetime
-        from datetime import timedelta
+        from datetime import datetime, timedelta
         now = datetime.now
         for album in albums:
             fromdt = now() - timedelta(days=interval)
@@ -648,22 +646,27 @@ class PlexSync(BeetsPlugin):
     def create_collage(self, list_image_urls, dimension):
         """Create a collage from a list of image urls."""
         import math
-        import requests
-        from PIL import Image
         from io import BytesIO
-        from itertools import cycle
-        # Create a list of images
+
+        from PIL import Image
         thumbnail_size = 300
         images = []
         for url in list_image_urls:
-            response = requests.get(url)
-            img = Image.open(BytesIO(response.content)).resize((thumbnail_size, thumbnail_size))
-            images.append(img)
+            try:
+                response = requests.get(url)
+                img = Image.open(BytesIO(response.content))
+                img.resize((thumbnail_size, thumbnail_size))
+                images.append(img)
+            except Exception:
+                self._log.debug('Unable to fetch image from {}', url)
+                continue
         # Calculate the size of the grid
         grid_size = thumbnail_size * dimension
         # Create the new image
         grid = Image.new('RGB', size=(grid_size, grid_size))
         # Paste the images into the grid
         for index, image in enumerate(images):
-            grid.paste(image, box=(thumbnail_size * (index % dimension), thumbnail_size * math.floor(index / dimension)))
+            grid.paste(image,
+                       box=(thumbnail_size * (index % dimension),
+                            thumbnail_size * math.floor(index / dimension)))
         return grid
