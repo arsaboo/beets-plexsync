@@ -54,6 +54,8 @@ class PlexSync(BeetsPlugin):
         """Initialize plexsync plugin."""
         super().__init__()
 
+        self.config_dir = config.config_dir()
+
         # Adding defaults.
         config['plex'].add({
             'host': 'localhost',
@@ -266,14 +268,29 @@ class PlexSync(BeetsPlugin):
 
         playlistclear_cmd.parser.add_option('-m', '--playlist',
                                              default='',
-                                             help='name of the Plex playlist to be cleared')
+                                             help='name of the Plex playlist \
+                                                 to be cleared')
         def func_playlist_clear(lib, opts, args):
             self._plex_clear_playlist(opts.playlist)
 
         playlistclear_cmd.func = func_playlist_clear
 
+        # plexcollage command
+        collage_cmd = ui.Subcommand('plexcollage', help="create album collage \
+            based on Plex history")
+
+        collage_cmd.parser.add_option('-i', '--interval', default=7,
+                                      help='days to look back for history')
+        collage_cmd.parser.add_option('-g', '--grid', default=3,
+                                      help='dimension of the collage grid')
+        def func_collage(lib, opts, args):
+            self._plex_collage(opts.interval, opts.grid)
+
+        collage_cmd.func = func_collage
+
         return [plexupdate_cmd, sync_cmd, playlistadd_cmd, playlistrem_cmd,
-                syncrecent_cmd, playlistimport_cmd, playlistclear_cmd]
+                syncrecent_cmd, playlistimport_cmd, playlistclear_cmd,
+                collage_cmd]
 
     def parse_title(self, title_orig):
         if "(From \"" in title_orig:
@@ -404,7 +421,8 @@ class PlexSync(BeetsPlugin):
             title_orig = song.find("div", class_="songs-list-row__song-name").text.strip()
             title, album = self.parse_title(title_orig)
             # Find and store the song artist
-            artist = song.find("div", class_="songs-list-row__by-line").text.strip().replace("\n", "").replace("  ", "")
+            artist = song.find("div",
+                               class_="songs-list-row__by-line").text.strip().replace("\n", "").replace("  ", "")
             # Find and store the song duration
             #duration = song.find("div", class_="songs-list-row__length").text.strip()
             # Create a dictionary with the song information
@@ -594,3 +612,65 @@ class PlexSync(BeetsPlugin):
         for track in tracks:
             # Remove the track from the playlist
             plist.removeItems(track)
+
+    def _plex_collage(self, interval, grid):
+        """Get the most played albums from Plex in the last 10 days."""
+        self._log.info('Creating collage of most played albums in the last {} '
+                       'days', interval)
+        tot = int(grid) ** 2
+        # Get the most played albums in the last 10 days
+        interval2 = str(interval) + 'd'
+        albums = self.music.search(filters={'album.lastViewedAt>>': interval2},
+                                   sort="viewCount:desc", libtype='album',
+                                   maxresults=tot)
+        sorted = self._plex_most_played_albums(albums, int(interval))
+        # Create a list of album art
+        album_art = []
+        for album in sorted:
+            album_art.append(album.thumbUrl)
+        collage = self.create_collage(album_art, int(grid))
+        try:
+            collage.save(os.path.join(self.config_dir, 'collage.png'))
+        except Exception as e:
+            self._log.error('Unable to save collage. Error: {}', e)
+            return
+
+    def _plex_most_played_albums(self, albums, interval):
+        from datetime import datetime, timedelta
+        now = datetime.now
+        for album in albums:
+            frm_dt = now() - timedelta(days=interval)
+            history = album.history(mindate=frm_dt)
+            album.count = len(history)
+        # sort the albums according to the number of times they were played
+        sorted_albums = sorted(albums, key=lambda x: x.count, reverse=True)
+        return sorted_albums
+
+
+    def create_collage(self, list_image_urls, dimension):
+        """Create a collage from a list of image urls."""
+        import math
+        from io import BytesIO
+
+        from PIL import Image
+        thumbnail_size = 300
+        images = []
+        for url in list_image_urls:
+            try:
+                response = requests.get(url)
+                img = Image.open(BytesIO(response.content))
+                img.resize((thumbnail_size, thumbnail_size))
+                images.append(img)
+            except Exception:
+                self._log.debug('Unable to fetch image from {}', url)
+                continue
+        # Calculate the size of the grid
+        grid_size = thumbnail_size * dimension
+        # Create the new image
+        grid = Image.new('RGB', size=(grid_size, grid_size))
+        # Paste the images into the grid
+        for index, image in enumerate(images):
+            grid.paste(image,
+                       box=(thumbnail_size * (index % dimension),
+                            thumbnail_size * math.floor(index / dimension)))
+        return grid

@@ -14,6 +14,7 @@ setup(
     install_requires=[
         'beets>=1.6.0',
         'plexapi>=4.13.4',
-        'jiosaavn-python>=0.2'
+        'jiosaavn-python>=0.2',
+        'spotipy'
     ],
 )
