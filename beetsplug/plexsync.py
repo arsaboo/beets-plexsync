@@ -592,7 +592,7 @@ class PlexSync(BeetsPlugin):
             return tracks[0]
         elif len(tracks) > 1:
             sorted_tracks = self.find_closest_match(song['title'], tracks)
-            test = ui.input_select('Select the track to import', sorted_tracks)
+            test = ui.input_select_objects(sorted_tracks, 'title')
             print(test)
 
             for track in sorted_tracks:
