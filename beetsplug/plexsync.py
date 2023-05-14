@@ -582,17 +582,22 @@ class PlexSync(BeetsPlugin):
 
     def search_plex_song(self, song):
         """Fetch the Plex track key."""
+
+        def fmt_track(t):
+            ui.print_(format(t, fmt))
+
         if song['album'] == "":
             tracks = self.music.searchTracks(**{'track.title': song['title']})
         else:
             tracks = self.music.searchTracks(
                 **{'album.title': song['album'], 'track.title': song['title']})
         artist = song['artist'].split(",")[0]
+        fmt = '$path - $title'
         if len(tracks) == 1:
             return tracks[0]
         elif len(tracks) > 1:
             sorted_tracks = self.find_closest_match(song['title'], tracks)
-            test = ui.input_select_objects(sorted_tracks, 'title')
+            test = ui.input_select_objects("Select matching track:", sorted_tracks, fmt_track, 'title')
             print(test)
 
             for track in sorted_tracks:
