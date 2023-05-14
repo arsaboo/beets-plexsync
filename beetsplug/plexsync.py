@@ -773,5 +773,11 @@ class PlexSync(BeetsPlugin):
             self._log.error('Unable to connect to OpenAI. Error: {}', e)
             return
         reply = chat.choices[0].message.content
+        # write a regex to extract the JSON object from the reply. The JSON object is 
+        # embedded between ``` and ``` in the reply or between ```json and ```.
+        pattern = re.compile(r'```(json)?\n(.*)```', re.DOTALL)
+        match = pattern.search(reply)
+        if match:
+            reply = match.group(2)
         self._log.debug('OpenAI Reply: {}', reply)
         return reply
