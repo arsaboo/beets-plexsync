@@ -593,8 +593,8 @@ class PlexSync(BeetsPlugin):
             return tracks[0]
         elif len(tracks) > 1:
             sorted_tracks = self.find_closest_match(song['title'], tracks)
-            choice_opts = tuple(c.long for c in sorted_tracks)
-            sel = ui.input_options(choice_opts)
+            # present these options to the users and let them choose. How do I do this?
+            sel = ui.input_options(sorted_tracks, numrange=(1, len(sorted_tracks)))
             print(sel)
 
             for track in sorted_tracks:
