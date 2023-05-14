@@ -736,10 +736,8 @@ class PlexSync(BeetsPlugin):
             else:
                 self._log.debug('Song not found in Plex library: {}', song)
         self._log.debug('Songs matched in Plex library: {}', matched_songs)
-        self._plex_add_playlist_item(matched_songs, playlist)
-
         try:
-            self._plex_add_playlist_item(song_list, playlist)
+            self._plex_add_playlist_item(matched_songs, playlist)
         except Exception as e:
             self._log.error('Unable to add songs to playlist. Error: {}', e)
 
