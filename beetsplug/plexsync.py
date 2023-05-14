@@ -724,7 +724,11 @@ class PlexSync(BeetsPlugin):
                          "album": album.strip(),
                          "artist": artist.strip(), "year": int(year)}
             song_list.append(song_dict)
-        self._plex_add_playlist_item(song_list, playlist)
+        self._log.debug('Songs matched in Plex library: {}', song_list)
+        try:
+            self._plex_add_playlist_item(song_list, playlist)
+        except Exception as e:
+            self._log.error('Unable to add songs to playlist. Error: {}', e)
 
 
     def chat_gpt(self, number, prompt):
