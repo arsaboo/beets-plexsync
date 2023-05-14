@@ -71,6 +71,14 @@ class PlexSync(BeetsPlugin):
             confuse.Filename(in_app_dir=True)
         )
 
+        # add OpenAI defaults
+        config['openai'].add({
+            'api_key': '',
+            'model': 'gpt-3.5-turbo',
+            })
+
+        config['openai']['api_key'].redact = True
+
         config['plex']['token'].redact = True
         baseurl = "http://" + config['plex']['host'].get() + ":" \
             + str(config['plex']['port'].get())
@@ -280,9 +288,26 @@ class PlexSync(BeetsPlugin):
 
         collage_cmd.func = func_collage
 
+        # plexcollage command
+        sonicsage_cmd = ui.Subcommand(
+            'plexsonic', help="create ChatGPT-based playlists")
+
+        sonicsage_cmd.parser.add_option('-n', '--number', default=10,
+                                      help='number of song recommendations')
+        sonicsage_cmd.parser.add_option('-p', '--prompt', default='',
+                                      help='describe what you want to hear')
+        sonicsage_cmd.parser.add_option('-m', '--playlist',
+                                        default='SonicSage',
+                                        help='name of the playlist to be \
+                                            added in Plex')
+        def func_sonic(lib, opts, args):
+            self._plex_sonicsage(opts.number, opts.prompt, opts.playlist)
+
+        sonicsage_cmd.func = func_sonic
+
         return [plexupdate_cmd, sync_cmd, playlistadd_cmd, playlistrem_cmd,
                 syncrecent_cmd, playlistimport_cmd, playlistclear_cmd,
-                collage_cmd]
+                collage_cmd, sonicsage_cmd]
 
     def parse_title(self, title_orig):
         if "(From \"" in title_orig:
@@ -678,3 +703,62 @@ class PlexSync(BeetsPlugin):
                        box=(thumbnail_size * (index % dimension),
                             thumbnail_size * math.floor(index / dimension)))
         return grid
+
+
+    def _plex_sonicsage(self, number, prompt, playlist):
+        import json
+        if not bool(config['openai']['api_key'].get()):
+            self._log.error('OpenAI API key not provided')
+            return
+        if prompt == '':
+            self._log.error('Prompt not provided')
+            return
+        songs = json.loads(self.chat_gpt(number, prompt))
+        song_list = []
+        for song in songs['songs']:
+            title = song['title']
+            album = song['album']
+            artist = song['artist']
+            year = song['year']
+            song_dict = {"title": title.strip(),
+                         "album": album.strip(),
+                         "artist": artist.strip(), "year": int(year)}
+            song_list.append(song_dict)
+        self._log.debug('Songs matched in Plex library: {}', song_list)
+        try:
+            self._plex_add_playlist_item(song_list, playlist)
+        except Exception as e:
+            self._log.error('Unable to add songs to playlist. Error: {}', e)
+
+
+    def chat_gpt(self, number, prompt):
+        import openai
+        openai.api_key = config['openai']['api_key'].get()
+        model = config['openai']['model'].get()
+        num_songs = int(number)
+        sys_prompt = f'''You are a music \
+            recommender. You will reply with {num_songs} song recommendations \
+            in a JSON format. Only reply with the JSON object, no need to \
+            send anything else. Include title, artist, album, and year in the \
+            JSON response. Use the JSON format: \
+                {{ \
+                "songs": [
+                    {{
+                    "title": "Title of song 1",
+                    "artist": "Artist of Song 1",
+                    "album": "Album of Song 1",
+                    "year": "Year of release"
+                    }}
+                    ]
+                    }}
+            '''
+        messages = [ {"role": "system", "content": sys_prompt} ]
+        messages.append({"role": "user", "content": prompt})
+        try:
+            chat = openai.ChatCompletion.create(model=model, messages=messages)
+        except Exception as e:
+            self._log.error('Unable to connect to OpenAI. Error: {}', e)
+            return
+        reply = chat.choices[0].message.content
+        self._log.debug('OpenAI Reply: {}', reply)
+        return reply
