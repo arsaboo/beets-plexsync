@@ -724,7 +724,8 @@ class PlexSync(BeetsPlugin):
                          "album": album.strip(),
                          "artist": artist.strip(), "year": int(year)}
             song_list.append(song_dict)
-        self._log.debug('Songs to be added in Plex library: {}', song_list)
+        self._log.debug('{} songs to be added in Plex library: {}',
+                        len(song_list), song_list)
         matched_songs = []
         for song in song_list:
             if self.search_plex_song(song) is not None:
@@ -733,8 +734,6 @@ class PlexSync(BeetsPlugin):
                              "plex_ratingkey": found.ratingKey}
                 self._log.debug('Song matched in Plex library: {}', match_dict)
                 matched_songs.append(self.dotdict(match_dict))
-            else:
-                self._log.debug('Song not found in Plex library: {}', song)
         self._log.debug('Songs matched in Plex library: {}', matched_songs)
         try:
             self._plex_add_playlist_item(matched_songs, playlist)
