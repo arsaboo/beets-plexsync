@@ -587,6 +587,9 @@ class PlexSync(BeetsPlugin):
         else:
             tracks = self.music.searchTracks(
                 **{'album.title': song['album'], 'track.title': song['title']})
+            if len(tracks) == 0:
+                tracks = self.music.searchTracks(
+                    **{'track.title': song['title']})
         artist = song['artist'].split(",")[0]
         if len(tracks) == 1:
             return tracks[0]
