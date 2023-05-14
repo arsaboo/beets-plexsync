@@ -713,14 +713,13 @@ class PlexSync(BeetsPlugin):
 
 
     def _plex_sonicsage(self, number, prompt, playlist, clear):
-        import json
         if not bool(config['openai']['api_key'].get()):
             self._log.error('OpenAI API key not provided')
             return
         if prompt == '':
             self._log.error('Prompt not provided')
             return
-        songs = json.loads(self.chat_gpt(number, prompt))
+        songs = self.chat_gpt(number, prompt)
         song_list = []
         for song in songs['songs']:
             title = song['title']
@@ -779,11 +778,13 @@ class PlexSync(BeetsPlugin):
             self._log.error('Unable to connect to OpenAI. Error: {}', e)
             return
         reply = chat.choices[0].message.content
-        # write a regex to extract the JSON object from the reply. The JSON object is 
-        # embedded between ``` and ``` in the reply or between ```json and ```.
-        pattern = re.compile(r'```(json)?\n(.*)```', re.DOTALL)
-        match = pattern.search(reply)
-        if match:
-            reply = match.group(2)
         self._log.debug('OpenAI Reply: {}', reply)
-        return reply
+        return self.cleanup_json(reply)
+
+    def cleanup_json(self, jsonString):
+        import json
+        startIndex = jsonString.index('{')
+        endIndex = jsonString.rindex('}')
+        jsonSubstring = jsonString[startIndex:endIndex + 1]
+        obj = json.loads(jsonSubstring)
+        return obj
