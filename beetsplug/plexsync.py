@@ -748,6 +748,8 @@ class PlexSync(BeetsPlugin):
             return
         songs = self.chat_gpt(number, prompt)
         song_list = []
+        if len(songs) == 0:
+            return
         for song in songs['songs']:
             title = song['title']
             album = song['album']
