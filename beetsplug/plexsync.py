@@ -18,7 +18,7 @@ import dateutil.parser
 import requests
 import spotipy
 from beets import config, ui
-from beets.ui import print_
+from beets.ui import print_, input_
 from beets.dbcore import types
 from beets.dbcore.query import MatchQuery
 from beets.library import DateType
@@ -603,16 +603,6 @@ class PlexSync(BeetsPlugin):
             sorted_tracks = self.find_closest_match(song['title'], tracks)
             self._log.debug('Found {} tracks for {}', len(sorted_tracks),
                             song['title'])
-            # present these options to the users and let them choose. How do I do this?
-            print_(f'Choose candidates for { song["album"] } - { song["title"] }:')
-            for i, track in enumerate(sorted_tracks, start=1):
-                print_(f'{i}. {track.title} - {track.artist().title}')
-
-            sel = ui.input_options(('aBort', 'Enter search', 'Skip'),
-                numrange=(1, len(sorted_tracks)), default=1)
-
-            print(sel)
-
             for track in sorted_tracks:
                 if track.originalTitle is not None:
                     plex_artist = track.originalTitle
@@ -621,9 +611,29 @@ class PlexSync(BeetsPlugin):
                 if artist in plex_artist:
                     return track
         else:
-            self._log.info('Track {} - {} not found in Plex',
+            if config['plexsync']['manual_search']:
+                print_('Track {} - {} not found in Plex',
+                       song['album'], song['title'])                
+                if ui.input_yn("Search manually? (Y/n)"):
+                    self.manual_track_search()
+            else:
+                self._log.info('Track {} - {} not found in Plex',
                            song['album'], song['title'])
             return None
+
+    def manual_track_search(self):
+        """Get a new `Proposal` using manual search criteria.
+
+        Input either an artist and album (for full albums) or artist and
+        track name (for singletons) for manual search.
+        """
+        song_dict = {}
+        artist = input_('Artist:').strip()
+        title = input_('Track:').strip()
+        album = input_('Album:').strip()
+        song_dict = {"title": title.strip(),
+                     "album": album.strip(), "artist": artist.strip()}
+        self.search_plex_song(song_dict)
 
     def _plex_import_playlist(self, playlist, playlist_url):
         """Import playlist into Plex."""
