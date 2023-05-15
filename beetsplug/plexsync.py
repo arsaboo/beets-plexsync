@@ -18,7 +18,7 @@ import dateutil.parser
 import requests
 import spotipy
 from beets import config, ui
-from beets.ui import print
+from beets.ui import print_
 from beets.dbcore import types
 from beets.dbcore.query import MatchQuery
 from beets.library import DateType
