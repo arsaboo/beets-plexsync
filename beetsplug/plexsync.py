@@ -22,6 +22,7 @@ from beets.dbcore import types
 from beets.dbcore.query import MatchQuery
 from beets.library import DateType
 from beets.plugins import BeetsPlugin
+from beets.ui import input_
 from bs4 import BeautifulSoup
 from jiosaavn import JioSaavn
 from plexapi import exceptions
@@ -66,7 +67,8 @@ class PlexSync(BeetsPlugin):
             'ignore_cert_errors': False})
 
         config['plexsync'].add({
-            'tokenfile': 'spotify_plexsync.json'})
+            'tokenfile': 'spotify_plexsync.json',
+            'manual_search': False})
         self.plexsync_token = config['plexsync']['tokenfile'].get(
             confuse.Filename(in_app_dir=True)
         )
@@ -584,8 +586,9 @@ class PlexSync(BeetsPlugin):
                     self._log.debug("Please sync Plex library again")
                     continue
 
-    def search_plex_song(self, song):
+    def search_plex_song(self, song, manual_search=False):
         """Fetch the Plex track key."""
+
         if song['album'] == "":
             tracks = self.music.searchTracks(**{'track.title': song['title']})
         else:
@@ -599,6 +602,8 @@ class PlexSync(BeetsPlugin):
             return tracks[0]
         elif len(tracks) > 1:
             sorted_tracks = self.find_closest_match(song['title'], tracks)
+            self._log.debug('Found {} tracks for {}', len(sorted_tracks),
+                            song['title'])
             for track in sorted_tracks:
                 if track.originalTitle is not None:
                     plex_artist = track.originalTitle
@@ -607,9 +612,31 @@ class PlexSync(BeetsPlugin):
                 if artist in plex_artist:
                     return track
         else:
-            self._log.info('Track {} - {} not found in Plex',
+            if config['plexsync']['manual_search'] and not manual_search:
+                self._log.info('Track {} - {} not found in Plex',
+                           song['album'], song['title'])
+                if ui.input_yn("Search manually? (Y/n)"):
+                    self.manual_track_search()
+            else:
+                self._log.info('Track {} - {} not found in Plex',
                            song['album'], song['title'])
             return None
+
+    def manual_track_search(self):
+        """Manually search for a track in the Plex library.
+
+        Prompts the user to enter the title, album, and artist of the track 
+        they want to search for.
+        Calls the `search_plex_song` method with the provided information and
+        sets the `manual_search` flag to True.
+        """
+        song_dict = {}
+        title = input_('Title:').strip()
+        album = input_('Album:').strip()
+        artist = input_('Artist:').strip()        
+        song_dict = {"title": title.strip(),
+                     "album": album.strip(), "artist": artist.strip()}
+        self.search_plex_song(song_dict, manual_search=True)
 
     def _plex_import_playlist(self, playlist, playlist_url):
         """Import playlist into Plex."""
@@ -646,11 +673,10 @@ class PlexSync(BeetsPlugin):
             plist.removeItems(track)
 
     def _plex_collage(self, interval, grid):
-        """Get the most played albums from Plex in the last 10 days."""
+        """Create a collage of most played albums."""
         self._log.info('Creating collage of most played albums in the last {} '
                        'days', interval)
         tot = int(grid) ** 2
-        # Get the most played albums in the last 10 days
         interval2 = str(interval) + 'd'
         albums = self.music.search(filters={'album.lastViewedAt>>': interval2},
                                    sort="viewCount:desc", libtype='album',
@@ -668,6 +694,7 @@ class PlexSync(BeetsPlugin):
             return
 
     def _plex_most_played_albums(self, albums, interval):
+        """Return a list of most played albums in the last `interval` days."""
         from datetime import datetime, timedelta
         now = datetime.now
         for album in albums:
@@ -754,23 +781,23 @@ class PlexSync(BeetsPlugin):
         openai.api_key = config['openai']['api_key'].get()
         model = config['openai']['model'].get()
         num_songs = int(number)
-        sys_prompt = f'''You are a music \
-            recommender. You will reply with {num_songs} song recommendations \
-            in a JSON format. Only reply with the JSON object, no need to \
-            send anything else. Include title, artist, album, and year in the \
-            JSON response. Use the JSON format: \
-                {{ \
-                "songs": [
-                    {{
-                    "title": "Title of song 1",
-                    "artist": "Artist of Song 1",
-                    "album": "Album of Song 1",
-                    "year": "Year of release"
-                    }}
-                    ]
-                    }}
-            '''
-        messages = [ {"role": "system", "content": sys_prompt} ]
+        sys_prompt = (
+            f'You are a music recommender. You will reply with {num_songs} song '
+            'recommendations in a JSON format. Only reply with the JSON object, '
+            'no need to send anything else. Include title, artist, album, and '
+            'year in the JSON response. Use the JSON format: '
+            '{'
+            '    "songs": ['
+            '        {'
+            '            "title": "Title of song 1",'
+            '            "artist": "Artist of Song 1",'
+            '            "album": "Album of Song 1",'
+            '            "year": "Year of release"'
+            '        }'
+            '    ]'
+            '}'
+        )
+        messages = [{"role": "system", "content": sys_prompt}]
         messages.append({"role": "user", "content": prompt})
         try:
             chat = openai.ChatCompletion.create(model=model, messages=messages)
@@ -780,6 +807,7 @@ class PlexSync(BeetsPlugin):
         reply = chat.choices[0].message.content
         self._log.debug('OpenAI Reply: {}', reply)
         return self.cleanup_json(reply)
+
 
     def cleanup_json(self, jsonString):
         import json
