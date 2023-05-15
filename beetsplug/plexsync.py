@@ -608,7 +608,6 @@ class PlexSync(BeetsPlugin):
             sel = ui.input_options(
                 [f"{i}. {track.title} - {track.artist().title}" for i,
                  track in enumerate(sorted_tracks, start=1)],
-                 prompt='Choose one',
                 numrange=(1, len(sorted_tracks)), default=1)
             print(sel)
 
