@@ -18,11 +18,11 @@ import dateutil.parser
 import requests
 import spotipy
 from beets import config, ui
-from beets.ui import print_, input_
 from beets.dbcore import types
 from beets.dbcore.query import MatchQuery
 from beets.library import DateType
 from beets.plugins import BeetsPlugin
+from beets.ui import input_
 from bs4 import BeautifulSoup
 from jiosaavn import JioSaavn
 from plexapi import exceptions
@@ -774,7 +774,6 @@ class PlexSync(BeetsPlugin):
             self._plex_add_playlist_item(matched_songs, playlist)
         except Exception as e:
             self._log.error('Unable to add songs to playlist. Error: {}', e)
-
 
 
     def chat_gpt(self, number, prompt):
