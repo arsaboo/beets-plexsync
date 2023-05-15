@@ -270,12 +270,12 @@ class PlexSync(BeetsPlugin):
 
         # plexplaylistclear command
         playlistclear_cmd = ui.Subcommand('plexplaylistclear',
-                                           help="clear Plex playlist")
+                                          help="clear Plex playlist")
 
         playlistclear_cmd.parser.add_option('-m', '--playlist',
-                                             default='',
-                                             help='name of the Plex playlist \
-                                                 to be cleared')
+                                            default='',
+                                            help='name of the Plex playlist \
+                                            to be cleared')
 
         def func_playlist_clear(lib, opts, args):
             self._plex_clear_playlist(opts.playlist)
@@ -337,7 +337,7 @@ class PlexSync(BeetsPlugin):
     def clean_album_name(self, album_orig):
         album_orig = album_orig.replace(
             "(Original Motion Picture Soundtrack)",
-            "").replace("- Hindi","").strip()
+            "").replace("- Hindi", "").strip()
         if "(From \"" in album_orig:
             album = re.sub(r'^[^"]+"|(?<!^)"[^"]+"|"[^"]+$', '', album_orig)
         elif "[From \"" in album_orig:
@@ -379,7 +379,8 @@ class PlexSync(BeetsPlugin):
             # Create a dictionary with the song information
             song_dict = {"title": title.strip(),
                          "album": album.strip(),
-                         "artist": artist.strip(), "year": year}
+                         "artist": artist.strip(),
+                         "year": year}
             # Append the dictionary to the list of songs
             song_list.append(song_dict)
         return song_list
