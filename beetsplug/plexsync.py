@@ -605,13 +605,13 @@ class PlexSync(BeetsPlugin):
                             song['title'])
             # present these options to the users and let them choose. How do I do this?
             print_('Candidates:')
-            for i, sorted_tracks in enumerate(sorted_tracks):
+            for i, tracks in enumerate(sorted_tracks):
                 # Index, metadata, and distance.
                 line = [
                     '{}.'.format(i + 1),
                     '{} - {}'.format(
-                        sorted_tracks.artist,
-                        sorted_tracks.title,
+                        tracks.artist,
+                        tracks.title,
                     ),
                 ]            
                 print_(' '.join(line))
