@@ -282,7 +282,7 @@ class PlexSync(BeetsPlugin):
         collage_cmd.parser.add_option('-i', '--interval', default=7,
                                       help='days to look back for history')
         collage_cmd.parser.add_option('-g', '--grid', default=3,
-                                      help='dimension of the collage grid')
+                                      help='dimension of the collage grid') 
         def func_collage(lib, opts, args):
             self._plex_collage(opts.interval, opts.grid)
 
@@ -300,8 +300,12 @@ class PlexSync(BeetsPlugin):
                                         default='SonicSage',
                                         help='name of the playlist to be \
                                             added in Plex')
+        sonicsage_cmd.parser.add_option('-c', '--clear', dest='clear',
+                                        default=False, 
+                                        help='Clear playlist if not empty')
         def func_sonic(lib, opts, args):
-            self._plex_sonicsage(opts.number, opts.prompt, opts.playlist)
+            self._plex_sonicsage(opts.number, opts.prompt, opts.playlist,
+                                 opts.clear)
 
         sonicsage_cmd.func = func_sonic
 
@@ -588,6 +592,9 @@ class PlexSync(BeetsPlugin):
         else:
             tracks = self.music.searchTracks(
                 **{'album.title': song['album'], 'track.title': song['title']})
+            if len(tracks) == 0:
+                tracks = self.music.searchTracks(
+                    **{'track.title': song['title']})
         artist = song['artist'].split(",")[0]
         if len(tracks) == 1:
             return tracks[0]
@@ -710,7 +717,7 @@ class PlexSync(BeetsPlugin):
         return grid
 
 
-    def _plex_sonicsage(self, number, prompt, playlist):
+    def _plex_sonicsage(self, number, prompt, playlist, clear):
         import json
         if not bool(config['openai']['api_key'].get()):
             self._log.error('OpenAI API key not provided')
@@ -740,6 +747,8 @@ class PlexSync(BeetsPlugin):
                 self._log.debug('Song matched in Plex library: {}', match_dict)
                 matched_songs.append(self.dotdict(match_dict))
         self._log.debug('Songs matched in Plex library: {}', matched_songs)
+        if clear:
+            self._plex_clear_playlist(playlist)
         try:
             self._plex_add_playlist_item(matched_songs, playlist)
         except Exception as e:
