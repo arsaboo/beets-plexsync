@@ -67,7 +67,8 @@ class PlexSync(BeetsPlugin):
             'ignore_cert_errors': False})
 
         config['plexsync'].add({
-            'tokenfile': 'spotify_plexsync.json'})
+            'tokenfile': 'spotify_plexsync.json',
+            'manual_search': False})
         self.plexsync_token = config['plexsync']['tokenfile'].get(
             confuse.Filename(in_app_dir=True)
         )
@@ -612,8 +613,7 @@ class PlexSync(BeetsPlugin):
                     return track
         else:
             if config['plexsync']['manual_search']:
-                print_('Track {} - {} not found in Plex',
-                       song['album'], song['title'])                
+                print_(f'Track {song["album"]} - {song["title"]} not found in Plex')
                 if ui.input_yn("Search manually? (Y/n)"):
                     self.manual_track_search()
             else:
