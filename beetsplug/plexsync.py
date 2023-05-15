@@ -604,10 +604,10 @@ class PlexSync(BeetsPlugin):
             self._log.debug('Found {} tracks for {}', len(sorted_tracks),
                             song['title'])
             # present these options to the users and let them choose. How do I do this?
-            print_('Candidates:')
+            print_(f'Choose candidates for { song["album"] } - { song["title"] }')
 
             sel = ui.input_options(
-                [f"\n{i}. {track.title} - {track.artist().title}" for i,
+                [f"{i}. {track.title} - {track.artist().title}" for i,
                  track in enumerate(sorted_tracks, start=1)],
                 numrange=(1, len(sorted_tracks)), default=1)
 
