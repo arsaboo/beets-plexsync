@@ -586,7 +586,7 @@ class PlexSync(BeetsPlugin):
                     self._log.debug("Please sync Plex library again")
                     continue
 
-    def search_plex_song(self, song):
+    def search_plex_song(self, song, manual_search=False):
         """Fetch the Plex track key."""
 
         if song['album'] == "":
@@ -612,8 +612,9 @@ class PlexSync(BeetsPlugin):
                 if artist in plex_artist:
                     return track
         else:
-            if config['plexsync']['manual_search']:
-                print_(f'Track {song["album"]} - {song["title"]} not found in Plex')
+            if config['plexsync']['manual_search'] and not manual_search:
+                self._log.info('Track {} - {} not found in Plex',
+                           song['album'], song['title'])
                 if ui.input_yn("Search manually? (Y/n)"):
                     self.manual_track_search()
             else:
@@ -628,12 +629,12 @@ class PlexSync(BeetsPlugin):
         track name (for singletons) for manual search.
         """
         song_dict = {}
-        artist = input_('Artist:').strip()
-        title = input_('Track:').strip()
+        title = input_('Title:').strip()
         album = input_('Album:').strip()
+        artist = input_('Artist:').strip()        
         song_dict = {"title": title.strip(),
                      "album": album.strip(), "artist": artist.strip()}
-        self.search_plex_song(song_dict)
+        self.search_plex_song(song_dict, manual_search=True)
 
     def _plex_import_playlist(self, playlist, playlist_url):
         """Import playlist into Plex."""
