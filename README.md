@@ -1,5 +1,5 @@
 # beets-plexsync
-A plugin for [beets](https://github.com/beetbox/beets) to sync with your Plex server.
+A plugin for [beets][beets] to sync with your Plex server.
 
 ## Installation
 
@@ -10,7 +10,7 @@ pip install git+https://github.com/arsaboo/beets-plexsync.git
 ```
 
 Then, [configure](#configuration) the plugin in your
-[`config.yaml`](https://beets.readthedocs.io/en/latest/plugins/index.html) file.
+[`config.yaml`][config] file.
 
 ## Configuration
 
@@ -20,7 +20,7 @@ Add `plexsync` to your list of enabled plugins.
 plugins: plexsync
 ```
 
-Next, you can configure your Plex server and library like following (see instructions to obtain Plex token [here](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/)).
+Next, you can configure your Plex server and library like following (see instructions to obtain Plex token [here][plex_token]).
 
 ```yaml
 plex:
@@ -75,3 +75,6 @@ plexsync:
 [collage]: collage.png
 [queries_]: https://beets.readthedocs.io/en/latest/reference/query.html?highlight=queries
 [plaxapi]: https://python-plexapi.readthedocs.io/en/latest/modules/audio.html
+[plex_token]: https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/
+[config]: https://beets.readthedocs.io/en/latest/plugins/index.html
+[beets]: https://github.com/beetbox/beets
