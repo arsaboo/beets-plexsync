@@ -63,6 +63,15 @@ The following features are implemented in `plexsync`:
   <img src="collage.png">
 </p>
 
+## Advanced
+Plex matching may be less than perfect and it can miss tracks if the tags don't match perfectly. You can enable manual search to improve the matching by enabling `manual_search` in your config (default: `False`):
+
+```yaml
+plexsync:
+    manual_search: yes
+```
+
+
 [collage]: collage.png
 [queries_]: https://beets.readthedocs.io/en/latest/reference/query.html?highlight=queries
 [plaxapi]: https://python-plexapi.readthedocs.io/en/latest/modules/audio.html
