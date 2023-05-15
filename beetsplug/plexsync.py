@@ -623,10 +623,12 @@ class PlexSync(BeetsPlugin):
             return None
 
     def manual_track_search(self):
-        """Get a new `Proposal` using manual search criteria.
+        """Manually search for a track in the Plex library.
 
-        Input either an artist and album (for full albums) or artist and
-        track name (for singletons) for manual search.
+        Prompts the user to enter the title, album, and artist of the track 
+        they want to search for.
+        Calls the `search_plex_song` method with the provided information and
+        sets the `manual_search` flag to True.
         """
         song_dict = {}
         title = input_('Title:').strip()
@@ -671,11 +673,10 @@ class PlexSync(BeetsPlugin):
             plist.removeItems(track)
 
     def _plex_collage(self, interval, grid):
-        """Get the most played albums from Plex in the last 10 days."""
+        """Create a collage of most played albums."""
         self._log.info('Creating collage of most played albums in the last {} '
                        'days', interval)
         tot = int(grid) ** 2
-        # Get the most played albums in the last 10 days
         interval2 = str(interval) + 'd'
         albums = self.music.search(filters={'album.lastViewedAt>>': interval2},
                                    sort="viewCount:desc", libtype='album',
@@ -693,6 +694,7 @@ class PlexSync(BeetsPlugin):
             return
 
     def _plex_most_played_albums(self, albums, interval):
+        """Return a list of most played albums in the last `interval` days."""
         from datetime import datetime, timedelta
         now = datetime.now
         for album in albums:
@@ -774,28 +776,29 @@ class PlexSync(BeetsPlugin):
             self._log.error('Unable to add songs to playlist. Error: {}', e)
 
 
+
     def chat_gpt(self, number, prompt):
         import openai
         openai.api_key = config['openai']['api_key'].get()
         model = config['openai']['model'].get()
         num_songs = int(number)
-        sys_prompt = f'''You are a music \
-            recommender. You will reply with {num_songs} song recommendations \
-            in a JSON format. Only reply with the JSON object, no need to \
-            send anything else. Include title, artist, album, and year in the \
-            JSON response. Use the JSON format: \
-                {{ \
-                "songs": [
-                    {{
-                    "title": "Title of song 1",
-                    "artist": "Artist of Song 1",
-                    "album": "Album of Song 1",
-                    "year": "Year of release"
-                    }}
-                    ]
-                    }}
-            '''
-        messages = [ {"role": "system", "content": sys_prompt} ]
+        sys_prompt = (
+            f'You are a music recommender. You will reply with {num_songs} song '
+            'recommendations in a JSON format. Only reply with the JSON object, '
+            'no need to send anything else. Include title, artist, album, and '
+            'year in the JSON response. Use the JSON format: '
+            '{'
+            '    "songs": ['
+            '        {'
+            '            "title": "Title of song 1",'
+            '            "artist": "Artist of Song 1",'
+            '            "album": "Album of Song 1",'
+            '            "year": "Year of release"'
+            '        }'
+            '    ]'
+            '}'
+        )
+        messages = [{"role": "system", "content": sys_prompt}]
         messages.append({"role": "user", "content": prompt})
         try:
             chat = openai.ChatCompletion.create(model=model, messages=messages)
@@ -805,6 +808,7 @@ class PlexSync(BeetsPlugin):
         reply = chat.choices[0].message.content
         self._log.debug('OpenAI Reply: {}', reply)
         return self.cleanup_json(reply)
+
 
     def cleanup_json(self, jsonString):
         import json
