@@ -819,9 +819,9 @@ class PlexSync(BeetsPlugin):
             return
         reply = chat.choices[0].message.content
         self._log.debug('OpenAI Reply: {}', reply)
-        return self.cleanup_json(reply)
+        return self.extract_json(reply)
 
-    def cleanup_json(self, jsonString):
+    def extract_json(self, jsonString):
         import json
         startIndex = jsonString.index('{')
         endIndex = jsonString.rindex('}')
