@@ -460,11 +460,9 @@ class PlexSync(BeetsPlugin):
                 text.strip()
             title, album = self.parse_title(title_orig)
             # Find and store the song artist
-            artist = song.find("div",class_="songs-list-row__by-line").\
+            artist = song.find(
+                "div", class_="songs-list-row__by-line").\
                 text.strip().replace("\n", "").replace("  ", "")
-            
-            # Find and store the song duration
-            #duration = song.find("div", class_="songs-list-row__length").text.strip()
             # Create a dictionary with the song information
             song_dict = {"title": title.strip(),
                          "album": album.strip(), "artist": artist.strip()}
@@ -547,7 +545,12 @@ class PlexSync(BeetsPlugin):
             self._log.info('{} playlist will be created', playlist)
             self.plex.createPlaylist(playlist, items=list(to_add))
         else:
-            plst.addItems(items=list(to_add))
+            try:
+                plst.addItems(items=list(to_add))
+            except exceptions.BadRequest as e:
+                self._log.error(
+                    'Error adding items {} to {} playlist. Error: {}',
+                    items, playlist, e)
 
     def _plex_remove_playlist_item(self, items, playlist):
         """Remove items from Plex playlist."""
