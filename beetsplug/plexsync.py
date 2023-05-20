@@ -826,7 +826,8 @@ class PlexSync(BeetsPlugin):
         messages = [{"role": "system", "content": sys_prompt}]
         messages.append({"role": "user", "content": prompt})
         try:
-            chat = openai.ChatCompletion.create(model=model, messages=messages)
+            chat = openai.ChatCompletion.create(model=model, messages=messages,
+                                                temperature=0.7)
         except Exception as e:
             self._log.error('Unable to connect to OpenAI. Error: {}', e)
             return
