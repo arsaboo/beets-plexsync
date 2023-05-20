@@ -752,13 +752,26 @@ class PlexSync(BeetsPlugin):
         return grid
 
     def _plex_sonicsage(self, number, prompt, playlist, clear):
+        """
+        Generate song recommendations using OpenAI's GPT-3 model based on a given prompt,
+        and add the recommended songs to a Plex playlist.
+
+        Args:
+            number (int): The number of song recommendations to generate.
+            prompt (str): The prompt to use for generating song recommendations.
+            playlist (str): The name of the Plex playlist to add the recommended songs to.
+            clear (bool): Whether to clear the playlist before adding the recommended songs.
+
+        Returns:
+            None
+        """
         if not bool(config['openai']['api_key'].get()):
             self._log.error('OpenAI API key not provided')
             return
         if prompt == '':
             self._log.error('Prompt not provided')
             return
-        songs = self.chat_gpt(number, prompt)
+        songs = self.chat_gpt_song_rec(number, prompt)
         song_list = []
         if len(songs) == 0:
             return
@@ -789,7 +802,7 @@ class PlexSync(BeetsPlugin):
         except Exception as e:
             self._log.error('Unable to add songs to playlist. Error: {}', e)
 
-    def chat_gpt(self, number, prompt):
+    def chat_gpt_song_rec(self, number, prompt):
         import openai
         openai.api_key = config['openai']['api_key'].get()
         model = config['openai']['model'].get()
