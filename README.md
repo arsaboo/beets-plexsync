@@ -12,6 +12,11 @@ pip install git+https://github.com/arsaboo/beets-plexsync.git
 Then, [configure](#configuration) the plugin in your
 [`config.yaml`][config] file.
 
+To upgrade, use the command:
+```shell
+pip install --upgrade --force-reinstall --no-deps git+https://github.com/arsaboo/beets-plexsync.git
+```
+
 ## Configuration
 
 Add `plexsync` to your list of enabled plugins.
@@ -30,7 +35,7 @@ plex:
     library_name: 'Music'
 ```
 
-If you want to import `spotify` playlists, you will also need to configure the `spotify` plugin. If you are already using the [Spotify](https://beets.readthedocs.io/en/stable/plugins/spotify.html) plugin, `plexsync`will reuse the same configuration.
+If you want to import `spotify` playlists, you will also need to configure the `spotify` plugin. If you are already using the [Spotify][Spotify] plugin, `plexsync`will reuse the same configuration.
 ```yaml
 spotify:
     client_id: CLIENT_ID
@@ -40,6 +45,18 @@ spotify:
 ## Features
 
 The following features are implemented in `plexsync`:
+
+## `beet plexsonic`
+
+* The `beet plexsonic` command allows you to create AI-based playlists using OpenAI's GPT language model. To use this feature, you will need an OpenAI API key. Once you have obtained an API key, you can configure `beets` to use it by adding the following to your `config.yaml` file:
+  ```yaml
+  openai:
+      api_key: API_KEY
+      model: "gpt-3.5-turbo"
+  ```
+  I have only tested this with `gpt-3.5-turbo` but I am sure it will work with gpt-4. You can get started with `beet plexsonic -p "YOUR_PROMPT"` to create the playlist based on YOUR_PROMPT. The default playlist name is `SonicSage` (wink wink), you can modify it using `-m` flag. By default, it requests 10 tracks from OpenAI. Use the `-n` flag to change the number of tracks requested. Finally, if you prefer to clear the playlist before adding the new songs, you can add `-c` flat. So, to create a new classical music playlist, you can use somethign like `beet plexsonic -c -n 10 -p "classical music, romanticism era, like Schubert, Chopin, Liszt"`.
+
+  Please note that not all tracks returned by OpenAI may be available in your library or matched perfectly, affecting the size of the playlist created. The command will log the tracks that could not be found on your library. You can improve the matching by enabling `manual_search` (see Advanced Usage). This is working extrmely well for me. I would love to hear your comments/feedback to improve this feature. 
 
 * `beet plexsync [-f]`: allows you to import all the data from your Plex library inside beets. Run the command `beet plexsync` and it will obtain `guid`, `ratingkey`, `userrating`, `skipcount`, `viewcount`, `lastviewedat`, `lastratedat`, and `plex_updated`. See details about these attributes [here][plaxapi]. By default, `plexsync` will not overwrite information for tracks that are already rated. If you want to overwrite all the details again, use the `-f` flag, i.e., `beet plexsync -f` will force update the entire library with fresh information from Plex. This can be useful if you have made significant changes to your Plex library (e.g., updated ratings).
 
@@ -78,3 +95,4 @@ plexsync:
 [plex_token]: https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/
 [config]: https://beets.readthedocs.io/en/latest/plugins/index.html
 [beets]: https://github.com/beetbox/beets
+[Spotify]: https://beets.readthedocs.io/en/stable/plugins/spotify.html

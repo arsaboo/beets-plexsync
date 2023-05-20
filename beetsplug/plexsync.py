@@ -826,6 +826,7 @@ class PlexSync(BeetsPlugin):
         messages = [{"role": "system", "content": sys_prompt}]
         messages.append({"role": "user", "content": prompt})
         try:
+            self._log.info('Sending request to OpenAI')
             chat = openai.ChatCompletion.create(model=model, messages=messages,
                                                 temperature=0.7)
         except Exception as e:
