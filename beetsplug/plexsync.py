@@ -773,7 +773,7 @@ class PlexSync(BeetsPlugin):
             return
         songs = self.chat_gpt_song_rec(number, prompt)
         song_list = []
-        if len(songs) == 0:
+        if songs is None:
             return
         for song in songs['songs']:
             title = song['title']
