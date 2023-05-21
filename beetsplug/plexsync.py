@@ -799,7 +799,7 @@ class PlexSync(BeetsPlugin):
             try:
                 self._plex_clear_playlist(playlist)
             except exceptions.NotFound:
-                self._log.debug('Unable to clear playlist. Error: {}', e)
+                self._log.debug(f'Unable to clear playlist {playlist}')
         try:
             self._plex_add_playlist_item(matched_songs, playlist)
         except Exception as e:
