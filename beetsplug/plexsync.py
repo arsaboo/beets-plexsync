@@ -796,7 +796,10 @@ class PlexSync(BeetsPlugin):
                 matched_songs.append(self.dotdict(match_dict))
         self._log.debug('Songs matched in Plex library: {}', matched_songs)
         if clear:
-            self._plex_clear_playlist(playlist)
+            try:
+                self._plex_clear_playlist(playlist)
+            except exceptions.NotFound:
+                self._log.debug('Unable to clear playlist. Error: {}', e)
         try:
             self._plex_add_playlist_item(matched_songs, playlist)
         except Exception as e:
