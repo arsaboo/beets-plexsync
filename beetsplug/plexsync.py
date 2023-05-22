@@ -836,7 +836,7 @@ class PlexSync(BeetsPlugin):
             self._log.error('Unable to connect to OpenAI. Error: {}', e)
             return
         reply = chat.choices[0].message.content
-        tokens = chat.usage.total_tokens
+        tokens = chat.usage
         self._log.debug(f'OpenAI used {tokens} tokens and replied: {reply}')
         return self.extract_json(reply)
 
