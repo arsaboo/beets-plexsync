@@ -837,7 +837,6 @@ class PlexSync(BeetsPlugin):
             return
         reply = chat.choices[0].message.content
         tokens = chat.usage.total_tokens
-        print(chat)
         self._log.debug('OpenAI used {} tokens and replied: {}', tokens, reply)
         return self.extract_json(reply)
 
