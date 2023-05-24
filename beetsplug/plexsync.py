@@ -860,15 +860,23 @@ class PlexSync(BeetsPlugin):
         return obj
 
     def _check_mb_matched(self, albums):
-        # search for the album on musicbrainz and inform the user if a match exists. 
-        # This is useful for albums that are not matched in Plex but are available on MusicBrainz
+        # search for the album on musicbrainz.
+        # This is useful for albums that are not matched in Plex but are
+        # available on MusicBrainz
         import musicbrainzngs
         for album in albums:
-            print(album.items()[0].get('plex_guid'))
-            try:
-                result = musicbrainzngs.search_releases(query=album.album, strict=True)
-                if result['release-list']:
-                    self._log.info('Album {} - {} matched on MusicBrainz', album.album, album.year)
-            except Exception as e:
-                self._log.debug('Unable to search for album {} on MusicBrainz. Error: {}', album.album, e)
+            if (album.items()[0].get('plex_guid').split(":")[0] == 'plex'):
+                self._log.debug('Album {} - {} is already matched in Plex',
+                                album.album, album.year)
+                continue
+            else:
+                try:
+                    result = musicbrainzngs.search_releases(query=album.album,
+                                                            strict=True)
+                    if result['release-list']:
+                        self._log.info('Album {} - {} matched on MusicBrainz',
+                                       album.album, album.year)
+                except Exception as e:
+                    self._log.debug('No resulsts for album {} on MusicBrainz. \
+                                    Error: {}', album.album, e)
                 
