@@ -866,6 +866,7 @@ class PlexSync(BeetsPlugin):
         from beets.autotag import tag_album
         musicbrainzngs.set_useragent('plex-sonicsage', '0.1')
         for album in albums:
+            print(album)
             try:
                 _, _, prop = tag_album(album.items(),
                                        search_artist=album.artist,
