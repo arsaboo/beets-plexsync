@@ -864,7 +864,7 @@ class PlexSync(BeetsPlugin):
         # This is useful for albums that are not matched in Plex but are available on MusicBrainz
         import musicbrainzngs
         for album in albums:
-            print(album.items()[0].__dict__)
+            print(album.items()[0].get('plex_guid'))
             try:
                 result = musicbrainzngs.search_releases(query=album.album, strict=True)
                 if result['release-list']:
