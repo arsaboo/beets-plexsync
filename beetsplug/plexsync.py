@@ -867,7 +867,7 @@ class PlexSync(BeetsPlugin):
         for album in albums:
             candidates = album_candidates(album.items(),
                                           album.albumartist,
-                                          albums.album,
+                                          album.album,
                                           va_likely)
             if len(candidates) > 0:
                 print(candidate[0])
