@@ -866,11 +866,10 @@ class PlexSync(BeetsPlugin):
         from beets.autotag import tag_album
         musicbrainzngs.set_useragent('plex-sonicsage', '0.1')
         for album in albums:
-            print(album.album, album.albumartist)
             try:
                 _, _, prop = tag_album(album.items(),
-                                       search_artist=album.artist,
-                                       search_album=album.title)
+                                       search_artist=album.albumartist,
+                                       search_album=album.album)
             except Exception as e:
                 self._log.debug('Unable to tag album {}', e)
                 continue
