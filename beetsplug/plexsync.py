@@ -869,4 +869,4 @@ class PlexSync(BeetsPlugin):
             candidates = match_album(album.albumartist,
                                      album.album)
             if len(list(candidates)) > 0:
-                print(list(candidates))
+                print(candidates)
