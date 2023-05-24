@@ -28,6 +28,7 @@ from jiosaavn import JioSaavn
 from plexapi import exceptions
 from plexapi.server import PlexServer
 from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
+from beetsplug.youtube import YouTubePlugin
 
 
 class PlexSync(BeetsPlugin):
@@ -54,6 +55,7 @@ class PlexSync(BeetsPlugin):
     def __init__(self):
         """Initialize plexsync plugin."""
         super().__init__()
+        self.ytp = YouTubePlugin()
 
         self.config_dir = config.config_dir()
 
@@ -665,7 +667,10 @@ class PlexSync(BeetsPlugin):
         elif "gaana.com" in playlist_url:
             songs = self.import_gaana_playlist(playlist_url)
         elif "spotify" in playlist_url:
-            songs = self.import_spotify_playlist(self.get_playlist_id(playlist_url))
+            songs = self.import_spotify_playlist(
+                self.get_playlist_id(playlist_url))
+        elif "youtube" in playlist_url:
+            songs = self.import_yt_playlist(playlist_url)
         song_list = []
         for song in songs:
             if self.search_plex_song(song) is not None:
@@ -847,3 +852,6 @@ class PlexSync(BeetsPlugin):
         jsonSubstring = jsonString[startIndex:endIndex + 1]
         obj = json.loads(jsonSubstring)
         return obj
+
+    def import_yt_playlist(self, url):
+        return self.ytp.import_youtube_playlist(url)
