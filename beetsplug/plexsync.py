@@ -864,26 +864,9 @@ class PlexSync(BeetsPlugin):
         # search for the album on musicbrainz.
         # This is useful for albums that are not matched in Plex but are
         # available on MusicBrainz
-        from beets.autotag.hooks import album_candidates
+        from beets.autotag.mb import match_album
         for album in albums:
-            candidates = self.candidates(album.items(),
-                                          album.albumartist,
-                                          album.album,
-                                          va_likely)
-            if len(candidates) > 0:
-                print(candidate[0])
-
-    def candidates(self, items, artist, release, va_likely, extra_tags=None):
-        """Returns a list of AlbumInfo objects for JioSaavn search results
-        matching release and artist (if not various).
-        """
-        if va_likely:
-            query = release
-        else:
-            query = f'{release} {artist}'
-        try:
-            return tag_album(query)
-        except Exception as e:
-            self._log.debug('JioSaavn Search Error: {}'.format(e))
-            return []
-                
+            candidates = match_album(album.albumartist,
+                                     album.album)
+            if len(list(candidates)) > 0:
+                print(list(candidates)[0])
