@@ -863,15 +863,11 @@ class PlexSync(BeetsPlugin):
         # search for the album on musicbrainz and inform the user if a match exists. 
         # This is useful for albums that are not matched in Plex but are available on MusicBrainz
         import musicbrainzngs
-        from beets.autotag import tag_album
-        musicbrainzngs.set_useragent('plex-sonicsage', '0.1')
         for album in albums:
             try:
-                artist_name, album_name, prop = tag_album(album.items(),
-                                       search_artist=album.albumartist,
-                                       search_album=album.album)
-                print(prop['distance'])
+                result = musicbrainzngs.search_releases(query=album.album, strict=True)
+                if result['release-list']:
+                    self._log.info('Album {} - {} matched on MusicBrainz', album.album, album.year)
             except Exception as e:
-                self._log.debug('Unable to tag album {}', e)
-                continue
+                self._log.debug('Unable to search for album {} on MusicBrainz. Error: {}', album.album, e)
                 
