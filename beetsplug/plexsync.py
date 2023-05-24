@@ -311,16 +311,27 @@ class PlexSync(BeetsPlugin):
         sonicsage_cmd.parser.add_option('-c', '--clear', dest='clear',
                                         default=False, 
                                         help='Clear playlist if not empty')
-        
+
         def func_sonic(lib, opts, args):
             self._plex_sonicsage(opts.number, opts.prompt, opts.playlist,
                                  opts.clear)
 
         sonicsage_cmd.func = func_sonic
 
+        # mbmatched command
+        mbmatched_cmd = ui.Subcommand('plexcheckmb',
+                                      help="Check if there are any umatched \
+                                        Plex albums that are available on MB")
+
+        def func_mbmatched(lib, opts, args):
+            albums = lib.albums(ui.decargs(args))
+            self._check_mb_matched(albums)
+
+        mbmatched_cmd.func = func_mbmatched
+
         return [plexupdate_cmd, sync_cmd, playlistadd_cmd, playlistrem_cmd,
                 syncrecent_cmd, playlistimport_cmd, playlistclear_cmd,
-                collage_cmd, sonicsage_cmd]
+                collage_cmd, sonicsage_cmd, mbmatched_cmd]
 
     def parse_title(self, title_orig):
         if "(From \"" in title_orig:
@@ -847,3 +858,19 @@ class PlexSync(BeetsPlugin):
         jsonSubstring = jsonString[startIndex:endIndex + 1]
         obj = json.loads(jsonSubstring)
         return obj
+
+    def _check_mb_matched(self, albums):
+        # search for the album on musicbrainz and inform the user if a match exists. 
+        # This is useful for albums that are not matched in Plex but are available on MusicBrainz
+        import musicbrainzngs
+        from beets.autotag import tag_album
+        musicbrainzngs.set_useragent('plex-sonicsage', '0.1')
+        for album in albums:
+            try:
+                _, _, prop = tag_album(album.items(),
+                                       search_artist=album.artist,
+                                       search_album=album.title)
+            except Exception as e:
+                self._log.debug('Unable to tag album {}', e)
+                continue
+            print(prop)
