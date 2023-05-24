@@ -18,6 +18,7 @@ import dateutil.parser
 import requests
 import spotipy
 from beets import config, ui
+from beets.autotag.match import tag_album
 from beets.dbcore import types
 from beets.dbcore.query import MatchQuery
 from beets.library import DateType
@@ -865,12 +866,24 @@ class PlexSync(BeetsPlugin):
         # available on MusicBrainz
         from beets.autotag.hooks import album_candidates
         for album in albums:
-            candidates = album_candidates(album.items(),
+            candidates = self.candidates(album.items(),
                                           album.albumartist,
                                           album.album,
                                           va_likely)
             if len(candidates) > 0:
                 print(candidate[0])
 
-
+    def candidates(self, items, artist, release, va_likely, extra_tags=None):
+        """Returns a list of AlbumInfo objects for JioSaavn search results
+        matching release and artist (if not various).
+        """
+        if va_likely:
+            query = release
+        else:
+            query = f'{release} {artist}'
+        try:
+            return tag_album(query)
+        except Exception as e:
+            self._log.debug('JioSaavn Search Error: {}'.format(e))
+            return []
                 
