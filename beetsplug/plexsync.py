@@ -626,7 +626,7 @@ class PlexSync(BeetsPlugin):
                     #print_(f'{i}. {track.parentTitle} - {track.title} - {track.artist().title}')
                     print_(f'{i}. {track.parentTitle} - {track.title} - '
                            f'{track.artist().title}')
-                sel = ui.input_options(('aBort'),
+                sel = ui.input_options(('aBort', 'Skip'),
                                        numrange=(1, len(sorted_tracks)),
                                        default=1)
                 if sel == 'b':
