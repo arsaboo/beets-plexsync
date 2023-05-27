@@ -623,7 +623,6 @@ class PlexSync(BeetsPlugin):
                 print_(f'Choose candidates for {song["album"]} - '
                        f'{song["title"]}:')
                 for i, track in enumerate(sorted_tracks, start=1):
-                    #print_(f'{i}. {track.parentTitle} - {track.title} - {track.artist().title}')
                     print_(f'{i}. {track.parentTitle} - {track.title} - '
                            f'{track.artist().title}')
                 sel = ui.input_options(('aBort', 'Skip'),
