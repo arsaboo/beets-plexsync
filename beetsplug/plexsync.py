@@ -22,7 +22,7 @@ from beets.dbcore import types
 from beets.dbcore.query import MatchQuery
 from beets.library import DateType
 from beets.plugins import BeetsPlugin
-from beets.ui import input_
+from beets.ui import input_, print_
 from bs4 import BeautifulSoup
 from jiosaavn import JioSaavn
 from plexapi import exceptions
@@ -607,7 +607,8 @@ class PlexSync(BeetsPlugin):
             tracks = self.music.searchTracks(**{'track.title': song['title']})
         else:
             tracks = self.music.searchTracks(
-                **{'album.title': song['album'], 'track.title': song['title']})
+                **{'album.title': song['album'],
+                   'track.title': song['title']})
             if len(tracks) == 0:
                 tracks = self.music.searchTracks(
                     **{'track.title': song['title']})
@@ -618,6 +619,18 @@ class PlexSync(BeetsPlugin):
             sorted_tracks = self.find_closest_match(song['title'], tracks)
             self._log.debug('Found {} tracks for {}', len(sorted_tracks),
                             song['title'])
+            if manual_search and len(sorted_tracks) > 0:
+                print_(f'Choose candidates for {song["album"]} - '
+                       f'{song["title"]}:')
+                for i, track in enumerate(sorted_tracks, start=1):
+                    print_(f'{i}. {track.parentTitle} - {track.title} - '
+                           f'{track.artist().title}')
+                sel = ui.input_options(('aBort', 'Skip'),
+                                       numrange=(1, len(sorted_tracks)),
+                                       default=1)
+                if sel in ('b', 'B', 's', 'S'):
+                    return None
+                return sorted_tracks[sel - 1] if sel > 0 else None
             for track in sorted_tracks:
                 if track.originalTitle is not None:
                     plex_artist = track.originalTitle
@@ -647,7 +660,7 @@ class PlexSync(BeetsPlugin):
         song_dict = {}
         title = input_('Title:').strip()
         album = input_('Album:').strip()
-        artist = input_('Artist:').strip()        
+        artist = input_('Artist:').strip()
         song_dict = {"title": title.strip(),
                      "album": album.strip(), "artist": artist.strip()}
         self.search_plex_song(song_dict, manual_search=True)
