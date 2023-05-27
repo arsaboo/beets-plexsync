@@ -607,7 +607,8 @@ class PlexSync(BeetsPlugin):
             tracks = self.music.searchTracks(**{'track.title': song['title']})
         else:
             tracks = self.music.searchTracks(
-                **{'album.title': song['album'], 'track.title': song['title']})
+                **{'album.title': song['album'],
+                   'track.title': song['title']})
             if len(tracks) == 0:
                 tracks = self.music.searchTracks(
                     **{'track.title': song['title']})
@@ -619,10 +620,13 @@ class PlexSync(BeetsPlugin):
             self._log.debug('Found {} tracks for {}', len(sorted_tracks),
                             song['title'])
             if manual_search and len(sorted_tracks) > 0:
-                print_(f'Choose candidates for { song["album"] } - { song["title"] }:')
+                print_(f'Choose candidates for {song["album"]} - '
+                       f'{song["title"]}:')
                 for i, track in enumerate(sorted_tracks, start=1):
-                    print_(f'{i}. {track.parentTitle} - {track.title} - {track.artist().title}')
-                sel = ui.input_options(('aBort', 'Enter search', 'Skip'),
+                    #print_(f'{i}. {track.parentTitle} - {track.title} - {track.artist().title}')
+                    print_(f'{i}. {track.parentTitle} - {track.title} - '
+                           f'{track.artist().title}')
+                sel = ui.input_options(('aBort'),
                                        numrange=(1, len(sorted_tracks)),
                                        default=1)
                 if sel == 'b':
