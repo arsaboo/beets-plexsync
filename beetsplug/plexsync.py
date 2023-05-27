@@ -621,7 +621,7 @@ class PlexSync(BeetsPlugin):
             if manual_search and len(sorted_tracks) > 0:
                 print_(f'Choose candidates for { song["album"] } - { song["title"] }:')
                 for i, track in enumerate(sorted_tracks, start=1):
-                    print_(f'{i}. {track.album} - {track.title} - {track.artist().title}')
+                    print_(f'{i}. {track.__dict__} - {track.title} - {track.artist().title}')
                 sel = ui.input_options(('aBort', 'Enter search', 'Skip'),
                                        numrange=(1, len(sorted_tracks)),
                                        default=1)
