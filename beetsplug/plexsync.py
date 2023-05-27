@@ -625,6 +625,8 @@ class PlexSync(BeetsPlugin):
                 sel = ui.input_options(('aBort', 'Enter search', 'Skip'),
                                        numrange=(1, len(sorted_tracks)),
                                        default=1)
+                if sel == 'b':
+                    return None
                 return sorted_tracks[sel - 1] if sel > 0 else None
             for track in sorted_tracks:
                 if track.originalTitle is not None:
