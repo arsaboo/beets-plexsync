@@ -669,6 +669,10 @@ class PlexSync(BeetsPlugin):
                 self.get_playlist_id(playlist_url))
         elif "youtube" in playlist_url:
             songs = self.import_yt_playlist(playlist_url)
+        else:
+            songs = []
+            raise ui.UserError('Playlist URL not supported')
+        print(songs)
         song_list = []
         for song in songs:
             if self.search_plex_song(song) is not None:
