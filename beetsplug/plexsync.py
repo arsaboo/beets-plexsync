@@ -671,15 +671,16 @@ class PlexSync(BeetsPlugin):
             songs = self.import_yt_playlist(playlist_url)
         else:
             songs = []
-            raise ui.UserError('Playlist URL not supported')
-        print(songs)
+            self._log.error('Playlist URL not supported')
         song_list = []
-        for song in songs:
-            if self.search_plex_song(song) is not None:
-                found = self.search_plex_song(song)
-                song_dict = {"title": found.title, "album": found.parentTitle,
-                             "plex_ratingkey": found.ratingKey}
-                song_list.append(self.dotdict(song_dict))
+        if songs:
+            for song in songs:
+                if self.search_plex_song(song) is not None:
+                    found = self.search_plex_song(song)
+                    song_dict = {"title": found.title,
+                                 "album": found.parentTitle,
+                                 "plex_ratingkey": found.ratingKey}
+                    song_list.append(self.dotdict(song_dict))
         self._plex_add_playlist_item(song_list, playlist)
 
     def _plex_clear_playlist(self, playlist):
