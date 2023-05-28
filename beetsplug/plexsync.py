@@ -669,8 +669,6 @@ class PlexSync(BeetsPlugin):
         """Import playlist into Plex."""
         if "http://" not in playlist_url and "https://" not in playlist_url:
             raise ui.UserError('Playlist URL not provided')
-        self._log.info('Adding tracks from {} into {} playlist',
-                       playlist_url, playlist)
         if "apple" in playlist_url:
             songs = self.import_apple_playlist(playlist_url)
         elif "jiosaavn" in playlist_url:
