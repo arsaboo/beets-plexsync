@@ -68,7 +68,7 @@ The following features are implemented in `plexsync`:
 
    ** To remove all tracks that are rated less than 5 from the `Country` playlist, use the command `beet plexplaylistremove -m Country plex_userrating:..5`
 
-* `beet plexplaylistimport`: allows you to import playlists from other online services. Spotify, Apple Music, Gaana.com, JioSaavn are currently supported (more coming soon). Use the `-m` flag to specify the playlist name to be created in Plex and supply the full playlist url with the `-u` flag.
+* `beet plexplaylistimport`: allows you to import playlists from other online services. Spotify, Apple Music, Gaana.com, JioSaavn, Youtube, and Tidal are currently supported. Use the `-m` flag to specify the playlist name to be created in Plex and supply the full playlist url with the `-u` flag.
 
   For example, to import the Global Top-100 Apple Music playlist, use the command `beet plexplaylistimport -m Top-100 -u https://music.apple.com/us/playlist/top-100-global/pl.d25f5d1181894928af76c85c967f8f31`. Similarly, to import the Hot-hits USA playlist from Spotify, use the command `beet plexplaylistimport -m HotHitsUSA -u https://open.spotify.com/playlist/37i9dQZF1DX0kbJZpiYdZl`
 
