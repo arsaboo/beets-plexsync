@@ -856,7 +856,11 @@ class PlexSync(BeetsPlugin):
         return obj
 
     def import_yt_playlist(self, url):
-        from beetsplug.youtube import YouTubePlugin
+        try:
+            from beetsplug.youtube import YouTubePlugin
+        except ModuleNotFoundError:
+            self._log.error('YouTube plugin not installed')
+            return
         try:
             ytp = YouTubePlugin()
         except Exception as e:
