@@ -682,6 +682,8 @@ class PlexSync(BeetsPlugin):
                 self.get_playlist_id(playlist_url))
         elif "youtube" in playlist_url:
             songs = self.import_yt_playlist(playlist_url)
+        elif "tidal" in playlist_url:
+            songs = self.import_tidal_playlist(playlist_url)
         else:
             songs = []
             self._log.error('Playlist URL not supported')
@@ -882,3 +884,17 @@ class PlexSync(BeetsPlugin):
                 'Unable to initialize YouTube plugin. Error: {}', e)
             return
         return ytp.import_youtube_playlist(url)
+
+    def import_tidal_playlist(self, url):
+        try:
+            from beetsplug.tidal import TidalPlugin
+        except ModuleNotFoundError:
+            self._log.error('Tidal plugin not installed')
+            return
+        try:
+            tidal = TidalPlugin()
+        except Exception as e:
+            self._log.error(
+                'Unable to initialize Tidal plugin. Error: {}', e)
+            return
+        return tidal.import_tidal_playlist(url)
