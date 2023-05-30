@@ -866,8 +866,11 @@ class PlexSync(BeetsPlugin):
         startIndex = jsonString.index('{')
         endIndex = jsonString.rindex('}')
         jsonSubstring = jsonString[startIndex:endIndex + 1]
-        obj = json.loads(jsonSubstring)
-        return obj
+        try:
+            return json.loads(jsonSubstring)
+        except Exception as e:
+            self._log.error('Unable to parse JSON. Error: {}', e)
+            return
 
     def import_yt_playlist(self, url):
         try:
