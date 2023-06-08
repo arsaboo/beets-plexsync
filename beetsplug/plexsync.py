@@ -603,7 +603,7 @@ class PlexSync(BeetsPlugin):
     def search_plex_song(self, song, manual_search=False):
         """Fetch the Plex track key."""
 
-        if song['album'] == "":
+        if song['album'] is None:
             tracks = self.music.searchTracks(**{'track.title': song['title']})
         else:
             tracks = self.music.searchTracks(
