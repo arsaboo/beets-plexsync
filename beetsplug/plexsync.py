@@ -769,6 +769,7 @@ class PlexSync(BeetsPlugin):
         for index, image in enumerate(images):
             x = thumbnail_size * (index % grid_size)
             y = thumbnail_size * math.floor(index / grid_size)
+            self._log.debug('x: {}, y: {}', x, y)
             grid.paste(image, box=(x, y))
             # grid.paste(image,
             #            box=(thumbnail_size * (index % dimension),
