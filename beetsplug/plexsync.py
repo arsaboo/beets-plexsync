@@ -769,17 +769,13 @@ class PlexSync(BeetsPlugin):
         for index, image in enumerate(images):
             x = thumbnail_size * (index % dimension)
             y = thumbnail_size * math.floor(index / dimension)
-            self._log.debug('x: {}, y: {}', x, y)
             grid.paste(image, box=(x, y))
-            # grid.paste(image,
-            #            box=(thumbnail_size * (index % dimension),
-            #                 thumbnail_size * math.floor(index / dimension)))
         return grid
 
     def _plex_sonicsage(self, number, prompt, playlist, clear):
         """
-        Generate song recommendations using OpenAI's GPT-3 model based on a given prompt,
-        and add the recommended songs to a Plex playlist.
+        Generate song recommendations using OpenAI's GPT-3 model based on a
+        given prompt, and add the recommended songs to a Plex playlist.
 
         Args:
             number (int): The number of song recommendations to generate.
