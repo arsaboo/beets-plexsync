@@ -767,7 +767,7 @@ class PlexSync(BeetsPlugin):
         grid = Image.new('RGB', size=(grid_size, grid_size))
         # Paste the images into the grid
         for index, image in enumerate(images):
-            x = thumbnail_size * (index % grid_size)
+            x = thumbnail_size * (index % dimension)
             y = thumbnail_size * math.floor(index / dimension)
             self._log.debug('x: {}, y: {}', x, y)
             grid.paste(image, box=(x, y))
