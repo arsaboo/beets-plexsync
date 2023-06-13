@@ -767,9 +767,12 @@ class PlexSync(BeetsPlugin):
         grid = Image.new('RGB', size=(grid_size, grid_size))
         # Paste the images into the grid
         for index, image in enumerate(images):
-            grid.paste(image,
-                       box=(thumbnail_size * (index % dimension),
-                            thumbnail_size * math.floor(index / dimension)))
+            x = thumbnail_size * (index % grid_size)
+            y = thumbnail_size * math.floor(index / grid_size)
+            grid.paste(image, box=(x, y))
+            # grid.paste(image,
+            #            box=(thumbnail_size * (index % dimension),
+            #                 thumbnail_size * math.floor(index / dimension)))
         return grid
 
     def _plex_sonicsage(self, number, prompt, playlist, clear):
