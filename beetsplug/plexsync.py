@@ -829,6 +829,10 @@ class PlexSync(BeetsPlugin):
     def chat_gpt_song_rec(self, number, prompt):
         import openai
         openai.api_key = config['openai']['api_key'].get()
+        try:
+            openai.api_base = config['openai']['api_base'].get()
+        except:
+            pass
         model = config['openai']['model'].get()
         num_songs = int(number)
         sys_prompt = (
