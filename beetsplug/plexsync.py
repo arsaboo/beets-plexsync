@@ -261,12 +261,32 @@ class PlexSync(BeetsPlugin):
                                              help='name of the playlist to be \
                                                  added in Plex')
         playlistimport_cmd.parser.add_option('-u', '--url', default='',
-                                             help='playlist URL to be imported in Plex')
+                                             help='playlist URL to be imported\
+                                                  in Plex')
 
         def func_playlist_import(lib, opts, args):
             self._plex_import_playlist(opts.playlist, opts.url)
 
         playlistimport_cmd.func = func_playlist_import
+
+        # plexsearchimport command
+        searchimport_cmd = ui.Subcommand('plexsearchimport',
+                                         help="import playlist in to Plex \
+                                            based on Youtube search")
+        searchimport_cmd.parser.add_option('-m', '--playlist',
+                                           default='Beets',
+                                           help='name of the playlist to be \
+                                           added in Plex')
+        searchimport_cmd.parser.add_option('-s', '--search', default='',
+                                           help='Create playlist based on \
+                                           Youtube search in Plex')
+        searchimport_cmd.parser.add_option('-l', '--limit', default=10,
+                                           help='Number of tracks')
+
+        def func_search_import(lib, opts, args):
+            self._plex_import_search(opts.playlist, opts.search, opts.limit)
+
+        searchimport_cmd.func = func_search_import
 
         # plexplaylistclear command
         playlistclear_cmd = ui.Subcommand('plexplaylistclear',
@@ -320,7 +340,7 @@ class PlexSync(BeetsPlugin):
 
         return [plexupdate_cmd, sync_cmd, playlistadd_cmd, playlistrem_cmd,
                 syncrecent_cmd, playlistimport_cmd, playlistclear_cmd,
-                collage_cmd, sonicsage_cmd]
+                collage_cmd, sonicsage_cmd, searchimport_cmd]
 
     def parse_title(self, title_orig):
         if "(From \"" in title_orig:
@@ -696,6 +716,19 @@ class PlexSync(BeetsPlugin):
                     song_list.append(self.dotdict(song_dict))
         self._plex_add_playlist_item(song_list, playlist)
 
+    def _plex_import_search(self, playlist, search, limit=10):
+        """Import search results into Plex."""
+        self._log.info('Searching for {}', search)
+        songs = self.import_yt_search(search, limit)
+        song_list = []
+        if songs:
+            for song in songs:
+                song_dict = {"title": song.title,
+                             "album": song.parentTitle,
+                             "plex_ratingkey": song.ratingKey}
+                song_list.append(self.dotdict(song_dict))
+        self._plex_add_playlist_item(song_list, playlist)
+
     def _plex_clear_playlist(self, playlist):
         """Clear Plex playlist."""
         # Get the playlist
@@ -831,7 +864,7 @@ class PlexSync(BeetsPlugin):
         openai.api_key = config['openai']['api_key'].get()
         try:
             openai.api_base = config['openai']['api_base'].get()
-        except:
+        except Exception:
             pass
         model = config['openai']['model'].get()
         num_songs = int(number)
@@ -889,6 +922,20 @@ class PlexSync(BeetsPlugin):
                 'Unable to initialize YouTube plugin. Error: {}', e)
             return
         return ytp.import_youtube_playlist(url)
+
+    def import_yt_search(self, query, limit):
+        try:
+            from beetsplug.youtube import YouTubePlugin
+        except ModuleNotFoundError:
+            self._log.error('YouTube plugin not installed')
+            return
+        try:
+            ytp = YouTubePlugin()
+        except Exception as e:
+            self._log.error(
+                'Unable to initialize YouTube plugin. Error: {}', e)
+            return
+        return ytp.import_youtube_search(query, limit)    
 
     def import_tidal_playlist(self, url):
         try:
