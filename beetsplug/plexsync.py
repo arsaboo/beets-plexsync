@@ -424,7 +424,7 @@ class PlexSync(BeetsPlugin):
         # list as a new list
         return [m[0] for m in matches]
 
-    def import_gaana_playlist(self, playlist_url):
+    def import_gaana_playlist_old(self, playlist_url):
         # Make a GET request to the playlist url
         response = requests.get(playlist_url)
         # Check if the response is successful
@@ -694,7 +694,7 @@ class PlexSync(BeetsPlugin):
         elif "jiosaavn" in playlist_url:
             songs = self.import_jiosaavn_playlist(playlist_url)
         elif "gaana.com" in playlist_url:
-            songs = self.import_gaana_playlist2(playlist_url)
+            songs = self.import_gaana_playlist(playlist_url)
         elif "spotify" in playlist_url:
             songs = self.import_spotify_playlist(
                 self.get_playlist_id(playlist_url))
@@ -953,7 +953,7 @@ class PlexSync(BeetsPlugin):
             return
         return tidal.import_tidal_playlist(url)
 
-    def import_gaana_playlist2(self, url):
+    def import_gaana_playlist(self, url):
         try:
             from beetsplug.gaana import GaanaPlugin
         except ModuleNotFoundError:
