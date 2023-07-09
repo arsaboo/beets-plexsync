@@ -694,7 +694,7 @@ class PlexSync(BeetsPlugin):
         elif "jiosaavn" in playlist_url:
             songs = self.import_jiosaavn_playlist(playlist_url)
         elif "gaana.com" in playlist_url:
-            songs = self.import_gaana_playlist(playlist_url)
+            songs = self.import_gaana_playlist2(playlist_url)
         elif "spotify" in playlist_url:
             songs = self.import_spotify_playlist(
                 self.get_playlist_id(playlist_url))
@@ -952,3 +952,18 @@ class PlexSync(BeetsPlugin):
                 'Unable to initialize Tidal plugin. Error: {}', e)
             return
         return tidal.import_tidal_playlist(url)
+
+    def import_gaana_playlist2(self, url):
+        try:
+            from beetsplug.gaana import GaanaPlugin
+        except ModuleNotFoundError:
+            self._log.error('Gaana plugin not installed. \
+                            See https://github.com/arsaboo/beets-gaana')
+            return
+        try:
+            gaana = GaanaPlugin()
+        except Exception as e:
+            self._log.error(
+                'Unable to initialize Gaana plugin. Error: {}', e)
+            return
+        return gaana.import_gaana_playlist(url)
