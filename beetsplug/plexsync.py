@@ -772,7 +772,8 @@ class PlexSync(BeetsPlugin):
             history = album.history(mindate=frm_dt)
             album.count = len(history)
         # sort the albums according to the number of times they were played
-        sorted_albums = sorted(albums, key=lambda x: x.count, reverse=True)
+        sorted_albums = sorted(albums, key=lambda x: (x.count, x.lastViewedAt),
+                               reverse=True)
         # print the top 10 albums. Use this only in debug mode
         for album in sorted_albums[:10]:
             self._log.debug('{} played {} times',
