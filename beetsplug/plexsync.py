@@ -577,7 +577,7 @@ class PlexSync(BeetsPlugin):
         plex_set = set()
         try:
             plst = self.plex.playlist(playlist)
-            playlist_set = set(plst.items())
+            playlist_set = {item.ratingKey for item in plst.items()}
         except exceptions.NotFound:
             self._log.error('{} playlist not found', playlist)
             return
