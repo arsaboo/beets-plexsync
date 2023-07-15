@@ -746,12 +746,10 @@ class PlexSync(BeetsPlugin):
         """Create a collage of most played albums."""
         self._log.info('Creating collage of most played albums in the last {} '
                        'days', interval)
-        tot = int(grid) ** 2
         interval2 = str(interval) + 'd'
-        albums = self.music.search(filters={'album.lastViewedAt>>': interval2},
-                                   sort="viewCount:desc", libtype='album',
-                                   maxresults=tot)
-        sorted = self._plex_most_played_albums(albums, int(interval))
+        tracks = self.music.search(filters={'track.lastViewedAt>>': interval2},
+                                   sort="viewCount:desc", libtype='track')
+        sorted = self._plex_most_played_albums(tracks, int(interval))
         # Create a list of album art
         album_art = []
         for album in sorted:
@@ -763,16 +761,21 @@ class PlexSync(BeetsPlugin):
             self._log.error('Unable to save collage. Error: {}', e)
             return
 
-    def _plex_most_played_albums(self, albums, interval):
-        """Return a list of most played albums in the last `interval` days."""
+    def _plex_most_played_albums(self, tracks, interval):
         from datetime import datetime, timedelta
         now = datetime.now
-        for album in albums:
+        album = []
+        for track in tracks:
             frm_dt = now() - timedelta(days=interval)
-            history = album.history(mindate=frm_dt)
-            album.count = len(history)
+            history = track.history(mindate=frm_dt)
+            track.count = len(history)
+            if track.album() not in album:
+                album.append(track.album())
+                album[track.album()] = track.count
+            else:
+                album[track.album()] += track.count
         # sort the albums according to the number of times they were played
-        sorted_albums = sorted(albums, key=lambda x: (x.count, x.lastViewedAt),
+        sorted_albums = sorted(album, key=lambda x: (x.count, x.lastViewedAt),
                                reverse=True)
         # print the top 10 albums. Use this only in debug mode
         for album in sorted_albums:
