@@ -765,19 +765,21 @@ class PlexSync(BeetsPlugin):
         from datetime import datetime, timedelta
         now = datetime.now
         album = []
+        # save album object, parenttitle, thumburl, and viewcount in album list
         for track in tracks:
             frm_dt = now() - timedelta(days=interval)
             history = track.history(mindate=frm_dt)
-            track.count = len(history)
-            if track.album() not in album:
-                album.append(track.album())
-                album[track.album()] = track.count
+            count = len(history)
+            if track.parentTitle not in album:
+                album.append([track.album(), track.parentTitle, count])
             else:
-                album[track.album()] += track.count
-        # sort the albums according to the number of times they were played
-        sorted_albums = sorted(album, key=lambda x: (x.count, x.lastViewedAt),
-                               reverse=True)
-        # print the top 10 albums. Use this only in debug mode
+                for i in album:
+                    if i[1] == track.parentTitle:
+                        i[2] += count
+        # sort album list by viewcount
+        sorted_albums = sorted(album, key=lambda x: x[2], reverse=True)
+        # only return the album objects, not the other info
+        sorted_albums = [i[0] for i in sorted_albums]
         for album in sorted_albums:
             self._log.debug('{} played {} times and last played on {}',
                             album.title, album.count, album.lastViewedAt)
