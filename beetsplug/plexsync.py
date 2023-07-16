@@ -309,7 +309,7 @@ class PlexSync(BeetsPlugin):
         collage_cmd.parser.add_option('-i', '--interval', default=7,
                                       help='days to look back for history')
         collage_cmd.parser.add_option('-g', '--grid', default=3,
-                                      help='dimension of the collage grid') 
+                                      help='dimension of the collage grid')
 
         def func_collage(lib, opts, args):
             self._plex_collage(opts.interval, opts.grid)
@@ -329,9 +329,9 @@ class PlexSync(BeetsPlugin):
                                         help='name of the playlist to be \
                                             added in Plex')
         sonicsage_cmd.parser.add_option('-c', '--clear', dest='clear',
-                                        default=False, 
+                                        default=False,
                                         help='Clear playlist if not empty')
-        
+
         def func_sonic(lib, opts, args):
             self._plex_sonicsage(opts.number, opts.prompt, opts.playlist,
                                  opts.clear)
@@ -420,7 +420,7 @@ class PlexSync(BeetsPlugin):
             matches.append((t, score))
         # Sort the matches list by the score in descending order
         matches.sort(key=lambda x: x[1], reverse=True)
-        # Return only the first element of each tuple in the matches 
+        # Return only the first element of each tuple in the matches
         # list as a new list
         return [m[0] for m in matches]
 
@@ -672,7 +672,7 @@ class PlexSync(BeetsPlugin):
     def manual_track_search(self):
         """Manually search for a track in the Plex library.
 
-        Prompts the user to enter the title, album, and artist of the track 
+        Prompts the user to enter the title, album, and artist of the track
         they want to search for.
         Calls the `search_plex_song` method with the provided information and
         sets the `manual_search` flag to True.
@@ -746,12 +746,10 @@ class PlexSync(BeetsPlugin):
         """Create a collage of most played albums."""
         self._log.info('Creating collage of most played albums in the last {} '
                        'days', interval)
-        tot = int(grid) ** 2
         interval2 = str(interval) + 'd'
-        albums = self.music.search(filters={'album.lastViewedAt>>': interval2},
-                                   sort="viewCount:desc", libtype='album',
-                                   maxresults=tot)
-        sorted = self._plex_most_played_albums(albums, int(interval))
+        tracks = self.music.search(filters={'track.lastViewedAt>>': interval2},
+                                   sort="viewCount:desc", libtype='track')
+        sorted = self._plex_most_played_albums(tracks, int(interval))
         # Create a list of album art
         album_art = []
         for album in sorted:
@@ -763,20 +761,30 @@ class PlexSync(BeetsPlugin):
             self._log.error('Unable to save collage. Error: {}', e)
             return
 
-    def _plex_most_played_albums(self, albums, interval):
-        """Return a list of most played albums in the last `interval` days."""
+    def _plex_most_played_albums(self, tracks, interval):
         from datetime import datetime, timedelta
         now = datetime.now
-        for album in albums:
-            frm_dt = now() - timedelta(days=interval)
-            history = album.history(mindate=frm_dt)
-            album.count = len(history)
-        # sort the albums according to the number of times they were played
-        sorted_albums = sorted(albums, key=lambda x: x.count, reverse=True)
-        # print the top 10 albums. Use this only in debug mode
-        for album in sorted_albums[:10]:
-            self._log.debug('{} played {} times',
-                            album.title, album.count)
+        frm_dt = now() - timedelta(days=interval)
+        album = []
+        # save album object, parenttitle, thumburl, and viewcount in album list
+        for track in tracks:
+            history = track.history(mindate=frm_dt)
+            count = len(history)
+            if track.parentTitle not in [a[1] for a in album]:
+                album.append([track.album(), track.parentTitle, count])
+            else:
+                for i in album:
+                    if i[1] == track.parentTitle:
+                        i[2] += count
+        # sort album list by viewcount
+        sorted_albums = sorted(album, key=lambda x: x[2], reverse=True)
+        # only return the album objects and add count to the album object
+        for album in sorted_albums:
+            album[0].count = album[2]
+        # sort album objects by viewcount
+        sorted_albums = [i[0] for i in sorted_albums]
+        for album in sorted_albums:
+            self._log.debug('{} played {} times', album.title, album.count)
         return sorted_albums
 
     def create_collage(self, list_image_urls, dimension):
@@ -937,7 +945,7 @@ class PlexSync(BeetsPlugin):
             self._log.error(
                 'Unable to initialize YouTube plugin. Error: {}', e)
             return
-        return ytp.import_youtube_search(query, limit)    
+        return ytp.import_youtube_search(query, limit)
 
     def import_tidal_playlist(self, url):
         try:
