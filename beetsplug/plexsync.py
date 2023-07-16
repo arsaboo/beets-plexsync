@@ -778,11 +778,13 @@ class PlexSync(BeetsPlugin):
                         i[2] += count
         # sort album list by viewcount
         sorted_albums = sorted(album, key=lambda x: x[2], reverse=True)
-        # only return the album objects, not the other info
+        # only return the album objects and add count to the album object
+        for album in sorted_albums:
+            album[0].count = album[2]
+        # sort album objects by viewcount
         sorted_albums = [i[0] for i in sorted_albums]
         for album in sorted_albums:
-            self._log.debug('{} played {} times and last played on {}',
-                            album.title, album.count, album.lastViewedAt)
+            self._log.debug('{} played {} times', album.title, album.count)
         return sorted_albums
 
     def create_collage(self, list_image_urls, dimension):
