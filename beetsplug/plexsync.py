@@ -770,7 +770,7 @@ class PlexSync(BeetsPlugin):
             frm_dt = now() - timedelta(days=interval)
             history = track.history(mindate=frm_dt)
             count = len(history)
-            if track.parentTitle not in album:
+            if track.parentTitle not in [a[1] for a in album]:
                 album.append([track.album(), track.parentTitle, count])
             else:
                 for i in album:
