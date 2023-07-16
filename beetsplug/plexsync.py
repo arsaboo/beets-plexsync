@@ -309,7 +309,7 @@ class PlexSync(BeetsPlugin):
         collage_cmd.parser.add_option('-i', '--interval', default=7,
                                       help='days to look back for history')
         collage_cmd.parser.add_option('-g', '--grid', default=3,
-                                      help='dimension of the collage grid') 
+                                      help='dimension of the collage grid')
 
         def func_collage(lib, opts, args):
             self._plex_collage(opts.interval, opts.grid)
@@ -329,9 +329,9 @@ class PlexSync(BeetsPlugin):
                                         help='name of the playlist to be \
                                             added in Plex')
         sonicsage_cmd.parser.add_option('-c', '--clear', dest='clear',
-                                        default=False, 
+                                        default=False,
                                         help='Clear playlist if not empty')
-        
+
         def func_sonic(lib, opts, args):
             self._plex_sonicsage(opts.number, opts.prompt, opts.playlist,
                                  opts.clear)
@@ -420,7 +420,7 @@ class PlexSync(BeetsPlugin):
             matches.append((t, score))
         # Sort the matches list by the score in descending order
         matches.sort(key=lambda x: x[1], reverse=True)
-        # Return only the first element of each tuple in the matches 
+        # Return only the first element of each tuple in the matches
         # list as a new list
         return [m[0] for m in matches]
 
@@ -672,7 +672,7 @@ class PlexSync(BeetsPlugin):
     def manual_track_search(self):
         """Manually search for a track in the Plex library.
 
-        Prompts the user to enter the title, album, and artist of the track 
+        Prompts the user to enter the title, album, and artist of the track
         they want to search for.
         Calls the `search_plex_song` method with the provided information and
         sets the `manual_search` flag to True.
@@ -764,10 +764,10 @@ class PlexSync(BeetsPlugin):
     def _plex_most_played_albums(self, tracks, interval):
         from datetime import datetime, timedelta
         now = datetime.now
+        frm_dt = now() - timedelta(days=interval)
         album = []
         # save album object, parenttitle, thumburl, and viewcount in album list
         for track in tracks:
-            frm_dt = now() - timedelta(days=interval)
             history = track.history(mindate=frm_dt)
             count = len(history)
             if track.parentTitle not in [a[1] for a in album]:
@@ -945,7 +945,7 @@ class PlexSync(BeetsPlugin):
             self._log.error(
                 'Unable to initialize YouTube plugin. Error: {}', e)
             return
-        return ytp.import_youtube_search(query, limit)    
+        return ytp.import_youtube_search(query, limit)
 
     def import_tidal_playlist(self, url):
         try:
