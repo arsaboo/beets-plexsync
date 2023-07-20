@@ -269,6 +269,20 @@ class PlexSync(BeetsPlugin):
 
         playlistimport_cmd.func = func_playlist_import
 
+        # plexplaylist2collection command
+        plexplaylist2collection_cmd = ui.Subcommand('plexplaylist2collection')
+
+        plexplaylist2collection_cmd.parser.add_option('-m', '--playlist',
+                                                      default='Beets',
+                                                      help='name of the \
+                                                      playlist to be \
+                                                      converted')
+
+        def func_playlist2collection(lib, opts, args):
+            self._plex_playlist_to_collection(opts.playlist)
+
+        plexplaylist2collection_cmd.func = func_playlist2collection
+
         # plexsearchimport command
         searchimport_cmd = ui.Subcommand('plexsearchimport',
                                          help="import playlist in to Plex \
@@ -340,7 +354,8 @@ class PlexSync(BeetsPlugin):
 
         return [plexupdate_cmd, sync_cmd, playlistadd_cmd, playlistrem_cmd,
                 syncrecent_cmd, playlistimport_cmd, playlistclear_cmd,
-                collage_cmd, sonicsage_cmd, searchimport_cmd]
+                collage_cmd, sonicsage_cmd, searchimport_cmd,
+                plexplaylist2collection_cmd]
 
     def parse_title(self, title_orig):
         if "(From \"" in title_orig:
@@ -570,6 +585,34 @@ class PlexSync(BeetsPlugin):
             except exceptions.BadRequest as e:
                 self._log.error(
                     'Error adding items {} to {} playlist. Error: {}',
+                    items, playlist, e)
+
+    def _plex_playlist_to_collection(self, playlist):
+        """Convert a Plex playlist to a Plex collection."""
+        try:
+            plst = self.music.playlist(playlist)
+            playlist_set = set(plst.items())
+        except exceptions.NotFound:
+            self._log.error('{} playlist not found', playlist)
+            return
+        try:
+            col = self.music.collection(playlist)
+            collection_set = set(col.items())
+        except exceptions.NotFound:
+            col = None
+            collection_set = set()
+        to_add = playlist_set - collection_set
+        self._log.info('Adding {} tracks to {} collection',
+                       len(to_add), playlist)
+        if col is None:
+            self._log.info('{} collection will be created', playlist)
+            self.music.createCollection(playlist, items=list(to_add))
+        else:
+            try:
+                col.addItems(items=list(to_add))
+            except exceptions.BadRequest as e:
+                self._log.error(
+                    'Error adding items {} to {} collection. Error: {}',
                     items, playlist, e)
 
     def _plex_remove_playlist_item(self, items, playlist):
