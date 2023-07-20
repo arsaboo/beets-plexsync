@@ -606,7 +606,7 @@ class PlexSync(BeetsPlugin):
                        len(to_add), playlist)
         if col is None:
             self._log.info('{} collection will be created', playlist)
-            self.plex.createCollection(playlist, items=list(to_add))
+            self.music.createCollection(playlist, items=list(to_add))
         else:
             try:
                 col.addItems(items=list(to_add))
