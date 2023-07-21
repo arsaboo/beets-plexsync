@@ -641,27 +641,25 @@ class PlexSync(BeetsPlugin):
         tracks = self.music.search(
             filters={'track.lastViewedAt>>': '7d'}, libtype='track')
         self._log.info("Updating information for {} tracks", len(tracks))
+        items = []
+        for track in tracks:
+            query = MatchQuery("plex_ratingkey", track.ratingKey, fast=False)
+            items.extend(lib.items(query))
+        if not items:
+            self._log.debug("No items found")
+            return
+        self._log.info("Updating information for {} items", len(items))
         with lib.transaction():
-            for track in tracks:
-                query = MatchQuery("plex_ratingkey", track.ratingKey,
-                                   fast=False)
-                items = lib.items(query)
-                if not items:
-                    self._log.debug("{} | track not found", query)
-                    continue
-                elif len(items) == 1:
-                    self._log.info("Updating information for {} ", items[0])
-                    items[0].plex_userrating = track.userRating
-                    items[0].plex_skipcount = track.skipCount
-                    items[0].plex_viewcount = track.viewCount
-                    items[0].plex_lastviewedat = track.lastViewedAt
-                    items[0].plex_lastratedat = track.lastRatedAt
-                    items[0].plex_updated = time.time()
-                    items[0].store()
-                    items[0].try_write()
-                else:
-                    self._log.debug("Please sync Plex library again")
-                    continue
+            for item in items:
+                item.plex_userrating = item.track.userRating
+                item.plex_skipcount = item.track.skipCount
+                item.plex_viewcount = item.track.viewCount
+                item.plex_lastviewedat = item.track.lastViewedAt
+                item.plex_lastratedat = item.track.lastRatedAt
+                item.plex_updated = time.time()
+            lib._memotable.clear()
+            lib.store(items)
+        self._log.info("Updated information for {} items", len(items))
 
     def search_plex_song(self, song, manual_search=False):
         """Fetch the Plex track key."""
