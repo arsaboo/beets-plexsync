@@ -670,15 +670,20 @@ class PlexSync(BeetsPlugin):
     def search_plex_song(self, song, manual_search=False):
         """Fetch the Plex track key."""
 
-        if song['album'] is None:
-            tracks = self.music.searchTracks(**{'track.title': song['title']})
-        else:
-            tracks = self.music.searchTracks(
-                **{'album.title': song['album'],
-                   'track.title': song['title']})
-            if len(tracks) == 0:
+        try:
+            if song['album'] is None:
+                tracks = self.music.searchTracks(**{'track.title': song['title']})
+            else:
                 tracks = self.music.searchTracks(
-                    **{'track.title': song['title']})
+                    **{'album.title': song['album'],
+                       'track.title': song['title']})
+                if len(tracks) == 0:
+                    tracks = self.music.searchTracks(
+                        **{'track.title': song['title']})
+        except exceptions as e:
+            self._log.debug('Error searching for {} - {}. Error: {}',
+                            song['album'], song['title'], e)
+            return None
         artist = song['artist'].split(",")[0]
         if len(tracks) == 1:
             return tracks[0]
