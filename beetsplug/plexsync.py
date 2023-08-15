@@ -758,6 +758,7 @@ class PlexSync(BeetsPlugin):
             songs = []
             self._log.error('Playlist URL not supported')
         song_list = []
+        self._log.info('Importing {} songs from {}', len(songs), playlist_url)
         if songs:
             for song in songs:
                 if self.search_plex_song(song) is not None:
