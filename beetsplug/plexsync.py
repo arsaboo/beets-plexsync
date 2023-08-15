@@ -477,30 +477,30 @@ class PlexSync(BeetsPlugin):
                             {response.status_code}")
 
     def import_apple_playlist(self, url):
+        import json
         # Send a GET request to the URL and get the HTML content
         response = requests.get(url)
         content = response.text
 
         # Create a BeautifulSoup object with the HTML content
         soup = BeautifulSoup(content, "html.parser")
+        data = soup.find("script", id="serialized-server-data").text
+        # load the data as a JSON object
+        data = json.loads(data)
+        songs = data[0]["data"]["sections"][1]["items"]
 
-        # Find all the song elements on the page
-        songs = soup.find_all("div", class_="songs-list-row")
         # Create an empty list to store the songs
         song_list = []
         # Loop through each song element
         for song in songs:
             # Find and store the song title
-            title_orig = song.find("div", class_="songs-list-row__song-name").\
-                text.strip()
-            title, album = self.parse_title(title_orig)
+            title = song['title'].strip()
+            album = song['tertiaryLinks'][0]['title']
             # Find and store the song artist
-            artist = song.find(
-                "div", class_="songs-list-row__by-line").\
-                text.strip().replace("\n", "").replace("  ", "")
+            artist = song['subtitleLinks'][0]['title']
             # Create a dictionary with the song information
             song_dict = {"title": title.strip(),
-                         "album": album.strip(), "artist": artist.strip()}
+                        "album": album.strip(), "artist": artist.strip()}
             # Append the dictionary to the list of songs
             song_list.append(song_dict)
         return song_list
