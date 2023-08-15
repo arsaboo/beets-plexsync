@@ -484,7 +484,11 @@ class PlexSync(BeetsPlugin):
 
         # Create a BeautifulSoup object with the HTML content
         soup = BeautifulSoup(content, "html.parser")
-        data = soup.find("script", id="serialized-server-data").text
+        try:
+            data = soup.find("script", id="serialized-server-data").text
+        except:
+            self._log.debug('Error parsing Apple Music playlist')
+            return None
         # load the data as a JSON object
         data = json.loads(data)
         songs = data[0]["data"]["sections"][1]["items"]
@@ -500,7 +504,7 @@ class PlexSync(BeetsPlugin):
             artist = song['subtitleLinks'][0]['title']
             # Create a dictionary with the song information
             song_dict = {"title": title.strip(),
-                        "album": album.strip(), "artist": artist.strip()}
+                         "album": album.strip(), "artist": artist.strip()}
             # Append the dictionary to the list of songs
             song_list.append(song_dict)
         return song_list
