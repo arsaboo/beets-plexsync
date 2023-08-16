@@ -477,27 +477,31 @@ class PlexSync(BeetsPlugin):
                             {response.status_code}")
 
     def import_apple_playlist(self, url):
+        import json
         # Send a GET request to the URL and get the HTML content
         response = requests.get(url)
         content = response.text
 
         # Create a BeautifulSoup object with the HTML content
         soup = BeautifulSoup(content, "html.parser")
+        try:
+            data = soup.find("script", id="serialized-server-data").text
+        except:
+            self._log.debug('Error parsing Apple Music playlist')
+            return None
+        # load the data as a JSON object
+        data = json.loads(data)
+        songs = data[0]["data"]["sections"][1]["items"]
 
-        # Find all the song elements on the page
-        songs = soup.find_all("div", class_="songs-list-row")
         # Create an empty list to store the songs
         song_list = []
         # Loop through each song element
         for song in songs:
             # Find and store the song title
-            title_orig = song.find("div", class_="songs-list-row__song-name").\
-                text.strip()
-            title, album = self.parse_title(title_orig)
+            title = song['title'].strip()
+            album = song['tertiaryLinks'][0]['title']
             # Find and store the song artist
-            artist = song.find(
-                "div", class_="songs-list-row__by-line").\
-                text.strip().replace("\n", "").replace("  ", "")
+            artist = song['subtitleLinks'][0]['title']
             # Create a dictionary with the song information
             song_dict = {"title": title.strip(),
                          "album": album.strip(), "artist": artist.strip()}
@@ -651,14 +655,18 @@ class PlexSync(BeetsPlugin):
                     continue
                 elif len(items) == 1:
                     self._log.info("Updating information for {} ", items[0])
-                    items[0].plex_userrating = track.userRating
-                    items[0].plex_skipcount = track.skipCount
-                    items[0].plex_viewcount = track.viewCount
-                    items[0].plex_lastviewedat = track.lastViewedAt
-                    items[0].plex_lastratedat = track.lastRatedAt
-                    items[0].plex_updated = time.time()
-                    items[0].store()
-                    items[0].try_write()
+                    try:
+                        items[0].plex_userrating = track.userRating
+                        items[0].plex_skipcount = track.skipCount
+                        items[0].plex_viewcount = track.viewCount
+                        items[0].plex_lastviewedat = track.lastViewedAt
+                        items[0].plex_lastratedat = track.lastRatedAt
+                        items[0].plex_updated = time.time()
+                        items[0].store()
+                        items[0].try_write()
+                    except exceptions.NotFound:
+                        self._log.debug("{} | track not found", items[0])
+                        continue
                 else:
                     self._log.debug("Please sync Plex library again")
                     continue
@@ -666,15 +674,20 @@ class PlexSync(BeetsPlugin):
     def search_plex_song(self, song, manual_search=False):
         """Fetch the Plex track key."""
 
-        if song['album'] is None:
-            tracks = self.music.searchTracks(**{'track.title': song['title']})
-        else:
-            tracks = self.music.searchTracks(
-                **{'album.title': song['album'],
-                   'track.title': song['title']})
-            if len(tracks) == 0:
+        try:
+            if song['album'] is None:
+                tracks = self.music.searchTracks(**{'track.title': song['title']})
+            else:
                 tracks = self.music.searchTracks(
-                    **{'track.title': song['title']})
+                    **{'album.title': song['album'],
+                       'track.title': song['title']})
+                if len(tracks) == 0:
+                    tracks = self.music.searchTracks(
+                        **{'track.title': song['title']})
+        except exceptions as e:
+            self._log.debug('Error searching for {} - {}. Error: {}',
+                            song['album'], song['title'], e)
+            return None
         artist = song['artist'].split(",")[0]
         if len(tracks) == 1:
             return tracks[0]
@@ -749,6 +762,7 @@ class PlexSync(BeetsPlugin):
             songs = []
             self._log.error('Playlist URL not supported')
         song_list = []
+        self._log.info('Importing {} songs from {}', len(songs), playlist_url)
         if songs:
             for song in songs:
                 if self.search_plex_song(song) is not None:
