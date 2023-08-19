@@ -1084,7 +1084,7 @@ class PlexSync(BeetsPlugin):
                     self._log.debug(f'Searching for {beets_item.title} '
                                     f'{beets_item.album} in Spotify')
                     spotify_search_results = self.sp.search(
-                        q=f'{beets_item.title} {beets_item.album}',
+                        q=f'track:{beets_item.title} album:{beets_item.album}',
                         limit=1, type='track')
                     self._log.debug(f'Spotify search results: '
                                     f'{spotify_search_results}')
