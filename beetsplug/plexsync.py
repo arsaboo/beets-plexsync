@@ -1083,6 +1083,7 @@ class PlexSync(BeetsPlugin):
                     # get the spotify track id
                     spotify_track_id = spotify_search_results['tracks']['items'][0]['id']
                 spotify_tracks.append(spotify_track_id)
+        self._log.debug(f'Spotify user: {self.sp.current_user()["id"]}')
         # create a spotify playlist
         spotify_playlist = self.sp.user_playlist_create(self.sp.current_user()['id'], playlist)
         # add the tracks to the spotify playlist
