@@ -1101,7 +1101,7 @@ class PlexSync(BeetsPlugin):
         # return the spotify playlist url
         return spotify_playlist['external_urls']['spotify']
 
-    def add_tracks_to_playlist(self, playlist_name, track_uris):
+    def add_tracks_to_playlist_old(self, playlist_name, track_uris):
         user_id = self.sp.current_user()['id']
         playlists = self.sp.user_playlists(user_id)
         playlist_exists = False
@@ -1115,3 +1115,28 @@ class PlexSync(BeetsPlugin):
             playlist = self.sp.user_playlist_create(user_id, playlist_name)
             playlist_id = playlist['id']
         self.sp.user_playlist_add_tracks(user_id, playlist_id, track_uris)
+
+    def add_tracks_to_playlist(self, playlist_name, track_uris):
+
+        # Get the current user's playlists
+        playlists = self.sp.current_user_playlists()
+
+        # Check if a playlist with the given name already exists
+        existing_playlist = None
+        for playlist in playlists['items']:
+            if playlist['name'] == playlist_name:
+                existing_playlist = playlist
+                break
+
+        if existing_playlist:
+            # Add tracks to the existing playlist
+            playlist_id = existing_playlist['id']
+            self.sp.playlist_add_items(playlist_id, track_uris)
+            self._log.debug(f"Added tracks to existing playlist: {playlist_name}")
+        else:
+            # Create a new playlist
+            user_id = self.sp.current_user()['id']
+            new_playlist = self.sp.user_playlist_create(user_id, playlist_name)
+            playlist_id = new_playlist['id']
+            self.sp.playlist_add_items(playlist_id, track_uris)
+            self._log.debug(f"Created new playlist and added tracks: {playlist_name}")
