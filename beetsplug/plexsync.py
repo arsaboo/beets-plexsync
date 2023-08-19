@@ -1097,8 +1097,20 @@ class PlexSync(BeetsPlugin):
         spotify_playlist = self.sp.user_playlist_create(
             self.sp.current_user()['id'], playlist)
         # add the tracks to the spotify playlist
-        self.sp.user_playlist_add_tracks(
-            self.sp.current_user()['id'], spotify_playlist['id'],
-            spotify_tracks)
+        self.add_tracks_to_playlist(playlist, spotify_tracks)
         # return the spotify playlist url
         return spotify_playlist['external_urls']['spotify']
+
+    def add_tracks_to_playlist(self, playlist_name, track_uris):
+        user_id = self.sp.current_user()['id']
+        playlists = self.sp.user_playlists(user_id)
+        playlist_exists = False
+        for playlist in playlists['items']:
+            if playlist['name'] == playlist_name:
+                playlist_id = playlist['id']
+                playlist_exists = True
+                break
+        if not playlist_exists:
+            playlist = self.sp.user_playlist_create(user_id, playlist_name)
+            playlist_id = playlist['id']
+        self.sp.user_playlist_add_tracks(user_id, playlist_id, track_uris)
