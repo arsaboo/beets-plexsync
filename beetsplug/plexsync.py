@@ -1058,12 +1058,12 @@ class PlexSync(BeetsPlugin):
         plex_playlist = self.plex.playlist(playlist)
         # get the plex playlist items
         plex_playlist_items = plex_playlist.items()
-        # get the item rating key
-        plex_playlist_items_rating_key = [item.ratingKey for item in plex_playlist_items]
         # lookup the plex playlist items in the beets library
-        for item in plex_playlist_items_rating_key:
+        for item in plex_playlist_items:
+            query = MatchQuery("plex_ratingkey", item.ratingKey,
+                               fast=False)
             # get the beets item
-            beets_item = lib.get_item(item)
+            beets_item = lib.get_item(query)
             self._log.debug(f'Processing {beets_item}')
             # get the spotify track id
             spotify_track_id = beets_item.spotify_track_id
