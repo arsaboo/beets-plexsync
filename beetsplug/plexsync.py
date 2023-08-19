@@ -1058,6 +1058,7 @@ class PlexSync(BeetsPlugin):
         plex_playlist = self.plex.playlist(playlist)
         # get the plex playlist items
         plex_playlist_items = plex_playlist.items()
+        self._log.debug(f'Plex playlist items: {plex_playlist_items}')
         # lookup the plex playlist items in the beets library
         for item in plex_playlist_items:
             query = MatchQuery("plex_ratingkey", item.ratingKey,
