@@ -1066,16 +1066,19 @@ class PlexSync(BeetsPlugin):
                 query = MatchQuery("plex_ratingkey", item.ratingKey,
                                fast=False)
                 # get the beets item
-                beets_item = lib.items(query)
-            self._log.debug(f'Processing {beets_item}')
-            # get the spotify track id
-            spotify_track_id = beets_item.spotify_track_id
-            self._log.debug(f'Spotify track id: {spotify_track_id}')
-            # if spotify track id is not available, search for the song in spotify
-            if spotify_track_id is None:
-                # search for the song in spotify
-                spotify_search_results = self.sp.search(q=f'{beets_item.title} {beets_item.album}', limit=1, type='track')
-                # get the spotify track id
-                spotify_track_id = spotify_search_results['tracks']['items'][0]['id']
+                items = lib.items(query)
+                if len(items) == 0:
+                    self._log.debug(f'No match found for {item.ratingKey}')
+                    continue
+                beets_item = items[0]
+                self._log.debug(f'Beets item: {beets_item}')
+                spotify_track_id = beets_item.spotify_track_id
+                self._log.debug(f'Spotify track id: {spotify_track_id}')
+                # if spotify track id is not available, search for the song in spotify
+                if spotify_track_id is None:
+                    # search for the song in spotify
+                    spotify_search_results = self.sp.search(q=f'{beets_item.title} {beets_item.album}', limit=1, type='track')
+                    # get the spotify track id
+                    spotify_track_id = spotify_search_results['tracks']['items'][0]['id']
             # add the track to the spotify playlist
             self.sp.playlist_add_items(playlist_id=self.sp_playlist_id, items=[spotify_track_id])
