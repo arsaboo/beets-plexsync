@@ -1049,14 +1049,13 @@ class PlexSync(BeetsPlugin):
             return
         return gaana.import_gaana_playlist(url)
 
-
     # write a function that transfers a plex playlist to spotify. The function will take the plex playlist name as input, retrieve the songs from Plex library. The beets library also has the spotify track_id for most songs that can be used to match songs in Spotify. If a spotify_track_id is available use that otherwise search for the song using track tile and album name. Create a playlist in Spotify and add the songs to the playlist. Return the Spotify playlist URL and log songs that are not matched in Spotify
     def _plex2spotify(self, lib, playlist):
         # use self.sp object to intearct with spotify
         # use self._plex object to interact with plex
 
         # get the plex playlist
-        plex_playlist = self._plex.playlist(playlist)
+        plex_playlist = self.plex.playlist(playlist)
         # get the plex playlist items
         plex_playlist_items = plex_playlist.items()
         # get the item rating key
