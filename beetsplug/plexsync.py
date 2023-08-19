@@ -1086,8 +1086,7 @@ class PlexSync(BeetsPlugin):
                     spotify_search_results = self.sp.search(
                         q=f'track:{beets_item.title} album:{beets_item.album}',
                         limit=1, type='track')
-                    self._log.debug(f'Spotify search results: '
-                                    f'{spotify_search_results}')
+                    self._log.debug(f'{len(spotify_search_results)}')
                     # get the spotify track id
                     spotify_track_id = (
                         spotify_search_results['tracks']['items'][0]['id']
