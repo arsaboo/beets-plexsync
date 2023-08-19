@@ -1072,8 +1072,12 @@ class PlexSync(BeetsPlugin):
                     continue
                 beets_item = items[0]
                 self._log.debug(f'Beets item: {beets_item}')
-                spotify_track_id = beets_item.spotify_track_id
-                self._log.debug(f'Spotify track id: {spotify_track_id}')
+                try:
+                    spotify_track_id = beets_item.spotify_track_id
+                    self._log.debug(f'Spotify track id in beets: {spotify_track_id}')
+                except Exception:
+                    spotify_track_id = None
+                    self._log.debug('Spotify track_id not found in beets')
                 # if spotify track id is not available, search for the song
                 if spotify_track_id is None:
                     # search for the song in spotify
