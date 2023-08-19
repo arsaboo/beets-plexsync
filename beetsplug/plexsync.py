@@ -1053,7 +1053,7 @@ class PlexSync(BeetsPlugin):
     def _plex2spotify(self, lib, playlist):
         # use self.sp object to intearct with spotify
         # use self._plex object to interact with plex
-
+        self.authenticate_spotify()
         # get the plex playlist
         plex_playlist = self.plex.playlist(playlist)
         # get the plex playlist items
