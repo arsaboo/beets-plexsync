@@ -1049,7 +1049,6 @@ class PlexSync(BeetsPlugin):
             return
         return gaana.import_gaana_playlist(url)
 
-    # write a function that transfers a plex playlist to spotify. The function will take the plex playlist name as input, retrieve the songs from Plex library. The beets library also has the spotify track_id for most songs that can be used to match songs in Spotify. If a spotify_track_id is available use that otherwise search for the song using track tile and album name. Create a playlist in Spotify and add the songs to the playlist. Return the Spotify playlist URL and log songs that are not matched in Spotify
     def _plex2spotify(self, lib, playlist):
         # use self.sp object to intearct with spotify
         # use self._plex object to interact with plex
@@ -1065,7 +1064,7 @@ class PlexSync(BeetsPlugin):
             self._log.debug(f'Processing {item.ratingKey}')
             with lib.transaction():
                 query = MatchQuery("plex_ratingkey", item.ratingKey,
-                               fast=False)
+                                   fast=False)
                 # get the beets item
                 items = lib.items(query)
                 if len(items) == 0:
@@ -1075,18 +1074,26 @@ class PlexSync(BeetsPlugin):
                 self._log.debug(f'Beets item: {beets_item}')
                 spotify_track_id = beets_item.spotify_track_id
                 self._log.debug(f'Spotify track id: {spotify_track_id}')
-                # if spotify track id is not available, search for the song in spotify
+                # if spotify track id is not available, search for the song
                 if spotify_track_id is None:
                     # search for the song in spotify
-                    self._log.debug(f'Searching for {beets_item.title} {beets_item.album} in Spotify')
-                    spotify_search_results = self.sp.search(q=f'{beets_item.title} {beets_item.album}', limit=1, type='track')
+                    self._log.debug(f'Searching for {beets_item.title} '
+                                    f'{beets_item.album} in Spotify')
+                    spotify_search_results = self.sp.search(
+                        q=f'{beets_item.title} {beets_item.album}',
+                        limit=1, type='track')
                     # get the spotify track id
-                    spotify_track_id = spotify_search_results['tracks']['items'][0]['id']
+                    spotify_track_id = (
+                        spotify_search_results['tracks']['items'][0]['id']
+                    )
                 spotify_tracks.append(spotify_track_id)
         self._log.debug(f'Spotify user: {self.sp.current_user()["id"]}')
         # create a spotify playlist
-        spotify_playlist = self.sp.user_playlist_create(self.sp.current_user()['id'], playlist)
+        spotify_playlist = self.sp.user_playlist_create(
+            self.sp.current_user()['id'], playlist)
         # add the tracks to the spotify playlist
-        self.sp.user_playlist_add_tracks(self.sp.current_user()['id'], spotify_playlist['id'], spotify_tracks)
+        self.sp.user_playlist_add_tracks(
+            self.sp.current_user()['id'], spotify_playlist['id'],
+            spotify_tracks)
         # return the spotify playlist url
         return spotify_playlist['external_urls']['spotify']
