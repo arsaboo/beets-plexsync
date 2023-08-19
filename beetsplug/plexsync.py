@@ -1060,6 +1060,7 @@ class PlexSync(BeetsPlugin):
         plex_playlist_items = plex_playlist.items()
         self._log.debug(f'Plex playlist items: {plex_playlist_items}')
         # lookup the plex playlist items in the beets library
+        spotify_tracks = []
         for item in plex_playlist_items:
             self._log.debug(f'Processing {item.ratingKey}')
             with lib.transaction():
@@ -1077,8 +1078,14 @@ class PlexSync(BeetsPlugin):
                 # if spotify track id is not available, search for the song in spotify
                 if spotify_track_id is None:
                     # search for the song in spotify
+                    self._log.debug(f'Searching for {beets_item.title} {beets_item.album} in Spotify')
                     spotify_search_results = self.sp.search(q=f'{beets_item.title} {beets_item.album}', limit=1, type='track')
                     # get the spotify track id
                     spotify_track_id = spotify_search_results['tracks']['items'][0]['id']
-            # add the track to the spotify playlist
-            self.sp.playlist_add_items(playlist_id=self.sp_playlist_id, items=[spotify_track_id])
+                spotify_tracks.append(spotify_track_id)
+        # create a spotify playlist
+        spotify_playlist = self.sp.user_playlist_create(self.sp.current_user()['id'], playlist)
+        # add the tracks to the spotify playlist
+        self.sp.user_playlist_add_tracks(self.sp.current_user()['id'], spotify_playlist['id'], spotify_tracks)
+        # return the spotify playlist url
+        return spotify_playlist['external_urls']['spotify']
