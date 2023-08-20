@@ -1107,7 +1107,7 @@ class PlexSync(BeetsPlugin):
         self._log.debug(f'Spotify user: {self.sp.current_user()["id"]}')
         self.add_tracks_to_spotify_playlist(playlist, spotify_tracks)
 
-    def add_tracks_to_spotify_playlist(self, playlist_name, track_uris):
+    def add_tracks_to_spotify_playlist_old(self, playlist_name, track_uris):
         user_id = self.sp.current_user()['id']
         playlists = self.sp.user_playlists(user_id)
         playlist_exists = False
@@ -1141,5 +1141,33 @@ class PlexSync(BeetsPlugin):
             for i in range(0, len(track_uris), 100):
                 chunk = track_uris[i:i+100]
                 self.sp.user_playlist_add_tracks(user_id, playlist_id, chunk)
+        else:
+            self._log.debug('No tracks to add to playlist')
+
+    def add_tracks_to_spotify_playlist(self, playlist_name, track_uris):
+        user_id = self.sp.current_user()['id']
+        playlists = self.sp.user_playlists(user_id)
+        playlist_id = None
+        for playlist in playlists['items']:
+            if playlist['name'].lower() == playlist_name.lower():
+                playlist_id = playlist['id']
+                break
+        if not playlist_id:
+            playlist = self.sp.user_playlist_create(user_id, playlist_name,
+                                                    public=False)
+            playlist_id = playlist['id']
+            self._log.debug(f'Playlist {playlist_name} created with id '
+                            f'{playlist_id}')
+        playlist_tracks = self.get_playlist_tracks(playlist_id)
+        uris = {track['track']['uri'].replace('spotify:track:', '')
+                for track in playlist_tracks['items']}
+        track_uris = list(set(track_uris) - uris)
+        self._log.debug(f'Tracks to be added: {track_uris}')
+        if len(track_uris) > 0:
+            for i in range(0, len(track_uris), 100):
+                chunk = track_uris[i:i+100]
+                self.sp.user_playlist_add_tracks(user_id, playlist_id, chunk)
+            self._log.debug(f'Added {len(track_uris)} tracks to playlist '
+                            f'{playlist_id}')
         else:
             self._log.debug('No tracks to add to playlist')
