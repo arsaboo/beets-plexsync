@@ -1138,6 +1138,8 @@ class PlexSync(BeetsPlugin):
         self._log.debug(f'Adding tracks to playlist {playlist_id}')
         # add the tracks to the playlist
         if len(track_uris) > 0:
-            self.sp.user_playlist_add_tracks(user_id, playlist_id, track_uris)
+            for i in range(0, len(track_uris), 100):
+                chunk = track_uris[i:i+100]
+                self.sp.user_playlist_add_tracks(user_id, playlist_id, chunk)
         else:
             self._log.debug('No tracks to add to playlist')
