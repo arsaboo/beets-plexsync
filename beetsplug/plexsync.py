@@ -1120,7 +1120,7 @@ class PlexSync(BeetsPlugin):
                 self._log.debug(f'Playlist {playlist_name} exists '
                                 f'with id {playlist_id}')
                 # get the tracks in the playlist
-                playlist_tracks = self.sp.playlist_tracks(playlist_id)
+                playlist_tracks = self.get_playlist_tracks(playlist_id)
                 # get the track uris in the playlist
                 uris = [track['track']['uri'].replace('spotify:track:', '')
                         for track in playlist_tracks['items']]
