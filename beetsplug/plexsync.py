@@ -1107,7 +1107,7 @@ class PlexSync(BeetsPlugin):
         playlists = self.sp.user_playlists(user_id)
         playlist_exists = False
         for playlist in playlists['items']:
-            self._log.debug(f'Processing Playlist {playlist_name} '
+            self._log.debug(f'Processing Playlist {playlist["name"]} '
                             f'with id {playlist["id"]}')
             if playlist['name'].lower() == playlist_name.lower():
                 playlist_id = playlist['id']
