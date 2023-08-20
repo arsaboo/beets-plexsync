@@ -101,7 +101,8 @@ class PlexSync(BeetsPlugin):
         ID = config["spotify"]["client_id"].get()
         SECRET = config["spotify"]["client_secret"].get()
         redirect_uri = "http://localhost/"
-        scope = "user-read-private user-read-email"
+        scope = "user-read-private user-read-email playlist-modify-public " \
+                "playlist-modify-private playlist-read-private"
         # Create a SpotifyOAuth object with your credentials and scope
         self.auth_manager = SpotifyOAuth(
             client_id=ID, client_secret=SECRET, redirect_uri=redirect_uri,
@@ -113,12 +114,13 @@ class PlexSync(BeetsPlugin):
         ID = config["spotify"]["client_id"].get()
         SECRET = config["spotify"]["client_secret"].get()
         redirect_uri = "http://localhost/"
-        scope = "user-read-private user-read-email"
+        scope = "user-read-private user-read-email playlist-modify-public " \
+                "playlist-modify-private playlist-read-private"
 
         # Create a SpotifyOAuth object with your credentials and scope
         self.auth_manager = SpotifyOAuth(
             client_id=ID, client_secret=SECRET, redirect_uri=redirect_uri,
-            scope=scope, open_browser=False,cache_path=self.plexsync_token)
+            scope=scope, open_browser=False, cache_path=self.plexsync_token)
         self.token_info = self.auth_manager.get_cached_token()
         if self.token_info is None:
             self.auth_manager.get_access_token(as_dict=True)
@@ -330,7 +332,7 @@ class PlexSync(BeetsPlugin):
 
         collage_cmd.func = func_collage
 
-        # plexcollage command
+        # plexsonic command
         sonicsage_cmd = ui.Subcommand(
             'plexsonic', help="create ChatGPT-based playlists")
 
@@ -352,10 +354,24 @@ class PlexSync(BeetsPlugin):
 
         sonicsage_cmd.func = func_sonic
 
+        # plex2spotify command
+        plex2spotify_cmd = ui.Subcommand(
+            'plex2spotify', help="Transfer Plex playlist to Spotify")
+
+        plex2spotify_cmd.parser.add_option('-m', '--playlist',
+                                           default='beets',
+                                           help='name of the playlist to be \
+                                            added in Spotify')
+
+        def func_plex2spotify(lib, opts, args):
+            self._plex2spotify(lib, opts.playlist)
+
+        plex2spotify_cmd.func = func_plex2spotify
+
         return [plexupdate_cmd, sync_cmd, playlistadd_cmd, playlistrem_cmd,
                 syncrecent_cmd, playlistimport_cmd, playlistclear_cmd,
                 collage_cmd, sonicsage_cmd, searchimport_cmd,
-                plexplaylist2collection_cmd]
+                plexplaylist2collection_cmd, plex2spotify_cmd]
 
     def parse_title(self, title_orig):
         if "(From \"" in title_orig:
@@ -407,7 +423,7 @@ class PlexSync(BeetsPlugin):
             # Find and store the song artist
             try:
                 artist = song['more_info']['artistMap']['primary_artists'][0]['name']
-            except:
+            except KeyError:
                 continue
             # Find and store the song duration
             #duration = song.find("div", class_="songs-list-row__length").text.strip()
@@ -1032,3 +1048,85 @@ class PlexSync(BeetsPlugin):
                 'Unable to initialize Gaana plugin. Error: {}', e)
             return
         return gaana.import_gaana_playlist(url)
+
+    def _plex2spotify(self, lib, playlist):
+        # use self.sp object to intearct with spotify
+        # use self._plex object to interact with plex
+        self.authenticate_spotify()
+        # get the plex playlist
+        plex_playlist = self.plex.playlist(playlist)
+        # get the plex playlist items
+        plex_playlist_items = plex_playlist.items()
+        self._log.debug(f'Plex playlist items: {plex_playlist_items}')
+        # lookup the plex playlist items in the beets library
+        spotify_tracks = []
+        for item in plex_playlist_items:
+            self._log.debug(f'Processing {item.ratingKey}')
+            with lib.transaction():
+                query = MatchQuery("plex_ratingkey", item.ratingKey,
+                                   fast=False)
+                # get the beets item
+                items = lib.items(query)
+                if len(items) == 0:
+                    self._log.debug(f'No match found for {item.ratingKey}')
+                    continue
+                beets_item = items[0]
+                self._log.debug(f'Beets item: {beets_item}')
+                try:
+                    spotify_track_id = beets_item.spotify_track_id
+                    self._log.debug(f'Spotify track id in '
+                                    f'beets: {spotify_track_id}')
+                except Exception:
+                    spotify_track_id = None
+                    self._log.debug('Spotify track_id not found in beets')
+                # if spotify track id is not available, search for the song
+                if spotify_track_id is None:
+                    # search for the song in spotify
+                    self._log.debug(f'Searching for {beets_item.title} '
+                                    f'{beets_item.album} in Spotify')
+                    spotify_search_results = self.sp.search(
+                        q=f'track:{beets_item.title} album:{beets_item.album}',
+                        limit=1, type='track')
+                    self._log.debug(f'{len(spotify_search_results)}')
+                    # get the spotify track id
+                    spotify_track_id = (
+                        spotify_search_results['tracks']['items'][0]['id']
+                    )
+                spotify_tracks.append(spotify_track_id)
+        self._log.debug(f'Spotify user: {self.sp.current_user()["id"]}')
+        self.add_tracks_to_spotify_playlist(playlist, spotify_tracks)
+
+    def add_tracks_to_spotify_playlist(self, playlist_name, track_uris):
+        user_id = self.sp.current_user()['id']
+        playlists = self.sp.user_playlists(user_id)
+        playlist_exists = False
+        for playlist in playlists['items']:
+            self._log.debug(f'Processing Playlist {playlist["name"]} '
+                            f'with id {playlist["id"]}')
+            if playlist['name'].lower() == playlist_name.lower():
+                playlist_id = playlist['id']
+                playlist_exists = True
+                self._log.debug(f'Playlist {playlist_name} exists '
+                                f'with id {playlist_id}')
+                # get the tracks in the playlist
+                playlist_tracks = self.sp.playlist_tracks(playlist_id)
+                # get the track uris in the playlist
+                uris = [track['track']['uri'].replace('spotify:track:', '')
+                        for track in playlist_tracks['items']]
+                self._log.debug(f'Playlist track uris: {uris}')
+                # remove the tracks that are already in the playlist
+                track_uris = list(set(track_uris) - set(uris))
+                self._log.debug(f'Tracks to be added: {track_uris}')
+                break
+        if not playlist_exists:
+            playlist = self.sp.user_playlist_create(user_id, playlist_name,
+                                                    public=False)
+            playlist_id = playlist['id']
+            self._log.debug(f'Playlist {playlist_name} created '
+                            f'with id {playlist_id}')
+        self._log.debug(f'Adding tracks to playlist {playlist_id}')
+        # add the tracks to the playlist
+        if len(track_uris) > 0:
+            self.sp.user_playlist_add_tracks(user_id, playlist_id, track_uris)
+        else:
+            self._log.debug('No tracks to add to playlist')
