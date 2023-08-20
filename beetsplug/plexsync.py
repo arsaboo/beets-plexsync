@@ -1091,7 +1091,7 @@ class PlexSync(BeetsPlugin):
                 spotify_tracks.append(spotify_track_id)
         self.add_tracks_to_spotify_playlist(playlist, spotify_tracks)
 
-    def add_tracks_to_spotify_playlist(self, playlist_name, track_uris):
+    def add_tracks_to_spotify_playlist_old(self, playlist_name, track_uris):
         user_id = self.sp.current_user()['id']
         playlists = self.sp.user_playlists(user_id)
         playlist_exists = False
@@ -1128,7 +1128,7 @@ class PlexSync(BeetsPlugin):
         else:
             self._log.debug('No tracks to add to playlist')
 
-    def add_tracks_to_spotify_playlist_2(self, playlist_name, track_uris):
+    def add_tracks_to_spotify_playlist(self, playlist_name, track_uris):
         user_id = self.sp.current_user()['id']
         playlists = self.sp.user_playlists(user_id)
         playlist_id = None
@@ -1143,8 +1143,11 @@ class PlexSync(BeetsPlugin):
             self._log.debug(f'Playlist {playlist_name} created with id '
                             f'{playlist_id}')
         playlist_tracks = self.get_playlist_tracks(playlist_id)
+        self._log.debug(f'Playlist tracks: {playlist_tracks}')
+        # remove teh prefix 'spotify:track:' from the uris
+
         uris = [track['track']['uri'].replace('spotify:track:', '')
-                for track in playlist_tracks['items']]
+                for track in playlist_tracks['tracks']['items']]
         track_uris = list(set(track_uris) - set(uris))
         self._log.debug(f'Tracks to be added: {track_uris}')
         if len(track_uris) > 0:
