@@ -1143,6 +1143,10 @@ class PlexSync(BeetsPlugin):
             self._log.debug(f'Playlist {playlist_name} created with id '
                             f'{playlist_id}')
         playlist_tracks = self.get_playlist_tracks(playlist_id)
+        self._log.debug(f'Playlist tracks: {playlist_tracks["items"]}')
+
+
+
         self._log.debug(f'Playlist tracks: {playlist_tracks["track"]}')
 
 
