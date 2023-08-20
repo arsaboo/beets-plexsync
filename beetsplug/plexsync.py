@@ -186,7 +186,6 @@ class PlexSync(BeetsPlugin):
         while tracks_response["next"]:
             tracks_response = self.sp.next(tracks_response)
             tracks.extend(tracks_response["items"])
-        self._log.debug(f"Found {tracks} tracks in the playlist")
         return tracks
 
     def listen_for_db_change(self, lib, model):
@@ -1147,15 +1146,6 @@ class PlexSync(BeetsPlugin):
         # get the tracks in the playlist
         uris = [track['track']['uri'].replace('spotify:track:', '')
                 for track in playlist_tracks]
-        # for track in playlist_tracks:
-        #     self._log.debug(f'Processing track {track["track"]["uri"]}')
-        # uris = [track['track']['uri'].replace('spotify:track:', '')
-        #         for track in playlist_tracks['items']]
-        # if len(playlist_tracks) == 0:
-        #     uris = []
-        # else:
-        #     uris = [track['track']['uri'].replace('spotify:track:', '')
-        #             for track in playlist_tracks['tracks']['items']]
         track_uris = list(set(track_uris) - set(uris))
         self._log.debug(f'Tracks to be added: {track_uris}')
         if len(track_uris) > 0:
