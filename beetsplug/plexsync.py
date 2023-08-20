@@ -1145,9 +1145,11 @@ class PlexSync(BeetsPlugin):
         playlist_tracks = self.get_playlist_tracks(playlist_id)
         self._log.debug(f'Playlist tracks: {playlist_tracks}')
         # remove teh prefix 'spotify:track:' from the uris
-
-        uris = [track['track']['uri'].replace('spotify:track:', '')
-                for track in playlist_tracks['tracks']['items']]
+        if not playlist_tracks['items']:
+            uris = []
+        else:
+            uris = [track['track']['uri'].replace('spotify:track:', '')
+                    for track in playlist_tracks['tracks']['items']]
         track_uris = list(set(track_uris) - set(uris))
         self._log.debug(f'Tracks to be added: {track_uris}')
         if len(track_uris) > 0:
