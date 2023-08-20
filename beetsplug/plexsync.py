@@ -1159,9 +1159,9 @@ class PlexSync(BeetsPlugin):
             self._log.debug(f'Playlist {playlist_name} created with id '
                             f'{playlist_id}')
         playlist_tracks = self.get_playlist_tracks(playlist_id)
-        uris = {track['track']['uri'].replace('spotify:track:', '')
-                for track in playlist_tracks['items']}
-        track_uris = list(set(track_uris) - uris)
+        uris = [track['track']['uri'].replace('spotify:track:', '')
+                for track in playlist_tracks['items']]
+        track_uris = list(set(track_uris) - set(uris))
         self._log.debug(f'Tracks to be added: {track_uris}')
         if len(track_uris) > 0:
             for i in range(0, len(track_uris), 100):
