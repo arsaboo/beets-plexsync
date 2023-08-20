@@ -1115,6 +1115,7 @@ class PlexSync(BeetsPlugin):
         if not playlist_exists:
             playlist = self.sp.user_playlist_create(user_id, playlist_name)
             playlist_id = playlist['id']
+            self._log.debug(f'Playlist {playlist_name} created with id {playlist_id}')
         self._log.debug(f'Adding tracks to playlist {playlist_id}')
         self.sp.user_playlist_add_tracks(user_id, playlist_id, track_uris)
 
