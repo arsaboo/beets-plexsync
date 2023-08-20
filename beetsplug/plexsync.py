@@ -102,7 +102,7 @@ class PlexSync(BeetsPlugin):
         SECRET = config["spotify"]["client_secret"].get()
         redirect_uri = "http://localhost/"
         scope = "user-read-private user-read-email playlist-modify-public " \
-                "playlist-modify-private"
+                "playlist-modify-private playlist-read-private"
         # Create a SpotifyOAuth object with your credentials and scope
         self.auth_manager = SpotifyOAuth(
             client_id=ID, client_secret=SECRET, redirect_uri=redirect_uri,
@@ -115,7 +115,7 @@ class PlexSync(BeetsPlugin):
         SECRET = config["spotify"]["client_secret"].get()
         redirect_uri = "http://localhost/"
         scope = "user-read-private user-read-email playlist-modify-public " \
-                "playlist-modify-private"
+                "playlist-modify-private playlist-read-private"
 
         # Create a SpotifyOAuth object with your credentials and scope
         self.auth_manager = SpotifyOAuth(
