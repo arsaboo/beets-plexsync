@@ -1068,7 +1068,9 @@ class PlexSync(BeetsPlugin):
                 # get the beets item
                 items = lib.items(query)
                 if len(items) == 0:
-                    self._log.debug(f'No match found for {item.ratingKey}')
+                    self._log.debug(f'Item not found in Beets '
+                                    f'{item.ratingKey}: '
+                                    f'{item.parentTitle} - {item.title}')
                     continue
                 beets_item = items[0]
                 self._log.debug(f'Beets item: {beets_item}')
@@ -1094,9 +1096,8 @@ class PlexSync(BeetsPlugin):
                             spotify_search_results['tracks']['items'][0]['id']
                         )
                     except Exception:
-                        self._log.info(f'No match found for '
-                                       f'{beets_item.album} - '
-                                       f'{beets_item.title}')
+                        self._log.info(f'No match found for {item.album} - '
+                                       f'{item.title}')
                         continue
 
                     spotify_track_id = (
