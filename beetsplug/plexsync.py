@@ -1146,7 +1146,9 @@ class PlexSync(BeetsPlugin):
         playlist_tracks = self.get_playlist_tracks(playlist_id)
         # get the tracks in the playlist
         uris = [track['track']['uri'].replace('spotify:track:', '')
-                for track in playlist_tracks['items']]
+                for track in playlist_tracks]
+        # for track in playlist_tracks:
+        #     self._log.debug(f'Processing track {track["track"]["uri"]}')
         # uris = [track['track']['uri'].replace('spotify:track:', '')
         #         for track in playlist_tracks['items']]
         # if len(playlist_tracks) == 0:
