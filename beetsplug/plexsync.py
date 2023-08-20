@@ -1114,8 +1114,10 @@ class PlexSync(BeetsPlugin):
                 playlist_track_uris = [
                     track['track']['uri'] for track in playlist_tracks['items']
                 ]
+                self._log.debug(f'Playlist track uris: {playlist_track_uris}')
                 # remove the tracks that are already in the playlist
                 track_uris = list(set(track_uris) - set(playlist_track_uris))
+                self._log.debug(f'Tracks to be added: {track_uris}')
                 break
         if not playlist_exists:
             playlist = self.sp.user_playlist_create(user_id, playlist_name,
