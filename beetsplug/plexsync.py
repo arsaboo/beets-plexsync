@@ -1074,7 +1074,8 @@ class PlexSync(BeetsPlugin):
                 self._log.debug(f'Beets item: {beets_item}')
                 try:
                     spotify_track_id = beets_item.spotify_track_id
-                    self._log.debug(f'Spotify track id in beets: {spotify_track_id}')
+                    self._log.debug(f'Spotify track id in '
+                                    f'beets: {spotify_track_id}')
                 except Exception:
                     spotify_track_id = None
                     self._log.debug('Spotify track_id not found in beets')
@@ -1106,40 +1107,18 @@ class PlexSync(BeetsPlugin):
         playlists = self.sp.user_playlists(user_id)
         playlist_exists = False
         for playlist in playlists['items']:
-            self._log.debug(f'Processing Playlist {playlist_name} with id {playlist["id"]}')
+            self._log.debug(f'Processing Playlist {playlist_name} '
+                            f'with id {playlist["id"]}')
             if playlist['name'].lower() == playlist_name.lower():
                 playlist_id = playlist['id']
                 playlist_exists = True
-                self._log.debug(f'Playlist {playlist_name} exists with id {playlist_id}')
+                self._log.debug(f'Playlist {playlist_name} exists '
+                                f'with id {playlist_id}')
                 break
         if not playlist_exists:
             playlist = self.sp.user_playlist_create(user_id, playlist_name)
             playlist_id = playlist['id']
-            self._log.debug(f'Playlist {playlist_name} created with id {playlist_id}')
+            self._log.debug(f'Playlist {playlist_name} created '
+                            f'with id {playlist_id}')
         self._log.debug(f'Adding tracks to playlist {playlist_id}')
         self.sp.user_playlist_add_tracks(user_id, playlist_id, track_uris)
-
-    def add_tracks_to_playlist_new(self, playlist_name, track_uris):
-
-        # Get the current user's playlists
-        playlists = self.sp.current_user_playlists()
-
-        # Check if a playlist with the given name already exists
-        existing_playlist = None
-        for playlist in playlists['items']:
-            if playlist['name'] == playlist_name:
-                existing_playlist = playlist
-                break
-
-        if existing_playlist:
-            # Add tracks to the existing playlist
-            playlist_id = existing_playlist['id']
-            self.sp.playlist_add_items(playlist_id, track_uris)
-            self._log.debug(f"Added tracks to existing playlist: {playlist_name}")
-        else:
-            # Create a new playlist
-            user_id = self.sp.current_user()['id']
-            new_playlist = self.sp.user_playlist_create(user_id, playlist_name)
-            playlist_id = new_playlist['id']
-            self.sp.playlist_add_items(playlist_id, track_uris)
-            self._log.debug(f"Created new playlist and added tracks: {playlist_name}")
