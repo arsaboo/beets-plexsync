@@ -1116,7 +1116,8 @@ class PlexSync(BeetsPlugin):
                                 f'with id {playlist_id}')
                 break
         if not playlist_exists:
-            playlist = self.sp.user_playlist_create(user_id, playlist_name)
+            playlist = self.sp.user_playlist_create(user_id, playlist_name,
+                                                    public=False)
             playlist_id = playlist['id']
             self._log.debug(f'Playlist {playlist_name} created '
                             f'with id {playlist_id}')
