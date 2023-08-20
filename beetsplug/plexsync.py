@@ -186,6 +186,7 @@ class PlexSync(BeetsPlugin):
         while tracks_response["next"]:
             tracks_response = self.sp.next(tracks_response)
             tracks.extend(tracks_response["items"])
+        self._log.debug(f"Found {tracks} tracks in the playlist")
         return tracks
 
     def listen_for_db_change(self, lib, model):
@@ -1143,11 +1144,9 @@ class PlexSync(BeetsPlugin):
             self._log.debug(f'Playlist {playlist_name} created with id '
                             f'{playlist_id}')
         playlist_tracks = self.get_playlist_tracks(playlist_id)
-        self._log.debug(f'Playlist tracks: {playlist_tracks["items"]}')
+        # get the tracks in the playlist
 
 
-
-        self._log.debug(f'Playlist tracks: {playlist_tracks["track"]}')
 
 
         # remove teh prefix 'spotify:track:' from the uris
