@@ -1082,8 +1082,8 @@ class PlexSync(BeetsPlugin):
                         q=f'track:{beets_item.title} album:{beets_item.album}',
                           limit=1, type='track')
                     if not spotify_search_results['tracks']['items']:
-                        self._log.info(f'No match found for {item.album} - '
-                                       f'{item.title}')
+                        self._log.info(f'Spotify match not found for '
+                                       f'{beets_item}')
                         continue
                     spotify_track_id = (
                         spotify_search_results['tracks']['items'][0]['id']
