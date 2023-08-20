@@ -1111,13 +1111,8 @@ class PlexSync(BeetsPlugin):
                 # get the tracks in the playlist
                 playlist_tracks = self.sp.playlist_tracks(playlist_id)
                 # get the track uris in the playlist
-                uris = [
-                    track['track']['uri'] for track in playlist_tracks['items']
-                ]
-                # remove the prefix from the track uris
-                uris = [
-                    uri.replace('spotify:track:', '') for uri in uris
-                ]
+                uris = [track['track']['uri'].replace('spotify:track:', '')
+                        for track in playlist_tracks['items']]
                 self._log.debug(f'Playlist track uris: {uris}')
                 # remove the tracks that are already in the playlist
                 track_uris = list(set(track_uris) - set(uris))
@@ -1135,4 +1130,3 @@ class PlexSync(BeetsPlugin):
             self.sp.user_playlist_add_tracks(user_id, playlist_id, track_uris)
         else:
             self._log.debug('No tracks to add to playlist')
-
