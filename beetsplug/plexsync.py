@@ -1050,53 +1050,48 @@ class PlexSync(BeetsPlugin):
         return gaana.import_gaana_playlist(url)
 
     def _plex2spotify(self, lib, playlist):
-        # use self.sp object to intearct with spotify
-        # use self._plex object to interact with plex
         self.authenticate_spotify()
-        # get the plex playlist
         plex_playlist = self.plex.playlist(playlist)
-        # get the plex playlist items
         plex_playlist_items = plex_playlist.items()
         self._log.debug(f'Plex playlist items: {plex_playlist_items}')
-        # lookup the plex playlist items in the beets library
         spotify_tracks = []
         for item in plex_playlist_items:
             self._log.debug(f'Processing {item.ratingKey}')
             with lib.transaction():
                 query = MatchQuery("plex_ratingkey", item.ratingKey,
                                    fast=False)
-                # get the beets item
                 items = lib.items(query)
-                if len(items) == 0:
-                    self._log.debug(f'No match found for {item.ratingKey}')
+                if not items:
+                    self._log.debug(f'Item not found in Beets '
+                                    f'{item.ratingKey}: {item.parentTitle} - '
+                                    f'{item.title}')
                     continue
                 beets_item = items[0]
                 self._log.debug(f'Beets item: {beets_item}')
                 try:
                     spotify_track_id = beets_item.spotify_track_id
-                    self._log.debug(f'Spotify track id in '
-                                    f'beets: {spotify_track_id}')
+                    self._log.debug(f'Spotify track id in beets: '
+                                    f'{spotify_track_id}')
                 except Exception:
                     spotify_track_id = None
                     self._log.debug('Spotify track_id not found in beets')
-                # if spotify track id is not available, search for the song
-                if spotify_track_id is None:
-                    # search for the song in spotify
+                if not spotify_track_id:
                     self._log.debug(f'Searching for {beets_item.title} '
                                     f'{beets_item.album} in Spotify')
                     spotify_search_results = self.sp.search(
                         q=f'track:{beets_item.title} album:{beets_item.album}',
-                        limit=1, type='track')
-                    self._log.debug(f'{len(spotify_search_results)}')
-                    # get the spotify track id
+                          limit=1, type='track')
+                    if not spotify_search_results['tracks']['items']:
+                        self._log.info(f'Spotify match not found for '
+                                       f'{beets_item}')
+                        continue
                     spotify_track_id = (
                         spotify_search_results['tracks']['items'][0]['id']
-                    )
+                        )
                 spotify_tracks.append(spotify_track_id)
-        self._log.debug(f'Spotify user: {self.sp.current_user()["id"]}')
         self.add_tracks_to_spotify_playlist(playlist, spotify_tracks)
 
-    def add_tracks_to_spotify_playlist(self, playlist_name, track_uris):
+    def add_tracks_to_spotify_playlist_old(self, playlist_name, track_uris):
         user_id = self.sp.current_user()['id']
         playlists = self.sp.user_playlists(user_id)
         playlist_exists = False
@@ -1109,7 +1104,7 @@ class PlexSync(BeetsPlugin):
                 self._log.debug(f'Playlist {playlist_name} exists '
                                 f'with id {playlist_id}')
                 # get the tracks in the playlist
-                playlist_tracks = self.sp.playlist_tracks(playlist_id)
+                playlist_tracks = self.get_playlist_tracks(playlist_id)
                 # get the track uris in the playlist
                 uris = [track['track']['uri'].replace('spotify:track:', '')
                         for track in playlist_tracks['items']]
@@ -1127,6 +1122,37 @@ class PlexSync(BeetsPlugin):
         self._log.debug(f'Adding tracks to playlist {playlist_id}')
         # add the tracks to the playlist
         if len(track_uris) > 0:
-            self.sp.user_playlist_add_tracks(user_id, playlist_id, track_uris)
+            for i in range(0, len(track_uris), 100):
+                chunk = track_uris[i:i+100]
+                self.sp.user_playlist_add_tracks(user_id, playlist_id, chunk)
+        else:
+            self._log.debug('No tracks to add to playlist')
+
+    def add_tracks_to_spotify_playlist(self, playlist_name, track_uris):
+        user_id = self.sp.current_user()['id']
+        playlists = self.sp.user_playlists(user_id)
+        playlist_id = None
+        for playlist in playlists['items']:
+            if playlist['name'].lower() == playlist_name.lower():
+                playlist_id = playlist['id']
+                break
+        if not playlist_id:
+            playlist = self.sp.user_playlist_create(user_id, playlist_name,
+                                                    public=False)
+            playlist_id = playlist['id']
+            self._log.debug(f'Playlist {playlist_name} created with id '
+                            f'{playlist_id}')
+        playlist_tracks = self.get_playlist_tracks(playlist_id)
+        # get the tracks in the playlist
+        uris = [track['track']['uri'].replace('spotify:track:', '')
+                for track in playlist_tracks]
+        track_uris = list(set(track_uris) - set(uris))
+        self._log.debug(f'Tracks to be added: {track_uris}')
+        if len(track_uris) > 0:
+            for i in range(0, len(track_uris), 100):
+                chunk = track_uris[i:i+100]
+                self.sp.user_playlist_add_tracks(user_id, playlist_id, chunk)
+            self._log.debug(f'Added {len(track_uris)} tracks to playlist '
+                            f'{playlist_id}')
         else:
             self._log.debug('No tracks to add to playlist')
