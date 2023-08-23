@@ -1050,12 +1050,13 @@ class PlexSync(BeetsPlugin):
         return gaana.import_gaana_playlist(url)
 
     def _plex2spotify(self, lib, playlist):
+        from tqdm import tqdm
         self.authenticate_spotify()
         plex_playlist = self.plex.playlist(playlist)
         plex_playlist_items = plex_playlist.items()
         self._log.debug(f'Plex playlist items: {plex_playlist_items}')
         spotify_tracks = []
-        for item in plex_playlist_items:
+        for item in tqdm(plex_playlist_items):
             self._log.debug(f'Processing {item.ratingKey}')
             with lib.transaction():
                 query = MatchQuery("plex_ratingkey", item.ratingKey,
