@@ -1056,8 +1056,9 @@ class PlexSync(BeetsPlugin):
         plex_playlist_items = plex_playlist.items()
         self._log.debug(f'Plex playlist items: {plex_playlist_items}')
         spotify_tracks = []
-        for item in tqdm(plex_playlist_items):
-            self._log.debug(f'Processing {item.ratingKey}')
+        for i, item in enumerate(tqdm(plex_playlist_items)):
+            self._log.info(f'Processing item {i+1}/{len(plex_playlist_items)}'
+                           f': {item.parentTitle} - {item.title}')
             with lib.transaction():
                 query = MatchQuery("plex_ratingkey", item.ratingKey,
                                    fast=False)
