@@ -383,7 +383,7 @@ class PlexSync(BeetsPlugin):
         else:
             title = title_orig
             album = ""
-        return title, album
+        return title.strip(), album.strip()
 
     def clean_album_name(self, album_orig):
         album_orig = album_orig.replace(
