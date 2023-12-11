@@ -383,7 +383,7 @@ class PlexSync(BeetsPlugin):
         else:
             title = title_orig
             album = ""
-        return title, album
+        return title.strip(), album.strip()
 
     def clean_album_name(self, album_orig):
         album_orig = album_orig.replace(
@@ -689,6 +689,9 @@ class PlexSync(BeetsPlugin):
 
     def search_plex_song(self, song, manual_search=False):
         """Fetch the Plex track key."""
+
+        if "From \"" in song['title'] or "[From \"" in song['title']:
+            song['title'], song['album'] = self.parse_title(song['title'])
 
         try:
             if song['album'] is None:
