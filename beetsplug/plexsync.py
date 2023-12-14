@@ -59,6 +59,10 @@ class PlexSync(BeetsPlugin):
         self.google = None
         self.openai = None
 
+        # Call the setup methods
+        self.setup_google_ai()
+        self.setup_openai_api()
+
         # Adding defaults.
         config['plex'].add({
             'host': 'localhost',
