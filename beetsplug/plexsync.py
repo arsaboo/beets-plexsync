@@ -969,7 +969,7 @@ class PlexSync(BeetsPlugin):
             history = track.history(mindate=frm_dt)
             count = len(history)
             last_played_date = (
-                max(history, key=lambda x: x.date_played).date_played
+                max(history, key=lambda x: x.lastViewedAt).lastViewedAt
                 if history
                 else None
             )
