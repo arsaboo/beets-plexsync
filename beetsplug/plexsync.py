@@ -968,11 +968,17 @@ class PlexSync(BeetsPlugin):
         for track in tracks:
             history = track.history(mindate=frm_dt)
             count = len(history)
-            last_played_date = (
-                max(history, key=lambda x: x.lastViewedAt).lastViewedAt
-                if history
-                else None
-            )
+            try:
+                last_played_date = (
+                    max(
+                        (h for h in history if h.lastViewedAt is not None),
+                        key=lambda x: x.lastViewedAt,
+                    ).lastViewedAt
+                    if history
+                    else None
+                )
+            except ValueError:
+                last_played_date = None
             if track.parentTitle not in [a[1] for a in album]:
                 album.append(
                     [track.album(), track.parentTitle, count, last_played_date]
