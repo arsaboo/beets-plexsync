@@ -905,13 +905,16 @@ class PlexSync(BeetsPlugin):
         Returns:
             None
         """
-        if not bool(config['openai']['api_key'].get()):
-            self._log.error('OpenAI API key not provided')
+        if self.google is None and self.openai is None:
+            self._log.error('No LLMs configured correctly')
             return
         if prompt == '':
             self._log.error('Prompt not provided')
             return
-        songs = self.chat_gpt_song_rec(number, prompt)
+        if self.google:
+            songs = self.google_ai_song_rec(number, prompt)
+        elif self.openai:
+            songs = self.chat_gpt_song_rec(number, prompt)
         song_list = []
         if songs is None:
             return
@@ -945,37 +948,86 @@ class PlexSync(BeetsPlugin):
         except Exception as e:
             self._log.error('Unable to add songs to playlist. Error: {}', e)
 
-    def chat_gpt_song_rec(self, number, prompt):
+    def setup_openai_api(self):
         import openai
         openai.api_key = config['openai']['api_key'].get()
         try:
             openai.api_base = config['openai']['api_base'].get()
         except Exception:
             pass
+        self.openai = openai
+
+    def setup_google_ai(self):
+        import google.generativeai as genai
+        key = config['google']['api_key'].get()
+        model = config['google']['model'].get("gemini-pro")
+        service_json = config['google']['json_key'].get()
+        self._log.debug('JSON key: {}', service_json)
+        os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = service_json
+        genai.configure(api_key=key)
+        try:
+            gen_ai = genai.GenerativeModel(model_name = model)
+            self.google = gen_ai
+        except Exception:
+            self.google = None
+            pass
+
+    def google_ai_song_rec(self, number, prompt):
+        num_songs = int(number)
+        sys_prompt = f"""
+        You are a music recommendation system. You will reply with
+        {num_songs} song recommendations in a JSON format. Only
+        reply with the JSON object, no need to send anything else.
+        Include title, artist, album, and year in the JSON response.
+        Don't make up things. Use the JSON format:
+        {{
+            "songs": [
+                {{
+                    "title": "Title of song 1",
+                    "artist": "Artist of Song 1",
+                    "album": "Album of Song 1",
+                    "year": "Year of release"
+                }}
+            ]
+        }}
+        Now, {prompt}
+        """
+        try:
+            self._log.info('Sending request to Google AI')
+            chat = self.google.generate_content(sys_prompt)
+        except Exception as e:
+            self._log.error('Unable to connect to Google AI. Error: {}', e)
+            return
+        reply = chat.text
+        self._log.debug('Google AI replied: {}', reply)
+        return self.extract_json(reply)
+
+    def chat_gpt_song_rec(self, number, prompt):
         model = config['openai']['model'].get()
         num_songs = int(number)
-        sys_prompt = (
-            f'You are a music recommender. You will reply with {num_songs} song '
-            'recommendations in a JSON format. Only reply with the JSON object, '
-            'no need to send anything else. Include title, artist, album, and '
-            'year in the JSON response. Use the JSON format: '
-            '{'
-            '    "songs": ['
-            '        {'
-            '            "title": "Title of song 1",'
-            '            "artist": "Artist of Song 1",'
-            '            "album": "Album of Song 1",'
-            '            "year": "Year of release"'
-            '        }'
-            '    ]'
-            '}'
-        )
+        sys_prompt = f"""
+        You are a music recommender. You will reply with {num_songs} song
+        recommendations in a JSON format. Only reply with the JSON object,
+        no need to send anything else. Include title, artist, album, and
+        year in the JSON response. Use the JSON format:
+        {{
+            "songs": [
+                {{
+                    "title": "Title of song 1",
+                    "artist": "Artist of Song 1",
+                    "album": "Album of Song 1",
+                    "year": "Year of release"
+                }}
+            ]
+        }}
+        """
         messages = [{"role": "system", "content": sys_prompt}]
         messages.append({"role": "user", "content": prompt})
         try:
             self._log.info('Sending request to OpenAI')
-            chat = openai.ChatCompletion.create(model=model, messages=messages,
-                                                temperature=0.7)
+            chat = self.openai.ChatCompletion.create(model=model,
+                                                     messages=messages,
+                                                     temperature=0.7)
         except Exception as e:
             self._log.error('Unable to connect to OpenAI. Error: {}', e)
             return
