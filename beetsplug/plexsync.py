@@ -56,6 +56,8 @@ class PlexSync(BeetsPlugin):
         super().__init__()
 
         self.config_dir = config.config_dir()
+        self.google = None
+        self.openai = None
 
         # Adding defaults.
         config['plex'].add({
