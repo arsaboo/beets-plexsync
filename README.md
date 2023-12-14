@@ -50,7 +50,7 @@ The following features are implemented in `plexsync`:
 
 * The `beet plexsonic` command allows you to create AI-based playlists using OpenAI's GPT language model or Google's Gemini Pro model. To use this feature, you will need to configure one of the AI models with an API key. If you configure both the models, the Gemini model will be used. Once you have obtained an API key, you can configure `beets` to use it by adding the following to your `config.yaml` file:
 
-  ```yaml
+```yaml
   openai:
       api_key: API_KEY
       model: "gpt-3.5-turbo"
