@@ -989,7 +989,7 @@ class PlexSync(BeetsPlugin):
                         i[2] += count
                         i[3] = max(i[3], last_played_date) if i[3] else last_played_date
         # sort album list by viewcount and then by last played date
-        sorted_albums = sorted(album, key=lambda x: (-x[2], x[3]), reverse=True)
+        sorted_albums = sorted(album, key=lambda x: (x[2], -x[3]), reverse=True)
         # only return the album objects and add count and last played date to the album object
         for album in sorted_albums:
             album[0].count = album[2]
