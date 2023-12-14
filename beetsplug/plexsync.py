@@ -967,7 +967,7 @@ class PlexSync(BeetsPlugin):
         import google.generativeai as genai
         key = config['google']['api_key'].get()
         model = config['google']['model'].get("gemini-pro")
-        service_json = config['google']['json_key'].get()
+        service_json = config['google']['service_json'].get()
         self._log.debug('JSON key: {}', service_json)
         os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = service_json
         genai.configure(api_key=key)
