@@ -961,28 +961,42 @@ class PlexSync(BeetsPlugin):
     def _plex_most_played_albums(self, tracks, interval):
         from datetime import datetime, timedelta
 
-        now = datetime.now
-        frm_dt = now() - timedelta(days=interval)
+        now = datetime.now()
+        frm_dt = now - timedelta(days=interval)
         album = []
-        # save album object, parenttitle, thumburl, and viewcount in album list
+        # save album object, parenttitle, thumburl, viewcount, and last played date in album list
         for track in tracks:
             history = track.history(mindate=frm_dt)
             count = len(history)
+            last_played_date = (
+                max(history, key=lambda x: x.date_played).date_played
+                if history
+                else None
+            )
             if track.parentTitle not in [a[1] for a in album]:
-                album.append([track.album(), track.parentTitle, count])
+                album.append(
+                    [track.album(), track.parentTitle, count, last_played_date]
+                )
             else:
                 for i in album:
                     if i[1] == track.parentTitle:
                         i[2] += count
-        # sort album list by viewcount
-        sorted_albums = sorted(album, key=lambda x: x[2], reverse=True)
-        # only return the album objects and add count to the album object
+                        i[3] = max(i[3], last_played_date) if i[3] else last_played_date
+        # sort album list by viewcount and then by last played date
+        sorted_albums = sorted(album, key=lambda x: (-x[2], x[3]), reverse=True)
+        # only return the album objects and add count and last played date to the album object
         for album in sorted_albums:
             album[0].count = album[2]
-        # sort album objects by viewcount
+            album[0].last_played_date = album[3]
+        # sort album objects by viewcount and then by last played date
         sorted_albums = [i[0] for i in sorted_albums]
         for album in sorted_albums:
-            self._log.debug("{} played {} times", album.title, album.count)
+            self._log.debug(
+                "{} played {} times, last played on {}",
+                album.title,
+                album.count,
+                album.last_played_date,
+            )
         return sorted_albums
 
     def create_collage(self, list_image_urls, dimension):
