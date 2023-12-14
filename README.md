@@ -48,13 +48,22 @@ The following features are implemented in `plexsync`:
 
 ## `beet plexsonic`
 
-* The `beet plexsonic` command allows you to create AI-based playlists using OpenAI's GPT language model. To use this feature, you will need an OpenAI API key. Once you have obtained an API key, you can configure `beets` to use it by adding the following to your `config.yaml` file:
+* The `beet plexsonic` command allows you to create AI-based playlists using OpenAI's GPT language model or Google's Gemini Pro model. To use this feature, you will need to configure one of the AI models with an API key. If you configure both the models, the Gemini model will be used. Once you have obtained an API key, you can configure `beets` to use it by adding the following to your `config.yaml` file:
+
   ```yaml
   openai:
       api_key: API_KEY
       model: "gpt-3.5-turbo"
   ```
-  I have only tested this with `gpt-3.5-turbo` but I am sure it will work with gpt-4. You can get started with `beet plexsonic -p "YOUR_PROMPT"` to create the playlist based on YOUR_PROMPT. The default playlist name is `SonicSage` (wink wink), you can modify it using `-m` flag. By default, it requests 10 tracks from OpenAI. Use the `-n` flag to change the number of tracks requested. Finally, if you prefer to clear the playlist before adding the new songs, you can add `-c` flat. So, to create a new classical music playlist, you can use somethign like `beet plexsonic -c -n 10 -p "classical music, romanticism era, like Schubert, Chopin, Liszt"`.
+```yaml
+  google:
+    model: "gemini-pro"
+    api_key: API_KEY
+    service_json: /path/to/your/key.json
+```
+  To obtain your json file, visit https://console.cloud.google.com/apis/credentials and use Service Account under create credentials.
+
+  I have only tested this with `gpt-3.5-turbo` and `gemini-pro` but I am sure it will work with other models. You can get started with `beet plexsonic -p "YOUR_PROMPT"` to create the playlist based on YOUR_PROMPT. The default playlist name is `SonicSage` (wink wink), you can modify it using `-m` flag. By default, it requests 10 tracks from OpenAI. Use the `-n` flag to change the number of tracks requested. Finally, if you prefer to clear the playlist before adding the new songs, you can add `-c` flat. So, to create a new classical music playlist, you can use somethign like `beet plexsonic -c -n 10 -p "classical music, romanticism era, like Schubert, Chopin, Liszt"`.
 
   Please note that not all tracks returned by OpenAI may be available in your library or matched perfectly, affecting the size of the playlist created. The command will log the tracks that could not be found on your library. You can improve the matching by enabling `manual_search` (see Advanced Usage). This is working extrmely well for me. I would love to hear your comments/feedback to improve this feature.
 
