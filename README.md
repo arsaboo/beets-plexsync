@@ -61,7 +61,7 @@ The following features are implemented in `plexsync`:
     api_key: API_KEY
     service_json: /path/to/your/key.json
 ```
-  To obtain your json file, visit https://console.cloud.google.com/apis/credentials and use Service Account under create credentials.
+  To obtain your json file, visit https://console.cloud.google.com/apis/credentials and use Service Account under create credentials. You can also create the API key on the same page.
 
   I have only tested this with `gpt-3.5-turbo` and `gemini-pro` but I am sure it will work with other models. You can get started with `beet plexsonic -p "YOUR_PROMPT"` to create the playlist based on YOUR_PROMPT. The default playlist name is `SonicSage` (wink wink), you can modify it using `-m` flag. By default, it requests 10 tracks from OpenAI. Use the `-n` flag to change the number of tracks requested. Finally, if you prefer to clear the playlist before adding the new songs, you can add `-c` flat. So, to create a new classical music playlist, you can use somethign like `beet plexsonic -c -n 10 -p "classical music, romanticism era, like Schubert, Chopin, Liszt"`.
 
