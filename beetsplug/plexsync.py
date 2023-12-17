@@ -963,40 +963,37 @@ class PlexSync(BeetsPlugin):
 
         now = datetime.now()
         frm_dt = now - timedelta(days=interval)
-        album = []
-        # save album object, parenttitle, thumburl, viewcount, and last played date in album list
+        album_dict = {}
         for track in tracks:
             history = track.history(mindate=frm_dt)
             count = len(history)
-            try:
-                last_played_date = (
-                    max(
-                        (h for h in history if h.lastViewedAt is not None),
-                        key=lambda x: x.lastViewedAt,
-                    ).lastViewedAt
-                    if history
-                    else None
-                )
-            except ValueError:
-                last_played_date = None
-            if track.parentTitle not in [a[1] for a in album]:
-                album.append(
-                    [track.album(), track.parentTitle, count, last_played_date]
-                )
+            last_played_date = max(
+                (h.lastViewedAt for h in history if h.lastViewedAt is not None),
+                default=None,
+            )
+            if track.parentTitle not in album_dict:
+                album_dict[track.parentTitle] = [
+                    track.album(),
+                    track.parentTitle,
+                    count,
+                    last_played_date,
+                ]
             else:
-                for i in album:
-                    if i[1] == track.parentTitle:
-                        i[2] += count
-                        i[3] = max(i[3], last_played_date) if i[3] else last_played_date
-        # sort album list by viewcount and then by last played date
+                album = album_dict[track.parentTitle]
+                album[2] += count
+                album[3] = (
+                    max(album[3], last_played_date) if album[3] else last_played_date
+                )
+
         sorted_albums = sorted(
-            album, key=lambda x: (-x[2], -x[3] if x[3] is not None else float("inf"))
+            album_dict.values(),
+            key=lambda x: (-x[2], -x[3] if x[3] is not None else float("inf")),
         )
-        # only return the album objects and add count and last played date to the album object
+
         for album in sorted_albums:
             album[0].count = album[2]
             album[0].last_played_date = album[3]
-        # sort album objects by viewcount and then by last played date
+
         sorted_albums = [i[0] for i in sorted_albums]
         for album in sorted_albums:
             self._log.debug(
