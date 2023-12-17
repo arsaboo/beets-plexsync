@@ -906,10 +906,12 @@ class PlexSync(BeetsPlugin):
         # get the weekly jams playlist
         self._log.info("Importing weekly jams playlist")
         weekly_jams = lb.get_weekly_jams()
+        self._log.info("Importing {} songs from Weekly Jams", len(weekly_jams))
         self.add_songs_to_plex("Weekly Jams", weekly_jams)
 
         self._log.info("Importing weekly exploration playlist")
         weekly_exploration = lb.get_weekly_exploration()
+        self._log.info("Importing {} songs from Weekly Exploration", len(weekly_exploration))
         self.add_songs_to_plex("Weekly Exploration", weekly_exploration)
 
     def _plex_import_playlist(self, playlist, playlist_url):
