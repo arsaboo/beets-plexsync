@@ -83,7 +83,9 @@ The following features are implemented in `plexsync`:
 
 * `beet plexsearchimport`: allows you to import playlists based on Youtube search (results are returned in descending order of the number of views). Use the `-m` flag to specify the playlist name to be created in Plex, supply the search query with the `-s` flag, and use the `-l` flag to limit the number of search results.
 
-  For example, to import the top-20 songs by Taylor Swift, use the command `beet -v plexsearchimport -s "Taylor Swift" -l 20 -m "Taylor"`.
+  For example, to import the top-20 songs by Taylor Swift, use the command `beet plexsearchimport -s "Taylor Swift" -l 20 -m "Taylor"`.
+
+  You can also use this function to import the weekly jams and weekly exploration playlists from ListenBrainz into Plex. You will need to install and configure the [Listenbrainz plugin][listenbrainz_plugin_]. To import the Listenbrainz playlists, use the command `beet plexplaylistimport --listenbrainz`.
 
 * `beet plexplaylistclear`: allows you to clear a Plex playlist. Use the `-m` flag to specify the playlist name to be cleared in Plex.
 
@@ -113,3 +115,4 @@ plexsync:
 [config]: https://beets.readthedocs.io/en/latest/plugins/index.html
 [beets]: https://github.com/beetbox/beets
 [Spotify]: https://beets.readthedocs.io/en/stable/plugins/spotify.html
+[listenbrainz_plugin_]: https://github.com/arsaboo/beets-listenbrainz
