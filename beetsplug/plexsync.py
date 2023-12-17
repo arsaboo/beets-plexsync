@@ -332,11 +332,7 @@ class PlexSync(BeetsPlugin):
         )
 
         def func_playlist_import(lib, opts, args):
-            if opts.listenbrainz:
-                # Use ListenBrainz as input option
-                self._plex_import_playlist_from_listenbrainz()
-            else:
-                self._plex_import_playlist(opts.playlist, opts.url)
+            self._plex_import_playlist(opts.playlist, opts.url, opts.listenbrainz)
 
         playlistimport_cmd.func = func_playlist_import
 
@@ -891,50 +887,56 @@ class PlexSync(BeetsPlugin):
         }
         self.search_plex_song(song_dict, manual_search=True)
 
-    def _plex_import_playlist_from_listenbrainz(self):
-        try:
-            from beetsplug.listenbrainz import ListenBrainzPlugin
-        except ModuleNotFoundError:
-            self._log.error("ListenBrainz plugin not installed")
-            return
-        try:
-            lb = ListenBrainzPlugin()
-        except Exception as e:
-            self._log.error("Unable to initialize ListenBrainz plugin. Error: {}", e)
-            return
-        # there are 4 playlists to be imported. 1. Weekly jams 2. Weekly exploration 3 Last week's jams 4. Last week's exploration
-        # get the weekly jams playlist
-        self._log.info("Importing weekly jams playlist")
-        weekly_jams = lb.get_weekly_jams()
-        self._log.info("Importing {} songs from Weekly Jams", len(weekly_jams))
-        self.add_songs_to_plex("Weekly Jams", weekly_jams)
-
-        self._log.info("Importing weekly exploration playlist")
-        weekly_exploration = lb.get_weekly_exploration()
-        self._log.info("Importing {} songs from Weekly Exploration", len(weekly_exploration))
-        self.add_songs_to_plex("Weekly Exploration", weekly_exploration)
-
-    def _plex_import_playlist(self, playlist, playlist_url):
+    def _plex_import_playlist(self, playlist, playlist_url=None, listenbrainz=False):
         """Import playlist into Plex."""
-        if "http://" not in playlist_url and "https://" not in playlist_url:
-            raise ui.UserError("Playlist URL not provided")
-        if "apple" in playlist_url:
-            songs = self.import_apple_playlist(playlist_url)
-        elif "jiosaavn" in playlist_url:
-            songs = self.import_jiosaavn_playlist(playlist_url)
-        elif "gaana.com" in playlist_url:
-            songs = self.import_gaana_playlist(playlist_url)
-        elif "spotify" in playlist_url:
-            songs = self.import_spotify_playlist(self.get_playlist_id(playlist_url))
-        elif "youtube" in playlist_url:
-            songs = self.import_yt_playlist(playlist_url)
-        elif "tidal" in playlist_url:
-            songs = self.import_tidal_playlist(playlist_url)
+        if listenbrainz:
+            try:
+                from beetsplug.listenbrainz import ListenBrainzPlugin
+            except ModuleNotFoundError:
+                self._log.error("ListenBrainz plugin not installed")
+                return
+            try:
+                lb = ListenBrainzPlugin()
+            except Exception as e:
+                self._log.error(
+                    "Unable to initialize ListenBrainz plugin. Error: {}", e
+                )
+                return
+            # there are 2 playlists to be imported. 1. Weekly jams 2. Weekly exploration
+            # get the weekly jams playlist
+            self._log.info("Importing weekly jams playlist")
+            weekly_jams = lb.get_weekly_jams()
+            self._log.info("Importing {} songs from Weekly Jams", len(weekly_jams))
+            self.add_songs_to_plex("Weekly Jams", weekly_jams)
+
+            self._log.info("Importing weekly exploration playlist")
+            weekly_exploration = lb.get_weekly_exploration()
+            self._log.info(
+                "Importing {} songs from Weekly Exploration", len(weekly_exploration)
+            )
+            self.add_songs_to_plex("Weekly Exploration", weekly_exploration)
         else:
-            songs = []
-            self._log.error("Playlist URL not supported")
-        self._log.info("Importing {} songs from {}", len(songs), playlist_url)
-        self.add_songs_to_plex(playlist, songs)
+            if playlist_url is None or (
+                "http://" not in playlist_url and "https://" not in playlist_url
+            ):
+                raise ui.UserError("Playlist URL not provided")
+            if "apple" in playlist_url:
+                songs = self.import_apple_playlist(playlist_url)
+            elif "jiosaavn" in playlist_url:
+                songs = self.import_jiosaavn_playlist(playlist_url)
+            elif "gaana.com" in playlist_url:
+                songs = self.import_gaana_playlist(playlist_url)
+            elif "spotify" in playlist_url:
+                songs = self.import_spotify_playlist(self.get_playlist_id(playlist_url))
+            elif "youtube" in playlist_url:
+                songs = self.import_yt_playlist(playlist_url)
+            elif "tidal" in playlist_url:
+                songs = self.import_tidal_playlist(playlist_url)
+            else:
+                songs = []
+                self._log.error("Playlist URL not supported")
+            self._log.info("Importing {} songs from {}", len(songs), playlist_url)
+            self.add_songs_to_plex(playlist, songs)
 
     def add_songs_to_plex(self, playlist, songs):
         song_list = []
