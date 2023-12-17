@@ -62,8 +62,17 @@ class PlexSync(BeetsPlugin):
         self.openai = None
 
         # Call the setup methods
-        self.setup_google_ai()
-        self.setup_openai_api()
+        try:
+            self.setup_google_ai()
+        except Exception as e:
+            print(f"Failed to set up Google AI: {e}")
+            self.google = None
+
+        try:
+            self.setup_openai_api()
+        except Exception as e:
+            print(f"Failed to set up OpenAI API: {e}")
+            self.openai = None
 
         # Adding defaults.
         config["plex"].add(
@@ -902,8 +911,6 @@ class PlexSync(BeetsPlugin):
         self._log.info("Importing weekly exploration playlist")
         weekly_exploration = lb.get_weekly_exploration()
         self.add_songs_to_plex("Weekly Exploration", weekly_exploration)
-
-        return lb.get_tracks_from_playlist()
 
     def _plex_import_playlist(self, playlist, playlist_url):
         """Import playlist into Plex."""
