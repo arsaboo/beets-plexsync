@@ -62,8 +62,17 @@ class PlexSync(BeetsPlugin):
         self.openai = None
 
         # Call the setup methods
-        self.setup_google_ai()
-        self.setup_openai_api()
+        try:
+            self.setup_google_ai()
+        except Exception as e:
+            print(f"Failed to set up Google AI: {e}")
+            self.google = None
+
+        try:
+            self.setup_openai_api()
+        except Exception as e:
+            print(f"Failed to set up OpenAI API: {e}")
+            self.openai = None
 
         # Adding defaults.
         config["plex"].add(
@@ -307,19 +316,27 @@ class PlexSync(BeetsPlugin):
             "-m",
             "--playlist",
             default="Beets",
-            help="name of the playlist to be \
-                                                 added in Plex",
+            help="name of the playlist to be added in Plex",
         )
         playlistimport_cmd.parser.add_option(
             "-u",
             "--url",
             default="",
-            help="playlist URL to be imported\
-                                                  in Plex",
+            help="playlist URL to be imported in Plex",
+        )
+        playlistimport_cmd.parser.add_option(
+            "-l",
+            "--listenbrainz",
+            action="store_true",
+            help="use ListenBrainz as input option",
         )
 
         def func_playlist_import(lib, opts, args):
-            self._plex_import_playlist(opts.playlist, opts.url)
+            if opts.listenbrainz:
+                # Use ListenBrainz as input option
+                self._plex_import_playlist_from_listenbrainz()
+            else:
+                self._plex_import_playlist(opts.playlist, opts.url)
 
         playlistimport_cmd.func = func_playlist_import
 
@@ -874,6 +891,29 @@ class PlexSync(BeetsPlugin):
         }
         self.search_plex_song(song_dict, manual_search=True)
 
+    def _plex_import_playlist_from_listenbrainz(self):
+        try:
+            from beetsplug.listenbrainz import ListenBrainzPlugin
+        except ModuleNotFoundError:
+            self._log.error("ListenBrainz plugin not installed")
+            return
+        try:
+            lb = ListenBrainzPlugin()
+        except Exception as e:
+            self._log.error("Unable to initialize ListenBrainz plugin. Error: {}", e)
+            return
+        # there are 4 playlists to be imported. 1. Weekly jams 2. Weekly exploration 3 Last week's jams 4. Last week's exploration
+        # get the weekly jams playlist
+        self._log.info("Importing weekly jams playlist")
+        weekly_jams = lb.get_weekly_jams()
+        self._log.info("Importing {} songs from Weekly Jams", len(weekly_jams))
+        self.add_songs_to_plex("Weekly Jams", weekly_jams)
+
+        self._log.info("Importing weekly exploration playlist")
+        weekly_exploration = lb.get_weekly_exploration()
+        self._log.info("Importing {} songs from Weekly Exploration", len(weekly_exploration))
+        self.add_songs_to_plex("Weekly Exploration", weekly_exploration)
+
     def _plex_import_playlist(self, playlist, playlist_url):
         """Import playlist into Plex."""
         if "http://" not in playlist_url and "https://" not in playlist_url:
@@ -893,8 +933,11 @@ class PlexSync(BeetsPlugin):
         else:
             songs = []
             self._log.error("Playlist URL not supported")
-        song_list = []
         self._log.info("Importing {} songs from {}", len(songs), playlist_url)
+        self.add_songs_to_plex(playlist, songs)
+
+    def add_songs_to_plex(self, playlist, songs):
+        song_list = []
         if songs:
             for song in songs:
                 if self.search_plex_song(song) is not None:
