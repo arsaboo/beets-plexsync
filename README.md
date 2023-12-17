@@ -29,38 +29,60 @@ Next, you can configure your Plex server and library like following (see instruc
 
 ```yaml
 plex:
-    host: '192.168.2.212'
-    port: 32400
-    token: PLEX_TOKEN
-    library_name: 'Music'
+  host: '192.168.2.212'
+  port: 32400
+  token: PLEX_TOKEN
+  library_name: 'Music'
 ```
 
 If you want to import `spotify` playlists, you will also need to configure the `spotify` plugin. If you are already using the [Spotify][Spotify] plugin, `plexsync`will reuse the same configuration.
 ```yaml
 spotify:
-    client_id: CLIENT_ID
-    client_secret: CLIENT_SECRET
+  client_id: CLIENT_ID
+  client_secret: CLIENT_SECRET
 ```
 
-## Features
+## Introduction
 
-The following features are implemented in `plexsync`:
+This plugin allows you to sync your Plex library with beets, create playlists based on AI-generated prompts, import playlists from other online services, and more.
 
-## `beet plexsonic`
+## Key Features
+
+- **AI-Generated Playlists**: Use `beet plexsonic -p "YOUR_PROMPT"` to create a playlist based on YOUR_PROMPT. Modify the playlist name using `-m` flag, change the number of tracks requested with `-n` flag, and clear the playlist before adding new songs with `-c` flag.
+
+- **Plex Library Sync**: `beet plexsync [-f]` imports all the data from your Plex library inside beets. Use the `-f` flag to force update the entire library with fresh information from Plex.
+
+- **Recent Sync**: `beet plexsyncrecent` updates the information for tracks listened in the last 7 days.
+
+- **Playlist Manipulation**: `plexplaylistadd` and `plexplaylistremove` add or remove tracks from Plex playlists. Use the `-m` flag to provide the playlist name.
+
+- **Playlist Import**: `beet plexplaylistimport` imports playlists from Spotify, Apple Music, Gaana.com, JioSaavn, Youtube, and Tidal. Use the `-m` flag to specify the playlist name and the `-u` flag to supply the full playlist url.
+
+- **Youtube Search Import**: `beet plexsearchimport` imports playlists based on Youtube search. Use the `-m` flag to specify the playlist name, the `-s` flag for the search query, and the `-l` flag to limit the number of search results.
+
+- **Playlist Clear**: `beet plexplaylistclear` clears a Plex playlist. Use the `-m` flag to specify the playlist name.
+
+- **Plex to Spotify**: `beet plex2spotify` copies a Plex playlist to Spotify. Use the `-m` flag to specify the playlist name.
+
+- **Playlist to Collection**: `beet plexplaylist2collection` converts a Plex playlist to a collection. Use the `-m` flag to specify the playlist name.
+
+- **Album Collage**: `beet plexcollage` creates a collage of most played albums. Use the `-i` flag to specify the number of days and `-g` flag to specify the grid size.
+
+## Configuration
 
 * The `beet plexsonic` command allows you to create AI-based playlists using OpenAI's GPT language model or Google's Gemini Pro model. To use this feature, you will need to configure one of the AI models with an API key. If you configure both the models, the Gemini model will be used. Once you have obtained an API key, you can configure `beets` to use it by adding the following to your `config.yaml` file:
 
-```yaml
+  ```yaml
   openai:
       api_key: API_KEY
       model: "gpt-3.5-turbo"
   ```
-```yaml
+  ```yaml
   google:
     model: "gemini-pro"
     api_key: API_KEY
     service_json: /path/to/your/key.json
-```
+  ```
   To obtain your json file, visit https://console.cloud.google.com/apis/credentials and use Service Account under create credentials. You can also create the API key on the same page.
 
   I have only tested this with `gpt-3.5-turbo` and `gemini-pro` but I am sure it will work with other models. You can get started with `beet plexsonic -p "YOUR_PROMPT"` to create the playlist based on YOUR_PROMPT. The default playlist name is `SonicSage` (wink wink), you can modify it using `-m` flag. By default, it requests 10 tracks from OpenAI. Use the `-n` flag to change the number of tracks requested. Finally, if you prefer to clear the playlist before adding the new songs, you can add `-c` flat. So, to create a new classical music playlist, you can use somethign like `beet plexsonic -c -n 10 -p "classical music, romanticism era, like Schubert, Chopin, Liszt"`.
@@ -104,7 +126,7 @@ Plex matching may be less than perfect and it can miss tracks if the tags don't 
 
 ```yaml
 plexsync:
-    manual_search: yes
+  manual_search: yes
 ```
 
 
