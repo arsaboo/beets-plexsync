@@ -306,7 +306,7 @@ class PlexSync(BeetsPlugin):
         )
 
         def func_sync_recent(lib, opts, args):
-            self._update_recently_played(lib)
+            self._update_recently_played(lib, opts.days)
 
         syncrecent_cmd.func = func_sync_recent
 
