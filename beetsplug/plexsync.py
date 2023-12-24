@@ -297,13 +297,16 @@ class PlexSync(BeetsPlugin):
 
         # plexsyncrecent command - instead of using the plexsync command which
         # can be slow, we can use the plexsyncrecent command to update info
-        # for tracks played in the last 7 days.
+        # for tracks played in the last X days.
         syncrecent_cmd = ui.Subcommand(
             "plexsyncrecent", help="Sync recently played tracks"
         )
+        syncrecent_cmd.parser.add_option(
+            "--days", default=7, help="Number of days to be synced"
+        )
 
         def func_sync_recent(lib, opts, args):
-            self._update_recently_played(lib)
+            self._update_recently_played(lib, opts.days)
 
         syncrecent_cmd.func = func_sync_recent
 
@@ -775,10 +778,10 @@ class PlexSync(BeetsPlugin):
         self._log.info("Removing {} tracks from {} playlist", len(to_remove), playlist)
         plst.removeItems(items=list(to_remove))
 
-    def _update_recently_played(self, lib):
+    def _update_recently_played(self, lib, days=7):
         """Fetch the Plex track key."""
         tracks = self.music.search(
-            filters={"track.lastViewedAt>>": "7d"}, libtype="track"
+            filters={"track.lastViewedAt>>": f"{days}d"}, libtype="track"
         )
         self._log.info("Updating information for {} tracks", len(tracks))
         with lib.transaction():
