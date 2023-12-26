@@ -12,6 +12,7 @@ import difflib
 import os
 import re
 import time
+from datetime import datetime
 
 import confuse
 import dateutil.parser
@@ -691,7 +692,7 @@ class PlexSync(BeetsPlugin):
             return None
 
     def sort_plex_playlist(self, playlist_name, sort_field):
-        import datetime
+        """Sort a Plex playlist by a given field."""
 
         # Get the playlist
         playlist = self.plex.playlist(playlist_name)
