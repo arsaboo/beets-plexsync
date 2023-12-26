@@ -346,9 +346,7 @@ class PlexSync(BeetsPlugin):
             "-m",
             "--playlist",
             default="Beets",
-            help="name of the \
-                                                      playlist to be \
-                                                      converted",
+            help="name of the playlist to be converted",
         )
 
         def func_playlist2collection(lib, opts, args):
@@ -359,22 +357,19 @@ class PlexSync(BeetsPlugin):
         # plexsearchimport command
         searchimport_cmd = ui.Subcommand(
             "plexsearchimport",
-            help="import playlist in to Plex \
-                                            based on Youtube search",
+            help="import playlist in to Plex based on Youtube search",
         )
         searchimport_cmd.parser.add_option(
             "-m",
             "--playlist",
             default="Beets",
-            help="name of the playlist to be \
-                                           added in Plex",
+            help="name of the playlist to be added in Plex",
         )
         searchimport_cmd.parser.add_option(
             "-s",
             "--search",
             default="",
-            help="Create playlist based on \
-                                           Youtube search in Plex",
+            help="Create playlist based on Youtube search in Plex",
         )
         searchimport_cmd.parser.add_option(
             "-l", "--limit", default=10, help="Number of tracks"
@@ -394,8 +389,7 @@ class PlexSync(BeetsPlugin):
             "-m",
             "--playlist",
             default="",
-            help="name of the Plex playlist \
-                                            to be cleared",
+            help="name of the Plex playlist to be cleared",
         )
 
         def func_playlist_clear(lib, opts, args):
@@ -435,8 +429,7 @@ class PlexSync(BeetsPlugin):
             "-m",
             "--playlist",
             default="SonicSage",
-            help="name of the playlist to be \
-                                            added in Plex",
+            help="name of the playlist to be added in Plex",
         )
         sonicsage_cmd.parser.add_option(
             "-c",
@@ -460,8 +453,7 @@ class PlexSync(BeetsPlugin):
             "-m",
             "--playlist",
             default="beets",
-            help="name of the playlist to be \
-                                            added in Spotify",
+            help="name of the playlist to be added in Spotify",
         )
 
         def func_plex2spotify(lib, opts, args):
