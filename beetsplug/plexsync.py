@@ -12,6 +12,7 @@ import difflib
 import os
 import re
 import time
+from datetime import datetime
 
 import confuse
 import dateutil.parser
@@ -690,6 +691,30 @@ class PlexSync(BeetsPlugin):
             self._log.debug("Track {} not found in Plex library", item)
             return None
 
+    def sort_plex_playlist(self, playlist_name, sort_field):
+        """Sort a Plex playlist by a given field."""
+
+        # Get the playlist
+        playlist = self.plex.playlist(playlist_name)
+
+        # Get the items in the playlist
+        items = playlist.items()
+
+        # Sort the items based on the sort_field
+        sorted_items = sorted(
+            items,
+            key=lambda x: getattr(x, sort_field)
+            if getattr(x, sort_field) is not None
+            else datetime(1900, 1, 1),
+        )
+
+        # Remove all items from the playlist
+        playlist.removeItems(items)
+
+        # Add the sorted items back to the playlist
+        for item in sorted_items:
+            playlist.addItems(item)
+
     def _plex_add_playlist_item(self, items, playlist):
         """Add items to Plex playlist."""
         plex_set = set()
@@ -720,6 +745,7 @@ class PlexSync(BeetsPlugin):
                     playlist,
                     e,
                 )
+        self.sort_plex_playlist(playlist, "lastViewedAt")
 
     def _plex_playlist_to_collection(self, playlist):
         """Convert a Plex playlist to a Plex collection."""
