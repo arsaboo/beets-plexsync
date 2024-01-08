@@ -842,7 +842,7 @@ class PlexSync(BeetsPlugin):
                 if len(tracks) == 0:
                     song["title"] = re.sub(r"\(.*\)", "", song["title"]).strip()
                     tracks = self.music.searchTracks(**{"track.title": song["title"]})
-        except exceptions as e:
+        except Exception as e:
             self._log.debug(
                 "Error searching for {} - {}. Error: {}",
                 song["album"],
