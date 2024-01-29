@@ -29,6 +29,7 @@ from jiosaavn import JioSaavn
 from plexapi import exceptions
 from plexapi.server import PlexServer
 from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
+from concurrent.futures import ThreadPoolExecutor
 
 
 class PlexSync(BeetsPlugin):
@@ -652,29 +653,30 @@ class PlexSync(BeetsPlugin):
 
     def _fetch_plex_info(self, items, write, force):
         """Obtain track information from Plex."""
-        for index, item in enumerate(items, start=1):
-            self._log.info("Processing {}/{} tracks - {} ", index, len(items), item)
-            # If we're not forcing re-downloading for all tracks, check
-            # whether the popularity data is already present
-            if not force:
-                if "plex_userrating" in item:
-                    self._log.debug("Plex rating already present for: {}", item)
-                    continue
-            plex_track = self.search_plex_track(item)
-            if plex_track is None:
-                self._log.info("No track found for: {}", item)
-                continue
-            item.plex_guid = plex_track.guid
-            item.plex_ratingkey = plex_track.ratingKey
-            item.plex_userrating = plex_track.userRating
-            item.plex_skipcount = plex_track.skipCount
-            item.plex_viewcount = plex_track.viewCount
-            item.plex_lastviewedat = plex_track.lastViewedAt
-            item.plex_lastratedat = plex_track.lastRatedAt
-            item.plex_updated = time.time()
-            item.store()
-            if write:
-                item.try_write()
+        with ThreadPoolExecutor() as executor:
+            for index, item in enumerate(items, start=1):
+                executor.submit(self._process_item, index, item, write, force)
+
+    def _process_item(self, index, item, write, force):
+        self._log.info("Processing {}/{} tracks - {} ", index, len(items), item)
+        if not force and "plex_userrating" in item:
+            self._log.debug("Plex rating already present for: {}", item)
+            return
+        plex_track = self.search_plex_track(item)
+        if plex_track is None:
+            self._log.info("No track found for: {}", item)
+            return
+        item.plex_guid = plex_track.guid
+        item.plex_ratingkey = plex_track.ratingKey
+        item.plex_userrating = plex_track.userRating
+        item.plex_skipcount = plex_track.skipCount
+        item.plex_viewcount = plex_track.viewCount
+        item.plex_lastviewedat = plex_track.lastViewedAt
+        item.plex_lastratedat = plex_track.lastRatedAt
+        item.plex_updated = time.time()
+        item.store()
+        if write:
+            item.try_write()
 
     def search_plex_track(self, item):
         """Fetch the Plex track key."""
@@ -703,9 +705,11 @@ class PlexSync(BeetsPlugin):
         # Sort the items based on the sort_field
         sorted_items = sorted(
             items,
-            key=lambda x: getattr(x, sort_field)
-            if getattr(x, sort_field) is not None
-            else datetime(1900, 1, 1),
+            key=lambda x: (
+                getattr(x, sort_field)
+                if getattr(x, sort_field) is not None
+                else datetime(1900, 1, 1)
+            ),
         )
 
         # Remove all items from the playlist
