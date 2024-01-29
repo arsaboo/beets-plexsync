@@ -653,12 +653,13 @@ class PlexSync(BeetsPlugin):
 
     def _fetch_plex_info(self, items, write, force):
         """Obtain track information from Plex."""
+        items_len = len(items)
         with ThreadPoolExecutor() as executor:
             for index, item in enumerate(items, start=1):
-                executor.submit(self._process_item, index, item, write, force)
+                executor.submit(self._process_item, index, item, write, force, items_len)
 
-    def _process_item(self, index, item, write, force):
-        self._log.info("Processing {}/{} tracks - {} ", index, len(items), item)
+    def _process_item(self, index, item, write, force, items_len):
+        self._log.info("Processing {}/{} tracks - {} ", index, items_len, item)
         if not force and "plex_userrating" in item:
             self._log.debug("Plex rating already present for: {}", item)
             return
