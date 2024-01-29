@@ -12,6 +12,7 @@ import difflib
 import os
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 import confuse
@@ -29,7 +30,6 @@ from jiosaavn import JioSaavn
 from plexapi import exceptions
 from plexapi.server import PlexServer
 from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
-from concurrent.futures import ThreadPoolExecutor
 
 
 class PlexSync(BeetsPlugin):
