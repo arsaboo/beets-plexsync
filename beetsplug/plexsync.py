@@ -864,7 +864,10 @@ class PlexSync(BeetsPlugin):
             sorted_tracks = self.find_closest_match(song["title"], tracks)
             self._log.debug("Found {} tracks for {}", len(sorted_tracks), song["title"])
             if manual_search and len(sorted_tracks) > 0:
-                print_(f'Choose candidates for {song["album"]} - ' f'{song["title"]}:')
+                print_(
+                    f'Choose candidates for {song["album"]} '
+                    f'- {song["title"]} - {song["artist"]}:'
+                )
                 for i, track in enumerate(sorted_tracks, start=1):
                     print_(
                         f"{i}. {track.parentTitle} - {track.title} - "
@@ -886,13 +889,19 @@ class PlexSync(BeetsPlugin):
         else:
             if config["plexsync"]["manual_search"] and not manual_search:
                 self._log.info(
-                    "Track {} - {} not found in Plex", song["album"], song["title"]
+                    "Track {} - {} - {} not found in Plex",
+                    song["album"],
+                    song["artist"],
+                    song["title"],
                 )
                 if ui.input_yn("Search manually? (Y/n)"):
                     self.manual_track_search()
             else:
                 self._log.info(
-                    "Track {} - {} not found in Plex", song["album"], song["title"]
+                    "Track {} - {} - {} not found in Plex",
+                    song["album"],
+                    song["artist"],
+                    song["title"],
                 )
             return None
 
