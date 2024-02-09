@@ -617,7 +617,7 @@ class PlexSync(BeetsPlugin):
         soup = BeautifulSoup(content, "html.parser")
         try:
             data = soup.find("script", id="serialized-server-data").text
-        except:
+        except AttributeError:
             self._log.debug("Error parsing Apple Music playlist")
             return None
         # load the data as a JSON object
@@ -649,7 +649,8 @@ class PlexSync(BeetsPlugin):
             self.music.update()
             self._log.info("Update started.")
         except exceptions.PlexApiException:
-            self._log.warning("{} Update failed", self.config["plex"]["library_name"])
+            self._log.warning("{} Update failed",
+                              self.config["plex"]["library_name"])
 
     def _fetch_plex_info(self, items, write, force):
         """Obtain track information from Plex."""
