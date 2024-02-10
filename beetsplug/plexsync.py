@@ -12,6 +12,7 @@ import difflib
 import os
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 import confuse
@@ -616,7 +617,7 @@ class PlexSync(BeetsPlugin):
         soup = BeautifulSoup(content, "html.parser")
         try:
             data = soup.find("script", id="serialized-server-data").text
-        except:
+        except AttributeError:
             self._log.debug("Error parsing Apple Music playlist")
             return None
         # load the data as a JSON object
@@ -648,33 +649,38 @@ class PlexSync(BeetsPlugin):
             self.music.update()
             self._log.info("Update started.")
         except exceptions.PlexApiException:
-            self._log.warning("{} Update failed", self.config["plex"]["library_name"])
+            self._log.warning("{} Update failed",
+                              self.config["plex"]["library_name"])
 
     def _fetch_plex_info(self, items, write, force):
         """Obtain track information from Plex."""
-        for index, item in enumerate(items, start=1):
-            self._log.info("Processing {}/{} tracks - {} ", index, len(items), item)
-            # If we're not forcing re-downloading for all tracks, check
-            # whether the popularity data is already present
-            if not force:
-                if "plex_userrating" in item:
-                    self._log.debug("Plex rating already present for: {}", item)
-                    continue
-            plex_track = self.search_plex_track(item)
-            if plex_track is None:
-                self._log.info("No track found for: {}", item)
-                continue
-            item.plex_guid = plex_track.guid
-            item.plex_ratingkey = plex_track.ratingKey
-            item.plex_userrating = plex_track.userRating
-            item.plex_skipcount = plex_track.skipCount
-            item.plex_viewcount = plex_track.viewCount
-            item.plex_lastviewedat = plex_track.lastViewedAt
-            item.plex_lastratedat = plex_track.lastRatedAt
-            item.plex_updated = time.time()
-            item.store()
-            if write:
-                item.try_write()
+        items_len = len(items)
+        with ThreadPoolExecutor() as executor:
+            for index, item in enumerate(items, start=1):
+                executor.submit(
+                    self._process_item, index, item, write, force, items_len
+                )
+
+    def _process_item(self, index, item, write, force, items_len):
+        self._log.info("Processing {}/{} tracks - {} ", index, items_len, item)
+        if not force and "plex_userrating" in item:
+            self._log.debug("Plex rating already present for: {}", item)
+            return
+        plex_track = self.search_plex_track(item)
+        if plex_track is None:
+            self._log.info("No track found for: {}", item)
+            return
+        item.plex_guid = plex_track.guid
+        item.plex_ratingkey = plex_track.ratingKey
+        item.plex_userrating = plex_track.userRating
+        item.plex_skipcount = plex_track.skipCount
+        item.plex_viewcount = plex_track.viewCount
+        item.plex_lastviewedat = plex_track.lastViewedAt
+        item.plex_lastratedat = plex_track.lastRatedAt
+        item.plex_updated = time.time()
+        item.store()
+        if write:
+            item.try_write()
 
     def search_plex_track(self, item):
         """Fetch the Plex track key."""
@@ -703,9 +709,11 @@ class PlexSync(BeetsPlugin):
         # Sort the items based on the sort_field
         sorted_items = sorted(
             items,
-            key=lambda x: getattr(x, sort_field)
-            if getattr(x, sort_field) is not None
-            else datetime(1900, 1, 1),
+            key=lambda x: (
+                getattr(x, sort_field)
+                if getattr(x, sort_field) is not None
+                else datetime(1900, 1, 1)
+            ),
         )
 
         # Remove all items from the playlist
@@ -857,7 +865,10 @@ class PlexSync(BeetsPlugin):
             sorted_tracks = self.find_closest_match(song["title"], tracks)
             self._log.debug("Found {} tracks for {}", len(sorted_tracks), song["title"])
             if manual_search and len(sorted_tracks) > 0:
-                print_(f'Choose candidates for {song["album"]} - ' f'{song["title"]}:')
+                print_(
+                    f'Choose candidates for {song["album"]} '
+                    f'- {song["title"]} - {song["artist"]}:'
+                )
                 for i, track in enumerate(sorted_tracks, start=1):
                     print_(
                         f"{i}. {track.parentTitle} - {track.title} - "
@@ -879,13 +890,19 @@ class PlexSync(BeetsPlugin):
         else:
             if config["plexsync"]["manual_search"] and not manual_search:
                 self._log.info(
-                    "Track {} - {} not found in Plex", song["album"], song["title"]
+                    "Track {} - {} - {} not found in Plex",
+                    song["album"],
+                    song["artist"],
+                    song["title"],
                 )
                 if ui.input_yn("Search manually? (Y/n)"):
                     self.manual_track_search()
             else:
                 self._log.info(
-                    "Track {} - {} not found in Plex", song["album"], song["title"]
+                    "Track {} - {} - {} not found in Plex",
+                    song["album"],
+                    song["artist"],
+                    song["title"],
                 )
             return None
 
