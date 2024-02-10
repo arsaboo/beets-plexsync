@@ -649,8 +649,7 @@ class PlexSync(BeetsPlugin):
             self.music.update()
             self._log.info("Update started.")
         except exceptions.PlexApiException:
-            self._log.warning("{} Update failed",
-                              self.config["plex"]["library_name"])
+            self._log.warning("{} Update failed", self.config["plex"]["library_name"])
 
     def _fetch_plex_info(self, items, write, force):
         """Obtain track information from Plex."""
@@ -1119,7 +1118,7 @@ class PlexSync(BeetsPlugin):
             grid.paste(image, box=(x, y))
         return grid
 
-    def _plex_sonicsage(self, number, prompt, playlist, clear):
+    def _plex_sonicsage_old(self, number, prompt, playlist, clear):
         """
         Generate song recommendations using OpenAI's GPT-3 model based on a
         given prompt, and add the recommended songs to a Plex playlist.
@@ -1182,6 +1181,103 @@ class PlexSync(BeetsPlugin):
             self._plex_add_playlist_item(matched_songs, playlist)
         except Exception as e:
             self._log.error("Unable to add songs to playlist. Error: {}", e)
+
+    def _plex_sonicsage(self, number, prompt, playlist, clear):
+        """
+        Generate song recommendations using OpenAI's GPT-3 model based on a
+        given prompt, and add the recommended songs to a Plex playlist.
+
+        Args:
+            number (int): The number of song recommendations to generate.
+            prompt (str): The prompt to use for generating song recommendations.
+            playlist (str): The name of the Plex playlist to add the recommended songs to.
+            clear (bool): Whether to clear the playlist before adding the recommended songs.
+
+        Returns:
+            None
+        """
+        if prompt == "":
+            self._log.error("Prompt not provided")
+            return
+        songs = self.llm_song_recommendation(number, prompt)
+        song_list = []
+        if songs is None:
+            return
+        for song in songs["songs"]:
+            title = song["title"]
+            album = song["album"]
+            artist = song["artist"]
+            year = song["year"]
+            song_dict = {
+                "title": title.strip(),
+                "album": album.strip(),
+                "artist": artist.strip(),
+                "year": int(year),
+            }
+            song_list.append(song_dict)
+        self._log.debug(
+            "{} songs to be added in Plex library: {}", len(song_list), song_list
+        )
+        matched_songs = []
+        for song in song_list:
+            if self.search_plex_song(song) is not None:
+                found = self.search_plex_song(song)
+                match_dict = {
+                    "title": found.title,
+                    "album": found.parentTitle,
+                    "plex_ratingkey": found.ratingKey,
+                }
+                self._log.debug("Song matched in Plex library: {}", match_dict)
+                matched_songs.append(self.dotdict(match_dict))
+        self._log.debug("Songs matched in Plex library: {}", matched_songs)
+        if clear:
+            try:
+                self._plex_clear_playlist(playlist)
+            except exceptions.NotFound:
+                self._log.debug(f"Unable to clear playlist {playlist}")
+        try:
+            self._plex_add_playlist_item(matched_songs, playlist)
+        except Exception as e:
+            self._log.error("Unable to add songs to playlist. Error: {}", e)
+
+
+    def llm_song_recommendation(self, number, prompt):
+        from litellm import completion
+
+        os.environ["GEMINI_API_KEY"] = config["google"]["api_key"].get()
+        os.environ["OPENAI_API_KEY"] = config["openai"]["api_key"].get()
+        if not os.environ["GEMINI_API_KEY"] or not os.environ["OPENAI_API_KEY"]:
+            self._log.error("No LLMs configured correctly")
+            return
+        model_fallback_list = ["gemini/gemini-pro", "gpt-3.5-turbo"]
+
+        sys_prompt = f"""
+        You are a music recommendation system. You will reply with
+        {number} song recommendations in a JSON format. Only
+        reply with the JSON object, no need to send anything else.
+        Include title, artist, album, and year in the JSON response.
+        Don't make up things. Use the JSON format:
+        {{
+            "songs": [
+                {{
+                    "title": "Title of song 1",
+                    "artist": "Artist of Song 1",
+                    "album": "Album of Song 1",
+                    "year": "Year of release"
+                }}
+            ]
+        }}
+        Now, {prompt}
+        """
+        messages = [{"content": sys_prompt, "role": "user"}]
+
+        for model in model_fallback_list:
+            try:
+                response = completion(model=model, messages=messages)
+            except Exception as e:
+                print(f"error occurred: {e}")
+
+        return self.extract_json(response.choices[0].message.content)
 
     def setup_openai_api(self):
         import openai
