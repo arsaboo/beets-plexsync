@@ -18,5 +18,6 @@ setup(
         'spotipy',
         'openai',
         'google-generativeai',
+        'litellm'
     ],
 )
