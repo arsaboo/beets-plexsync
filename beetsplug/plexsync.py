@@ -1118,70 +1118,6 @@ class PlexSync(BeetsPlugin):
             grid.paste(image, box=(x, y))
         return grid
 
-    def _plex_sonicsage_old(self, number, prompt, playlist, clear):
-        """
-        Generate song recommendations using OpenAI's GPT-3 model based on a
-        given prompt, and add the recommended songs to a Plex playlist.
-
-        Args:
-            number (int): The number of song recommendations to generate.
-            prompt (str): The prompt to use for generating song recommendations.
-            playlist (str): The name of the Plex playlist to add the recommended songs to.
-            clear (bool): Whether to clear the playlist before adding the recommended songs.
-
-        Returns:
-            None
-        """
-        if self.google is None and self.openai is None:
-            self._log.error("No LLMs configured correctly")
-            return
-        if prompt == "":
-            self._log.error("Prompt not provided")
-            return
-        if self.google:
-            songs = self.google_ai_song_rec(number, prompt)
-        elif self.openai:
-            songs = self.chat_gpt_song_rec(number, prompt)
-        song_list = []
-        if songs is None:
-            return
-        for song in songs["songs"]:
-            title = song["title"]
-            album = song["album"]
-            artist = song["artist"]
-            year = song["year"]
-            song_dict = {
-                "title": title.strip(),
-                "album": album.strip(),
-                "artist": artist.strip(),
-                "year": int(year),
-            }
-            song_list.append(song_dict)
-        self._log.debug(
-            "{} songs to be added in Plex library: {}", len(song_list), song_list
-        )
-        matched_songs = []
-        for song in song_list:
-            if self.search_plex_song(song) is not None:
-                found = self.search_plex_song(song)
-                match_dict = {
-                    "title": found.title,
-                    "album": found.parentTitle,
-                    "plex_ratingkey": found.ratingKey,
-                }
-                self._log.debug("Song matched in Plex library: {}", match_dict)
-                matched_songs.append(self.dotdict(match_dict))
-        self._log.debug("Songs matched in Plex library: {}", matched_songs)
-        if clear:
-            try:
-                self._plex_clear_playlist(playlist)
-            except exceptions.NotFound:
-                self._log.debug(f"Unable to clear playlist {playlist}")
-        try:
-            self._plex_add_playlist_item(matched_songs, playlist)
-        except Exception as e:
-            self._log.error("Unable to add songs to playlist. Error: {}", e)
-
     def _plex_sonicsage(self, number, prompt, playlist, clear):
         """
         Generate song recommendations using OpenAI's GPT-3 model based on a
@@ -1275,99 +1211,11 @@ class PlexSync(BeetsPlugin):
             try:
                 response = completion(model=model, messages=messages)
             except Exception as e:
-                print(f"error occurred: {e}")
-
+                self._log.error("LLM request failed. Error: {}", e)
+                return None
+        self._log.debug("LLM response: {} using model: {}",
+                        response.choices[0].message.content, response.model)
         return self.extract_json(response.choices[0].message.content)
-
-    def setup_openai_api(self):
-        import openai
-
-        openai.api_key = config["openai"]["api_key"].get()
-        try:
-            openai.api_base = config["openai"]["api_base"].get()
-        except Exception:
-            pass
-        self.openai = openai
-
-    def setup_google_ai(self):
-        import google.generativeai as genai
-
-        key = config["google"]["api_key"].get()
-        model = config["google"]["model"].get("gemini-pro")
-        service_json = config["google"]["service_json"].get()
-        self._log.debug("JSON key: {}", service_json)
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = service_json
-        genai.configure(api_key=key)
-        try:
-            gen_ai = genai.GenerativeModel(model_name=model)
-            self.google = gen_ai
-        except Exception:
-            self.google = None
-            pass
-
-    def google_ai_song_rec(self, number, prompt):
-        num_songs = int(number)
-        sys_prompt = f"""
-        You are a music recommendation system. You will reply with
-        {num_songs} song recommendations in a JSON format. Only
-        reply with the JSON object, no need to send anything else.
-        Include title, artist, album, and year in the JSON response.
-        Don't make up things. Use the JSON format:
-        {{
-            "songs": [
-                {{
-                    "title": "Title of song 1",
-                    "artist": "Artist of Song 1",
-                    "album": "Album of Song 1",
-                    "year": "Year of release"
-                }}
-            ]
-        }}
-        Now, {prompt}
-        """
-        try:
-            self._log.info("Sending request to Google AI")
-            chat = self.google.generate_content(sys_prompt)
-        except Exception as e:
-            self._log.error("Unable to connect to Google AI. Error: {}", e)
-            return
-        reply = chat.text
-        self._log.debug("Google AI replied: {}", reply)
-        return self.extract_json(reply)
-
-    def chat_gpt_song_rec(self, number, prompt):
-        model = config["openai"]["model"].get()
-        num_songs = int(number)
-        sys_prompt = f"""
-        You are a music recommender. You will reply with {num_songs} song
-        recommendations in a JSON format. Only reply with the JSON object,
-        no need to send anything else. Include title, artist, album, and
-        year in the JSON response. Use the JSON format:
-        {{
-            "songs": [
-                {{
-                    "title": "Title of song 1",
-                    "artist": "Artist of Song 1",
-                    "album": "Album of Song 1",
-                    "year": "Year of release"
-                }}
-            ]
-        }}
-        """
-        messages = [{"role": "system", "content": sys_prompt}]
-        messages.append({"role": "user", "content": prompt})
-        try:
-            self._log.info("Sending request to OpenAI")
-            chat = self.openai.ChatCompletion.create(
-                model=model, messages=messages, temperature=0.7
-            )
-        except Exception as e:
-            self._log.error("Unable to connect to OpenAI. Error: {}", e)
-            return
-        reply = chat.choices[0].message.content
-        tokens = chat.usage.total_tokens
-        self._log.debug("OpenAI used {} tokens and replied: {}", tokens, reply)
-        return self.extract_json(reply)
 
     def extract_json(self, jsonString):
         import json
