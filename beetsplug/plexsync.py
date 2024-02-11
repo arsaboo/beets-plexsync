@@ -1203,9 +1203,10 @@ class PlexSync(BeetsPlugin):
                 }}
             ]
         }}
-        Now, {prompt}
         """
-        messages = [{"content": sys_prompt, "role": "user"}]
+        user_message = f"Now, {message}"
+        messages = [{"content": sys_prompt, "role": "system"},
+                    {"content": user_message, "role": "user"}]
 
         for model in model_fallback_list:
             try:
