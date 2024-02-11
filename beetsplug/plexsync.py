@@ -1204,7 +1204,7 @@ class PlexSync(BeetsPlugin):
             ]
         }}
         """
-        user_message = f"Now, {message}"
+        user_message = f"Now, recommend {prompt}"
         messages = [{"content": sys_prompt, "role": "system"},
                     {"content": user_message, "role": "user"}]
 
