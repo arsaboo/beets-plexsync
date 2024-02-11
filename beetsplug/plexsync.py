@@ -60,21 +60,6 @@ class PlexSync(BeetsPlugin):
         super().__init__()
 
         self.config_dir = config.config_dir()
-        self.google = None
-        self.openai = None
-
-        # Call the setup methods
-        try:
-            self.setup_google_ai()
-        except Exception as e:
-            print(f"Failed to set up Google AI: {e}")
-            self.google = None
-
-        try:
-            self.setup_openai_api()
-        except Exception as e:
-            print(f"Failed to set up OpenAI API: {e}")
-            self.openai = None
 
         # Adding defaults.
         config["plex"].add(
