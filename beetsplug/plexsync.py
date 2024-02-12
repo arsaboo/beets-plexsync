@@ -1161,13 +1161,16 @@ class PlexSync(BeetsPlugin):
         except Exception as e:
             self._log.error("Unable to add songs to playlist. Error: {}", e)
 
-
     def llm_song_recommendation(self, number, prompt):
-        from litellm import completion
+        from litellm import completion, check_valid_key
 
         os.environ["GEMINI_API_KEY"] = config["google"]["api_key"].get()
         os.environ["OPENAI_API_KEY"] = config["openai"]["api_key"].get()
-        if not os.environ["GEMINI_API_KEY"] or not os.environ["OPENAI_API_KEY"]:
+        if not check_valid_key(
+            model="gemini/gemini-pro", api_key=os.environ.get("GEMINI_API_KEY")
+        ) or not check_valid_key(
+            model="gpt-3.5-turbo", api_key=os.environ.get("OPENAI_API_KEY")
+        ):
             self._log.error("No LLMs configured correctly")
             return
         model_fallback_list = ["gemini/gemini-pro", "gpt-3.5-turbo"]
@@ -1190,8 +1193,10 @@ class PlexSync(BeetsPlugin):
         }}
         """
         user_message = f"Now, recommend {prompt}"
-        messages = [{"content": sys_prompt, "role": "system"},
-                    {"content": user_message, "role": "user"}]
+        messages = [
+            {"content": sys_prompt, "role": "system"},
+            {"content": user_message, "role": "user"},
+        ]
 
         for model in model_fallback_list:
             try:
@@ -1199,8 +1204,11 @@ class PlexSync(BeetsPlugin):
             except Exception as e:
                 self._log.error("LLM request failed. Error: {}", e)
                 return None
-        self._log.debug("LLM response: {} using model: {}",
-                        response.choices[0].message.content, response.model)
+        self._log.debug(
+            "LLM response: {} using model: {}",
+            response.choices[0].message.content,
+            response.model,
+        )
         return self.extract_json(response.choices[0].message.content)
 
     def extract_json(self, jsonString):
