@@ -1162,15 +1162,11 @@ class PlexSync(BeetsPlugin):
             self._log.error("Unable to add songs to playlist. Error: {}", e)
 
     def llm_song_recommendation(self, number, prompt):
-        from litellm import completion, check_valid_key
+        from litellm import completion
 
         os.environ["GEMINI_API_KEY"] = config["google"]["api_key"].get()
         os.environ["OPENAI_API_KEY"] = config["openai"]["api_key"].get()
-        if not check_valid_key(
-            model="gemini/gemini-pro", api_key=os.environ.get("GEMINI_API_KEY")
-        ) or not check_valid_key(
-            model="gpt-3.5-turbo", api_key=os.environ.get("OPENAI_API_KEY")
-        ):
+        if not config["google"]["api_key"].get() or not config["openai"]["api_key"].get():
             self._log.error("No LLMs configured correctly")
             return
         model_fallback_list = ["gemini/gemini-pro", "gpt-3.5-turbo"]
