@@ -1166,27 +1166,42 @@ class PlexSync(BeetsPlugin):
 
         os.environ["GEMINI_API_KEY"] = config["google"]["api_key"].get()
         os.environ["OPENAI_API_KEY"] = config["openai"]["api_key"].get()
-        if not config["google"]["api_key"].get() or not config["openai"]["api_key"].get():
+        if (
+            not config["google"]["api_key"].get()
+            or not config["openai"]["api_key"].get()
+        ):
             self._log.error("No LLMs configured correctly")
             return
         model_fallback_list = ["gemini/gemini-pro", "gpt-3.5-turbo"]
+
+        schema = {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "properties": {
+                "songs": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string"},
+                            "artist": {"type": "string"},
+                            "album": {"type": "string"},
+                            "year": {"type": "string"},
+                        },
+                        "required": ["title", "artist", "album", "year"],
+                    },
+                }
+            },
+            "required": ["songs"],
+        }
 
         sys_prompt = f"""
         You are a music recommendation system. You will reply with
         {number} song recommendations in a JSON format. Only
         reply with the JSON object, no need to send anything else.
         Include title, artist, album, and year in the JSON response.
-        Don't make up things. Use the JSON format:
-        {{
-            "songs": [
-                {{
-                    "title": "Title of song 1",
-                    "artist": "Artist of Song 1",
-                    "album": "Album of Song 1",
-                    "year": "Year of release"
-                }}
-            ]
-        }}
+        Don't make up things. Always respond in the schema defined here:
+        {schema}
         """
         user_message = f"Now, recommend {prompt}"
         messages = [
@@ -1263,8 +1278,8 @@ class PlexSync(BeetsPlugin):
             from beetsplug.gaana import GaanaPlugin
         except ModuleNotFoundError:
             self._log.error(
-                "Gaana plugin not installed. \
-                            See https://github.com/arsaboo/beets-gaana"
+                "Gaana plugin not installed. "
+                "See https://github.com/arsaboo/beets-gaana"
             )
             return
         try:
