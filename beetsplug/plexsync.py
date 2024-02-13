@@ -1196,12 +1196,11 @@ class PlexSync(BeetsPlugin):
         }
 
         sys_prompt = f"""
-        You are a music recommendation system. You will reply with
-        {number} song recommendations in a JSON format. Only
-        reply with the JSON object, no need to send anything else.
-        Include title, artist, album, and year in the JSON response.
-        Don't make up things. Always respond in the schema defined here:
-        {schema}
+        As a music recommendation system, your task is to return {number}
+        song recommendations. The response should be a JSON object
+        containing only the recommended songs. Each song should
+        include the following details: 'title', 'artist', 'album', and 'year'.
+        Ensure that your response strictly adheres to the schema: {schema}.
         """
         user_message = f"Now, recommend {prompt}"
         messages = [
