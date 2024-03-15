@@ -817,27 +817,30 @@ class PlexSync(BeetsPlugin):
         self._log.info("Updating information for {} tracks", len(tracks))
         with lib.transaction():
             for track in tracks:
-                query = MatchQuery("plex_ratingkey", track.ratingKey, fast=False)
-                items = lib.items(query)
-                if not items:
-                    self._log.debug("{} | track not found", query)
-                    continue
-                elif len(items) == 1:
-                    self._log.info("Updating information for {} ", items[0])
-                    try:
-                        items[0].plex_userrating = track.userRating
-                        items[0].plex_skipcount = track.skipCount
-                        items[0].plex_viewcount = track.viewCount
-                        items[0].plex_lastviewedat = track.lastViewedAt
-                        items[0].plex_lastratedat = track.lastRatedAt
-                        items[0].plex_updated = time.time()
-                        items[0].store()
-                        items[0].try_write()
-                    except exceptions.NotFound:
-                        self._log.debug("{} | track not found", items[0])
+                try:
+                    self._log.debug("Searching for {} in Plex library", track.plex_ratingkey)
+                    track = self.music.fetchItem(track.plex_ratingkey)
+                except exceptions.NotFound:
+                    self._log.debug("Track {} not found in Plex library", track)
+                    query = MatchQuery("plex_ratingkey", track.ratingKey, fast=False)
+                    items = lib.items(query)
+                    if not items:
+                        self._log.debug("{} | track not found", query)
                         continue
-                else:
-                    self._log.debug("Please sync Plex library again")
+                    track = items[0]
+
+                self._log.info("Updating information for {} ", track)
+                try:
+                    track.plex_userrating = track.userRating
+                    track.plex_skipcount = track.skipCount
+                    track.plex_viewcount = track.viewCount
+                    track.plex_lastviewedat = track.lastViewedAt
+                    track.plex_lastratedat = track.lastRatedAt
+                    track.plex_updated = time.time()
+                    track.store()
+                    track.try_write()
+                except exceptions.NotFound:
+                    self._log.debug("{} | track not found", track)
                     continue
 
     def search_plex_song(self, song, manual_search=False):
