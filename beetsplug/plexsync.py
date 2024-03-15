@@ -649,8 +649,7 @@ class PlexSync(BeetsPlugin):
             self.music.update()
             self._log.info("Update started.")
         except exceptions.PlexApiException:
-            self._log.warning("{} Update failed",
-                              self.config["plex"]["library_name"])
+            self._log.warning("{} Update failed", self.config["plex"]["library_name"])
 
     def _fetch_plex_info(self, items, write, force):
         """Obtain track information from Plex."""
@@ -818,7 +817,7 @@ class PlexSync(BeetsPlugin):
         self._log.info("Updating information for {} tracks", len(tracks))
         with lib.transaction():
             for track in tracks:
-                query = MatchQuery("plex_ratingkey", track.ratingKey, fast=False)
+                query = MatchQuery("plex_ratingkey", track.ratingKey, fast=True)
                 items = lib.items(query)
                 if not items:
                     self._log.debug("{} | track not found", query)
