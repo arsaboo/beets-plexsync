@@ -817,7 +817,7 @@ class PlexSync(BeetsPlugin):
         self._log.info("Updating information for {} tracks", len(tracks))
         with lib.transaction():
             for track in tracks:
-                query = MatchQuery("plex_ratingkey", track.ratingKey, fast=True)
+                query = MatchQuery("plex_ratingkey", track.ratingKey, fast=False)
                 items = lib.items(query)
                 if not items:
                     self._log.debug("{} | track not found", query)
