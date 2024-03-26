@@ -250,7 +250,7 @@ class PlexSync(BeetsPlugin):
 
         def func_sync(lib, opts, args):
             items = lib.items(ui.decargs(args))
-            self._fetch_plex_info(items, ui.should_write(), opts.force_refetch)
+            self._fetch_plex_info(items, opts.force_refetch)
 
         sync_cmd.func = func_sync
 
@@ -636,16 +636,16 @@ class PlexSync(BeetsPlugin):
         except exceptions.PlexApiException:
             self._log.warning("{} Update failed", self.config["plex"]["library_name"])
 
-    def _fetch_plex_info(self, items, write, force):
+    def _fetch_plex_info(self, items, force):
         """Obtain track information from Plex."""
         items_len = len(items)
         with ThreadPoolExecutor() as executor:
             for index, item in enumerate(items, start=1):
                 executor.submit(
-                    self._process_item, index, item, write, force, items_len
+                    self._process_item, index, item, force, items_len
                 )
 
-    def _process_item(self, index, item, write, force, items_len):
+    def _process_item(self, index, item, force, items_len):
         self._log.info("Processing {}/{} tracks - {} ", index, items_len, item)
         if not force and "plex_userrating" in item:
             self._log.debug("Plex rating already present for: {}", item)
