@@ -652,7 +652,7 @@ class PlexSync(BeetsPlugin):
             return
         plex_track = self.search_plex_track(item)
         if plex_track is None:
-            self._log.debug("No track found for: {}", item)
+            self._log.debug("No track found for: {}", item.title)
             return
         item.plex_guid = plex_track.guid
         item.plex_ratingkey = plex_track.ratingKey
@@ -663,7 +663,7 @@ class PlexSync(BeetsPlugin):
         item.plex_lastratedat = plex_track.lastRatedAt
         item.plex_updated = time.time()
         self._log.debug(
-            f"Adding Plex info for {item}: {item.plex_ratingkey} - {item.plex_userrating} "
+            f"Adding Plex info for: {item.plex_ratingkey} - {item.plex_userrating} "
         )
         item.store()
         item.try_write()
