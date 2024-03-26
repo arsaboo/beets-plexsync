@@ -666,8 +666,7 @@ class PlexSync(BeetsPlugin):
             f"Adding Plex info for {item}: {item.plex_ratingkey} - {item.plex_userrating} "
         )
         item.store()
-        if write:
-            item.try_write()
+        item.try_write()
 
     def search_plex_track(self, item):
         """Fetch the Plex track key."""
