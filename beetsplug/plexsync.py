@@ -668,6 +668,13 @@ class PlexSync(BeetsPlugin):
 
     def search_plex_track(self, item):
         """Fetch the Plex track key."""
+        if item.get("plex_ratingkey") is not None:
+            self._log.debug("Track {} already in Plex library", item)
+            try:
+                return self.plex.fetchItem(item.plex_ratingkey)
+            except exceptions.NotFound:
+                self._log.debug("Track {} not found in Plex library", item)
+                return None
         tracks = self.music.searchTracks(
             **{"album.title": item.album, "track.title": item.title}
         )
