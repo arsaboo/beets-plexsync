@@ -662,6 +662,9 @@ class PlexSync(BeetsPlugin):
         item.plex_lastviewedat = plex_track.lastViewedAt
         item.plex_lastratedat = plex_track.lastRatedAt
         item.plex_updated = time.time()
+        self._log.debug(
+            f"Adding Plex info for {item}: {item.plex_ratingkey} - {item.plex_userrating} "
+        )
         item.store()
         if write:
             item.try_write()
@@ -669,8 +672,7 @@ class PlexSync(BeetsPlugin):
     def search_plex_track(self, item):
         """Fetch the Plex track key."""
         try:
-            self._log.debug("Searching for {} in Plex library",
-                            item.plex_ratingkey)
+            self._log.debug("Searching for {} in Plex library", item.plex_ratingkey)
             track = self.music.fetchItem(item.plex_ratingkey)
             return track
         except exceptions.NotFound:
