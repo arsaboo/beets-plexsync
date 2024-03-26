@@ -641,9 +641,7 @@ class PlexSync(BeetsPlugin):
         items_len = len(items)
         with ThreadPoolExecutor() as executor:
             for index, item in enumerate(items, start=1):
-                executor.submit(
-                    self._process_item, index, item, force, items_len
-                )
+                executor.submit(self._process_item, index, item, force, items_len)
 
     def _process_item(self, index, item, force, items_len):
         self._log.info("Processing {}/{} tracks - {} ", index, items_len, item)
@@ -670,12 +668,6 @@ class PlexSync(BeetsPlugin):
 
     def search_plex_track(self, item):
         """Fetch the Plex track key."""
-        try:
-            self._log.debug("Searching for {} in Plex library", item.plex_ratingkey)
-            track = self.music.fetchItem(item.plex_ratingkey)
-            return track
-        except exceptions.NotFound:
-            self._log.debug("Track {} not found in Plex library", item)
         tracks = self.music.searchTracks(
             **{"album.title": item.album, "track.title": item.title}
         )
