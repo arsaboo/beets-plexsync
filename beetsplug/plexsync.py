@@ -1186,7 +1186,12 @@ class PlexSync(BeetsPlugin):
 
     def setup_openai_api(self):
 
-        self.client = OpenAI(api_key=config["openai"]["api_key"].get())
+        try:
+            self.client = OpenAI(api_key=config["openai"]["api_key"].get())
+            self.openai = True
+        except Exception as e:
+            self._log.error("Unable to connect to OpenAI. Error: {}", e)
+            return
 
     def setup_google_ai(self):
         import google.generativeai as genai
