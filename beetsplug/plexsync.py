@@ -17,6 +17,7 @@ from datetime import datetime
 
 import confuse
 import dateutil.parser
+import openai
 import requests
 import spotipy
 from beets import config, ui
@@ -27,6 +28,7 @@ from beets.plugins import BeetsPlugin
 from beets.ui import input_, print_
 from bs4 import BeautifulSoup
 from jiosaavn import JioSaavn
+from openai import OpenAI
 from plexapi import exceptions
 from plexapi.server import PlexServer
 from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
@@ -649,8 +651,7 @@ class PlexSync(BeetsPlugin):
             self.music.update()
             self._log.info("Update started.")
         except exceptions.PlexApiException:
-            self._log.warning("{} Update failed",
-                              self.config["plex"]["library_name"])
+            self._log.warning("{} Update failed", self.config["plex"]["library_name"])
 
     def _fetch_plex_info(self, items, write, force):
         """Obtain track information from Plex."""
@@ -1184,14 +1185,8 @@ class PlexSync(BeetsPlugin):
             self._log.error("Unable to add songs to playlist. Error: {}", e)
 
     def setup_openai_api(self):
-        import openai
 
-        openai.api_key = config["openai"]["api_key"].get()
-        try:
-            openai.api_base = config["openai"]["api_base"].get()
-        except Exception:
-            pass
-        self.openai = openai
+        self.client = OpenAI(api_key=config["openai"]["api_key"].get())
 
     def setup_google_ai(self):
         import google.generativeai as genai
@@ -1262,7 +1257,7 @@ class PlexSync(BeetsPlugin):
         messages.append({"role": "user", "content": prompt})
         try:
             self._log.info("Sending request to OpenAI")
-            chat = self.openai.ChatCompletion.create(
+            chat = self.client.chat.completions.create(
                 model=model, messages=messages, temperature=0.7
             )
         except Exception as e:
