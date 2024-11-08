@@ -32,6 +32,7 @@ from openai import OpenAI
 from plexapi import exceptions
 from plexapi.server import PlexServer
 from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
+from requests.exceptions import ContentDecodingError
 
 
 class PlexSync(BeetsPlugin):
@@ -798,7 +799,7 @@ class PlexSync(BeetsPlugin):
         for item in items:
             try:
                 plex_set.add(self.plex.fetchItem(item.plex_ratingkey))
-            except exceptions.NotFound as e:
+            except (exceptions.NotFound, AttributeError, ContentDecodingError) as e:
                 self._log.warning("{} not found in Plex library. Error: {}", item, e)
                 continue
         to_remove = plex_set.intersection(playlist_set)
