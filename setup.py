@@ -17,6 +17,5 @@ setup(
         'jiosaavn-python>=0.2',
         'spotipy',
         'openai',
-        'google-generativeai',
     ],
 )

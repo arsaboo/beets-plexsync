@@ -32,8 +32,8 @@ from openai import OpenAI
 from plexapi import exceptions
 from plexapi.server import PlexServer
 from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
-from requests.exceptions import ContentDecodingError
-
+from requests.exceptions import ContentDecodingError, ConnectionError
+import json
 
 class PlexSync(BeetsPlugin):
     """Define plexsync class."""
@@ -63,21 +63,14 @@ class PlexSync(BeetsPlugin):
         super().__init__()
 
         self.config_dir = config.config_dir()
-        self.google = None
-        self.openai = None
+        self.llm_client = None
 
         # Call the setup methods
         try:
-            self.setup_google_ai()
+            self.setup_llm()
         except Exception as e:
-            print(f"Failed to set up Google AI: {e}")
-            self.google = None
-
-        try:
-            self.setup_openai_api()
-        except Exception as e:
-            print(f"Failed to set up OpenAI API: {e}")
-            self.openai = None
+            self._log.error("Failed to set up LLM client: {}", e)
+            self.llm_client = None
 
         # Adding defaults.
         config["plex"].add(
@@ -98,16 +91,14 @@ class PlexSync(BeetsPlugin):
             confuse.Filename(in_app_dir=True)
         )
 
-        # add OpenAI defaults
-        config["openai"].add(
-            {
-                "api_key": "",
-                "model": "gpt-3.5-turbo",
-            }
-        )
+        # add LLM defaults
+        config["llm"].add({
+            "api_key": "",
+            "model": "gpt-3.5-turbo",
+            "base_url": "",  # Optional, for other providers
+        })
 
-        config["openai"]["api_key"].redact = True
-        config["google"]["api_key"].redact = True
+        config["llm"]["api_key"].redact = True
 
         config["plex"]["token"].redact = True
         baseurl = (
@@ -799,7 +790,7 @@ class PlexSync(BeetsPlugin):
         for item in items:
             try:
                 plex_set.add(self.plex.fetchItem(item.plex_ratingkey))
-            except (exceptions.NotFound, AttributeError, ContentDecodingError) as e:
+            except (exceptions.NotFound, AttributeError, ContentDecodingError, ConnectionError) as e:
                 self._log.warning("{} not found in Plex library. Error: {}", item, e)
                 continue
         to_remove = plex_set.intersection(playlist_set)
@@ -1123,31 +1114,21 @@ class PlexSync(BeetsPlugin):
 
     def _plex_sonicsage(self, number, prompt, playlist, clear):
         """
-        Generate song recommendations using OpenAI's GPT-3 model based on a
-        given prompt, and add the recommended songs to a Plex playlist.
-
-        Args:
-            number (int): The number of song recommendations to generate.
-            prompt (str): The prompt to use for generating song recommendations.
-            playlist (str): The name of the Plex playlist to add the recommended songs to.
-            clear (bool): Whether to clear the playlist before adding the recommended songs.
-
-        Returns:
-            None
+        Generate song recommendations using LLM based on a given prompt,
+        and add the recommended songs to a Plex playlist.
         """
-        if self.google is None and self.openai is None:
-            self._log.error("No LLMs configured correctly")
+        if self.llm_client is None:
+            self._log.error("No LLM configured correctly")
             return
         if prompt == "":
             self._log.error("Prompt not provided")
             return
-        if self.google:
-            songs = self.google_ai_song_rec(number, prompt)
-        elif self.openai:
-            songs = self.chat_gpt_song_rec(number, prompt)
-        song_list = []
+
+        songs = self.get_llm_recommendations(number, prompt)
         if songs is None:
             return
+
+        song_list = []
         for song in songs["songs"]:
             title = song["title"]
             album = song["album"]
@@ -1185,63 +1166,25 @@ class PlexSync(BeetsPlugin):
         except Exception as e:
             self._log.error("Unable to add songs to playlist. Error: {}", e)
 
-    def setup_openai_api(self):
-
+    def setup_llm(self):
+        """Setup LLM client using OpenAI-compatible API."""
         try:
-            self.client = OpenAI(api_key=config["openai"]["api_key"].get())
-            self.openai = True
+            client_args = {
+                "api_key": config["llm"]["api_key"].get(),
+            }
+
+            base_url = config["llm"]["base_url"].get()
+            if (base_url):
+                client_args["base_url"] = base_url
+
+            self.llm_client = OpenAI(**client_args)
         except Exception as e:
-            self._log.error("Unable to connect to OpenAI. Error: {}", e)
+            self._log.error("Unable to connect to LLM service. Error: {}", e)
             return
 
-    def setup_google_ai(self):
-        import google.generativeai as genai
-
-        key = config["google"]["api_key"].get()
-        model = config["google"]["model"].get("gemini-pro")
-        service_json = config["google"]["service_json"].get()
-        self._log.debug("JSON key: {}", service_json)
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = service_json
-        genai.configure(api_key=key)
-        try:
-            gen_ai = genai.GenerativeModel(model_name=model)
-            self.google = gen_ai
-        except Exception:
-            self.google = None
-            pass
-
-    def google_ai_song_rec(self, number, prompt):
-        num_songs = int(number)
-        sys_prompt = f"""
-        You are a music recommendation system. You will reply with
-        {num_songs} song recommendations in a JSON format. Only
-        reply with the JSON object, no need to send anything else.
-        Include title, artist, album, and year in the JSON response.
-        Don't make up things. Use the JSON format:
-        {{
-            "songs": [
-                {{
-                    "title": "Title of song 1",
-                    "artist": "Artist of Song 1",
-                    "album": "Album of Song 1",
-                    "year": "Year of release"
-                }}
-            ]
-        }}
-        Now, {prompt}
-        """
-        try:
-            self._log.info("Sending request to Google AI")
-            chat = self.google.generate_content(sys_prompt)
-        except Exception as e:
-            self._log.error("Unable to connect to Google AI. Error: {}", e)
-            return
-        reply = chat.text
-        self._log.debug("Google AI replied: {}", reply)
-        return self.extract_json(reply)
-
-    def chat_gpt_song_rec(self, number, prompt):
-        model = config["openai"]["model"].get()
+    def get_llm_recommendations(self, number, prompt):
+        """Get song recommendations from LLM service."""
+        model = config["llm"]["model"].get()
         num_songs = int(number)
         sys_prompt = f"""
         You are a music recommender. You will reply with {num_songs} song
@@ -1262,27 +1205,24 @@ class PlexSync(BeetsPlugin):
         messages = [{"role": "system", "content": sys_prompt}]
         messages.append({"role": "user", "content": prompt})
         try:
-            self._log.info("Sending request to OpenAI")
-            chat = self.client.chat.completions.create(
+            self._log.info("Sending request to LLM service")
+            chat = self.llm_client.chat.completions.create(
                 model=model, messages=messages, temperature=0.7
             )
         except Exception as e:
-            self._log.error("Unable to connect to OpenAI. Error: {}", e)
+            self._log.error("Unable to connect to LLM service. Error: {}", e)
             return
         reply = chat.choices[0].message.content
         tokens = chat.usage.total_tokens
-        self._log.debug("OpenAI used {} tokens and replied: {}", tokens, reply)
+        self._log.debug("LLM service used {} tokens and replied: {}", tokens, reply)
         return self.extract_json(reply)
 
     def extract_json(self, jsonString):
-        import json
-
-        startIndex = jsonString.index("{")
-        endIndex = jsonString.rindex("}")
-        jsonSubstring = jsonString[startIndex : endIndex + 1]
+        """Extract and parse JSON from a string."""
         try:
-            return json.loads(jsonSubstring)
-        except Exception as e:
+            json_data = re.search(r'\{.*\}', jsonString, re.DOTALL).group()
+            return json.loads(json_data)
+        except (json.JSONDecodeError, AttributeError) as e:
             self._log.error("Unable to parse JSON. Error: {}", e)
             return
 

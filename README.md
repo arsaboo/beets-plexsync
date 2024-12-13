@@ -70,24 +70,18 @@ This plugin allows you to sync your Plex library with beets, create playlists ba
 
 ## Configuration
 
-* The `beet plexsonic` command allows you to create AI-based playlists using OpenAI's GPT language model or Google's Gemini Pro model. To use this feature, you will need to configure one of the AI models with an API key. If you configure both the models, the Gemini model will be used. Once you have obtained an API key, you can configure `beets` to use it by adding the following to your `config.yaml` file:
+* The `beet plexsonic` command allows you to create AI-based playlists using an OpenAI-compatible language model. To use this feature, you will need to configure the AI model with an API key. Once you have obtained an API key, you can configure `beets` to use it by adding the following to your `config.yaml` file:
 
   ```yaml
-  openai:
+  llm:
       api_key: API_KEY
       model: "gpt-3.5-turbo"
+      base_url: "https://api.openai.com/v1"  # Optional, for other providers
   ```
-  ```yaml
-  google:
-    model: "gemini-pro"
-    api_key: API_KEY
-    service_json: /path/to/your/key.json
-  ```
-  To obtain your json file, visit https://console.cloud.google.com/apis/credentials and use Service Account under create credentials. You can also create the API key on the same page.
 
-  I have only tested this with `gpt-3.5-turbo` and `gemini-pro` but I am sure it will work with other models. You can get started with `beet plexsonic -p "YOUR_PROMPT"` to create the playlist based on YOUR_PROMPT. The default playlist name is `SonicSage` (wink wink), you can modify it using `-m` flag. By default, it requests 10 tracks from OpenAI. Use the `-n` flag to change the number of tracks requested. Finally, if you prefer to clear the playlist before adding the new songs, you can add `-c` flat. So, to create a new classical music playlist, you can use somethign like `beet plexsonic -c -n 10 -p "classical music, romanticism era, like Schubert, Chopin, Liszt"`.
+  You can get started with `beet plexsonic -p "YOUR_PROMPT"` to create the playlist based on YOUR_PROMPT. The default playlist name is `SonicSage` (wink wink), you can modify it using `-m` flag. By default, it requests 10 tracks from the AI model. Use the `-n` flag to change the number of tracks requested. Finally, if you prefer to clear the playlist before adding the new songs, you can add `-c` flag. So, to create a new classical music playlist, you can use something like `beet plexsonic -c -n 10 -p "classical music, romanticism era, like Schubert, Chopin, Liszt"`.
 
-  Please note that not all tracks returned by OpenAI may be available in your library or matched perfectly, affecting the size of the playlist created. The command will log the tracks that could not be found on your library. You can improve the matching by enabling `manual_search` (see Advanced Usage). This is working extrmely well for me. I would love to hear your comments/feedback to improve this feature.
+  Please note that not all tracks returned by the AI model may be available in your library or matched perfectly, affecting the size of the playlist created. The command will log the tracks that could not be found on your library. You can improve the matching by enabling `manual_search` (see Advanced Usage). This is working extremely well for me. I would love to hear your comments/feedback to improve this feature.
 
 * `beet plexsync [-f]`: allows you to import all the data from your Plex library inside beets. Run the command `beet plexsync` and it will obtain `guid`, `ratingkey`, `userrating`, `skipcount`, `viewcount`, `lastviewedat`, `lastratedat`, and `plex_updated`. See details about these attributes [here][plaxapi]. By default, `plexsync` will not overwrite information for tracks that are already rated. If you want to overwrite all the details again, use the `-f` flag, i.e., `beet plexsync -f` will force update the entire library with fresh information from Plex. This can be useful if you have made significant changes to your Plex library (e.g., updated ratings).
 
@@ -107,7 +101,7 @@ This plugin allows you to sync your Plex library with beets, create playlists ba
 
   For example, to import the top-20 songs by Taylor Swift, use the command `beet plexsearchimport -s "Taylor Swift" -l 20 -m "Taylor"`.
 
-  You can also use this function to import the weekly jams and weekly exploration playlists from ListenBrainz into Plex. You will need to install and configure the [Listenbrainz plugin][listenbrainz_plugin_]. To import the Listenbrainz playlists, use the command `beet plexplaylistimport --listenbrainz`.
+  You can also use this function to import the weekly jams and weekly exploration playlists from ListenBrainz into Plex. You will need to install and configure the [Listenbrainz plugin][listenbrainz_plugin_]. To import the ListenBrainz playlists, use the command `beet plexplaylistimport --listenbrainz`.
 
 * `beet plexplaylistclear`: allows you to clear a Plex playlist. Use the `-m` flag to specify the playlist name to be cleared in Plex.
 
@@ -128,7 +122,6 @@ Plex matching may be less than perfect and it can miss tracks if the tags don't 
 plexsync:
   manual_search: yes
 ```
-
 
 [collage]: collage.png
 [queries_]: https://beets.readthedocs.io/en/latest/reference/query.html?highlight=queries
