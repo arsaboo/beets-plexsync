@@ -17,5 +17,6 @@ setup(
         'jiosaavn-python>=0.2',
         'spotipy',
         'openai',
+        'pydantic>=2.0.0',
     ],
 )
