@@ -962,105 +962,163 @@ class PlexSync(BeetsPlugin):
             plist.removeItems(track)
 
     def _plex_collage(self, interval, grid):
-        """Create a collage of most played albums."""
+        """Create a collage of most played albums.
+
+        Args:
+            interval (int): Number of days to look back
+            grid (int): Grid dimension (e.g., 3 for 3x3, 4 for 4x4)
+        """
+        # Convert input parameters to integers
+        interval = int(interval)
+        grid = int(grid)
+
         self._log.info(
-            "Creating collage of most played albums in the last {} " "days", interval
+            "Creating collage of most played albums in the last {} days", interval
         )
-        interval2 = str(interval) + "d"
+
+        # Get recently played tracks
         tracks = self.music.search(
-            filters={"track.lastViewedAt>>": interval2},
+            filters={"track.lastViewedAt>>": f"{interval}d"},
             sort="viewCount:desc",
             libtype="track",
         )
-        sorted = self._plex_most_played_albums(tracks, int(interval))
-        # Create a list of album art
-        album_art = []
-        for album in sorted:
-            album_art.append(album.thumbUrl)
-        collage = self.create_collage(album_art, int(grid))
-        try:
-            collage.save(os.path.join(self.config_dir, "collage.png"))
-        except Exception as e:
-            self._log.error("Unable to save collage. Error: {}", e)
+
+        # Get sorted albums and limit to grid*grid
+        max_albums = grid * grid
+        sorted_albums = self._plex_most_played_albums(tracks, interval)[:max_albums]
+
+        if not sorted_albums:
+            self._log.error("No albums found in the specified time period")
             return
+
+        # Create a list of album art URLs
+        album_art_urls = []
+        for album in sorted_albums:
+            if hasattr(album, 'thumbUrl') and album.thumbUrl:
+                album_art_urls.append(album.thumbUrl)
+                self._log.debug("Added album art for: {}", album.title)
+
+        if not album_art_urls:
+            self._log.error("No album artwork found")
+            return
+
+        try:
+            collage = self.create_collage(album_art_urls, grid)
+            output_path = os.path.join(self.config_dir, "collage.png")
+            collage.save(output_path, "PNG", quality=95)
+            self._log.info("Collage saved to: {}", output_path)
+        except Exception as e:
+            self._log.error("Failed to create collage: {}", e)
+
+    def create_collage(self, list_image_urls, dimension):
+        """Create a square collage from a list of image urls.
+
+        Args:
+            list_image_urls (list): List of image URLs
+            dimension (int): Grid dimension (e.g., 3 for 3x3)
+
+        Returns:
+            PIL.Image: The generated collage image
+        """
+        from io import BytesIO
+        from PIL import Image
+
+        thumbnail_size = 300  # Size of each album art
+        grid_size = thumbnail_size * dimension
+
+        # Create the base image
+        grid = Image.new('RGB', (grid_size, grid_size), 'black')
+
+        for index, url in enumerate(list_image_urls):
+            if index >= dimension * dimension:
+                break
+
+            try:
+                # Download and process image
+                response = requests.get(url, timeout=10)
+                img = Image.open(BytesIO(response.content))
+
+                # Convert to RGB if necessary
+                if img.mode != 'RGB':
+                    img = img.convert('RGB')
+
+                # Resize maintaining aspect ratio
+                img.thumbnail((thumbnail_size, thumbnail_size), Image.Resampling.LANCZOS)
+
+                # Calculate position
+                x = thumbnail_size * (index % dimension)
+                y = thumbnail_size * (index // dimension)
+                grid.paste(img, (x, y))
+
+                # Clean up
+                img.close()
+
+            except Exception as e:
+                self._log.debug("Failed to process image {}: {}", url, e)
+                continue
+
+        return grid
 
     def _plex_most_played_albums(self, tracks, interval):
         from datetime import datetime, timedelta
 
         now = datetime.now()
         frm_dt = now - timedelta(days=interval)
-        album = []
-        # save album object, parenttitle, thumburl, viewcount, and last played date in album list
+        album_data = {}  # Use dict to track albums instead of list
+
+        # First pass: collect all album data
         for track in tracks:
             history = track.history(mindate=frm_dt)
             count = len(history)
+
             try:
-                last_played_date = (
-                    max(
-                        (h for h in history if h.lastViewedAt is not None),
-                        key=lambda x: x.lastViewedAt,
-                    ).lastViewedAt
-                    if history
-                    else None
+                last_played = max(
+                    (h.lastViewedAt for h in history if h.lastViewedAt is not None),
+                    default=None
                 )
             except ValueError:
-                last_played_date = None
-            if track.parentTitle not in [a[1] for a in album]:
-                album.append(
-                    [track.album(), track.parentTitle, count, last_played_date]
-                )
+                last_played = None
+
+            if track.parentTitle not in album_data:
+                album_data[track.parentTitle] = {
+                    'album': track.album(),
+                    'count': count,
+                    'last_played': last_played
+                }
             else:
-                for i in album:
-                    if i[1] == track.parentTitle:
-                        i[2] += count
-                        i[3] = max(i[3], last_played_date) if i[3] else last_played_date
-        # sort album list by viewcount and then by last played date
+                album_data[track.parentTitle]['count'] += count
+                if last_played and (
+                    not album_data[track.parentTitle]['last_played'] or
+                    last_played > album_data[track.parentTitle]['last_played']
+                ):
+                    album_data[track.parentTitle]['last_played'] = last_played
+
+        # Convert to sortable list and sort
+        albums_list = [
+            (data['album'], data['count'], data['last_played'])
+            for data in album_data.values()
+        ]
+
+        # Sort by count (descending) and last played (most recent first)
         sorted_albums = sorted(
-            album, key=lambda x: (-x[2], -x[3] if x[3] is not None else float("inf"))
+            albums_list,
+            key=lambda x: (-x[1], -(x[2].timestamp() if x[2] else 0))
         )
-        # only return the album objects and add count and last played date to the album object
-        for album in sorted_albums:
-            album[0].count = album[2]
-            album[0].last_played_date = album[3]
-        # sort album objects by viewcount and then by last played date
-        sorted_albums = [i[0] for i in sorted_albums]
-        for album in sorted_albums:
+
+        # Extract just the album objects and add attributes
+        result = []
+        for album, count, last_played in sorted_albums:
+            album.count = count
+            album.last_played_date = last_played
+            result.append(album)
             self._log.debug(
                 "{} played {} times, last played on {}",
                 album.title,
-                album.count,
-                album.last_played_date,
+                count,
+                last_played
             )
-        return sorted_albums
 
-    def create_collage(self, list_image_urls, dimension):
-        """Create a collage from a list of image urls."""
-        import math
-        from io import BytesIO
-
-        from PIL import Image
-
-        thumbnail_size = 300
-        images = []
-        for url in list_image_urls:
-            try:
-                response = requests.get(url)
-                img = Image.open(BytesIO(response.content))
-                img = img.resize((thumbnail_size, thumbnail_size))
-                images.append(img)
-            except Exception:
-                self._log.debug("Unable to fetch image from {}", url)
-                continue
-        # Calculate the size of the grid
-        grid_size = thumbnail_size * dimension
-        # Create the new image
-        grid = Image.new("RGB", size=(grid_size, grid_size))
-        # Paste the images into the grid
-        for index, image in enumerate(images):
-            x = thumbnail_size * (index % dimension)
-            y = thumbnail_size * math.floor(index / dimension)
-            grid.paste(image, box=(x, y))
-        return grid
+        return result
 
     def _plex_sonicsage(self, number, prompt, playlist, clear):
         """Generate song recommendations using LLM based on a given prompt."""
