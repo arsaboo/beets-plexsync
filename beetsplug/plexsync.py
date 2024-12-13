@@ -37,14 +37,17 @@ from requests.exceptions import ContentDecodingError, ConnectionError
 from pydantic import BaseModel, Field
 import json
 
+
 class Song(BaseModel):
     title: str
     artist: str
     album: str
     year: str = Field(description="Year of release")
 
+
 class SongRecommendations(BaseModel):
     songs: List[Song]
+
 
 class PlexSync(BeetsPlugin):
     """Define plexsync class."""
@@ -103,11 +106,13 @@ class PlexSync(BeetsPlugin):
         )
 
         # add LLM defaults
-        config["llm"].add({
-            "api_key": "",
-            "model": "gpt-3.5-turbo",
-            "base_url": "",  # Optional, for other providers
-        })
+        config["llm"].add(
+            {
+                "api_key": "",
+                "model": "gpt-3.5-turbo",
+                "base_url": "",  # Optional, for other providers
+            }
+        )
 
         config["llm"]["api_key"].redact = True
 
@@ -740,7 +745,12 @@ class PlexSync(BeetsPlugin):
         for item in items:
             try:
                 plex_set.add(self.plex.fetchItem(item.plex_ratingkey))
-            except (exceptions.NotFound, AttributeError, ContentDecodingError, ConnectionError) as e:
+            except (
+                exceptions.NotFound,
+                AttributeError,
+                ContentDecodingError,
+                ConnectionError,
+            ) as e:
                 self._log.warning("{} not found in Plex library. Error: {}", item, e)
                 continue
         to_remove = plex_set.intersection(playlist_set)
@@ -994,7 +1004,7 @@ class PlexSync(BeetsPlugin):
         # Create a list of album art URLs
         album_art_urls = []
         for album in sorted_albums:
-            if hasattr(album, 'thumbUrl') and album.thumbUrl:
+            if hasattr(album, "thumbUrl") and album.thumbUrl:
                 album_art_urls.append(album.thumbUrl)
                 self._log.debug("Added album art for: {}", album.title)
 
@@ -1027,7 +1037,7 @@ class PlexSync(BeetsPlugin):
         grid_size = thumbnail_size * dimension
 
         # Create the base image
-        grid = Image.new('RGB', (grid_size, grid_size), 'black')
+        grid = Image.new("RGB", (grid_size, grid_size), "black")
 
         for index, url in enumerate(list_image_urls):
             if index >= dimension * dimension:
@@ -1039,11 +1049,13 @@ class PlexSync(BeetsPlugin):
                 img = Image.open(BytesIO(response.content))
 
                 # Convert to RGB if necessary
-                if img.mode != 'RGB':
-                    img = img.convert('RGB')
+                if img.mode != "RGB":
+                    img = img.convert("RGB")
 
                 # Resize maintaining aspect ratio
-                img.thumbnail((thumbnail_size, thumbnail_size), Image.Resampling.LANCZOS)
+                img.thumbnail(
+                    (thumbnail_size, thumbnail_size), Image.Resampling.LANCZOS
+                )
 
                 # Calculate position
                 x = thumbnail_size * (index % dimension)
@@ -1074,35 +1086,34 @@ class PlexSync(BeetsPlugin):
             try:
                 last_played = max(
                     (h.lastViewedAt for h in history if h.lastViewedAt is not None),
-                    default=None
+                    default=None,
                 )
             except ValueError:
                 last_played = None
 
             if track.parentTitle not in album_data:
                 album_data[track.parentTitle] = {
-                    'album': track.album(),
-                    'count': count,
-                    'last_played': last_played
+                    "album": track.album(),
+                    "count": count,
+                    "last_played": last_played,
                 }
             else:
-                album_data[track.parentTitle]['count'] += count
+                album_data[track.parentTitle]["count"] += count
                 if last_played and (
-                    not album_data[track.parentTitle]['last_played'] or
-                    last_played > album_data[track.parentTitle]['last_played']
+                    not album_data[track.parentTitle]["last_played"]
+                    or last_played > album_data[track.parentTitle]["last_played"]
                 ):
-                    album_data[track.parentTitle]['last_played'] = last_played
+                    album_data[track.parentTitle]["last_played"] = last_played
 
         # Convert to sortable list and sort
         albums_list = [
-            (data['album'], data['count'], data['last_played'])
+            (data["album"], data["count"], data["last_played"])
             for data in album_data.values()
         ]
 
         # Sort by count (descending) and last played (most recent first)
         sorted_albums = sorted(
-            albums_list,
-            key=lambda x: (-x[1], -(x[2].timestamp() if x[2] else 0))
+            albums_list, key=lambda x: (-x[1], -(x[2].timestamp() if x[2] else 0))
         )
 
         # Extract just the album objects and add attributes
@@ -1112,10 +1123,7 @@ class PlexSync(BeetsPlugin):
             album.last_played_date = last_played
             result.append(album)
             self._log.debug(
-                "{} played {} times, last played on {}",
-                album.title,
-                count,
-                last_played
+                "{} played {} times, last played on {}", album.title, count, last_played
             )
 
         return result
@@ -1139,7 +1147,7 @@ class PlexSync(BeetsPlugin):
                 "title": song.title.strip(),
                 "album": song.album.strip(),
                 "artist": song.artist.strip(),
-                "year": int(song.year) if song.year.isdigit() else None
+                "year": int(song.year) if song.year.isdigit() else None,
             }
             song_list.append(song_dict)
 
@@ -1176,7 +1184,7 @@ class PlexSync(BeetsPlugin):
             }
 
             base_url = config["llm"]["base_url"].get()
-            if (base_url):
+            if base_url:
                 client_args["base_url"] = base_url
 
             self.llm_client = OpenAI(**client_args)
@@ -1222,7 +1230,7 @@ class PlexSync(BeetsPlugin):
     def extract_json(self, jsonString):
         """Extract and parse JSON from a string using Pydantic."""
         try:
-            json_data = re.search(r'\{.*\}', jsonString, re.DOTALL).group()
+            json_data = re.search(r"\{.*\}", jsonString, re.DOTALL).group()
             return SongRecommendations.model_validate_json(json_data)
         except Exception as e:
             self._log.error("Unable to parse JSON. Error: {}", e)
