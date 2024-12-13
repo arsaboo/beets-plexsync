@@ -968,6 +968,10 @@ class PlexSync(BeetsPlugin):
             interval (int): Number of days to look back
             grid (int): Grid dimension (e.g., 3 for 3x3, 4 for 4x4)
         """
+        # Convert input parameters to integers
+        interval = int(interval)
+        grid = int(grid)
+
         self._log.info(
             "Creating collage of most played albums in the last {} days", interval
         )
@@ -981,7 +985,7 @@ class PlexSync(BeetsPlugin):
 
         # Get sorted albums and limit to grid*grid
         max_albums = grid * grid
-        sorted_albums = self._plex_most_played_albums(tracks, int(interval))[:max_albums]
+        sorted_albums = self._plex_most_played_albums(tracks, interval)[:max_albums]
 
         if not sorted_albums:
             self._log.error("No albums found in the specified time period")
