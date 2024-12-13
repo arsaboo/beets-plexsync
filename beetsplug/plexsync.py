@@ -14,6 +14,7 @@ import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+from typing import List
 
 import confuse
 import dateutil.parser
@@ -33,7 +34,17 @@ from plexapi import exceptions
 from plexapi.server import PlexServer
 from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
 from requests.exceptions import ContentDecodingError, ConnectionError
+from pydantic import BaseModel, Field
 import json
+
+class Song(BaseModel):
+    title: str
+    artist: str
+    album: str
+    year: str = Field(description="Year of release")
+
+class SongRecommendations(BaseModel):
+    songs: List[Song]
 
 class PlexSync(BeetsPlugin):
     """Define plexsync class."""
@@ -1113,10 +1124,7 @@ class PlexSync(BeetsPlugin):
         return grid
 
     def _plex_sonicsage(self, number, prompt, playlist, clear):
-        """
-        Generate song recommendations using LLM based on a given prompt,
-        and add the recommended songs to a Plex playlist.
-        """
+        """Generate song recommendations using LLM based on a given prompt."""
         if self.llm_client is None:
             self._log.error("No LLM configured correctly")
             return
@@ -1124,23 +1132,20 @@ class PlexSync(BeetsPlugin):
             self._log.error("Prompt not provided")
             return
 
-        songs = self.get_llm_recommendations(number, prompt)
-        if songs is None:
+        recommendations = self.get_llm_recommendations(number, prompt)
+        if recommendations is None:
             return
 
         song_list = []
-        for song in songs["songs"]:
-            title = song["title"]
-            album = song["album"]
-            artist = song["artist"]
-            year = song["year"]
+        for song in recommendations.songs:
             song_dict = {
-                "title": title.strip(),
-                "album": album.strip(),
-                "artist": artist.strip(),
-                "year": int(year),
+                "title": song.title.strip(),
+                "album": song.album.strip(),
+                "artist": song.artist.strip(),
+                "year": int(song.year) if song.year.isdigit() else None
             }
             song_list.append(song_dict)
+
         self._log.debug(
             "{} songs to be added in Plex library: {}", len(song_list), song_list
         )
@@ -1218,13 +1223,13 @@ class PlexSync(BeetsPlugin):
         return self.extract_json(reply)
 
     def extract_json(self, jsonString):
-        """Extract and parse JSON from a string."""
+        """Extract and parse JSON from a string using Pydantic."""
         try:
             json_data = re.search(r'\{.*\}', jsonString, re.DOTALL).group()
-            return json.loads(json_data)
-        except (json.JSONDecodeError, AttributeError) as e:
+            return SongRecommendations.model_validate_json(json_data)
+        except Exception as e:
             self._log.error("Unable to parse JSON. Error: {}", e)
-            return
+            return None
 
     def import_yt_playlist(self, url):
         try:
