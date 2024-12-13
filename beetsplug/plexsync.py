@@ -33,7 +33,7 @@ from plexapi import exceptions
 from plexapi.server import PlexServer
 from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
 from requests.exceptions import ContentDecodingError, ConnectionError
-
+import json
 
 class PlexSync(BeetsPlugin):
     """Define plexsync class."""
@@ -1174,7 +1174,7 @@ class PlexSync(BeetsPlugin):
             }
 
             base_url = config["llm"]["base_url"].get()
-            if base_url:
+            if (base_url):
                 client_args["base_url"] = base_url
 
             self.llm_client = OpenAI(**client_args)
@@ -1218,14 +1218,11 @@ class PlexSync(BeetsPlugin):
         return self.extract_json(reply)
 
     def extract_json(self, jsonString):
-        import json
-
-        startIndex = jsonString.index("{")
-        endIndex = jsonString.rindex("}")
-        jsonSubstring = jsonString[startIndex : endIndex + 1]
+        """Extract and parse JSON from a string."""
         try:
-            return json.loads(jsonSubstring)
-        except Exception as e:
+            json_data = re.search(r'\{.*\}', jsonString, re.DOTALL).group()
+            return json.loads(json_data)
+        except (json.JSONDecodeError, AttributeError) as e:
             self._log.error("Unable to parse JSON. Error: {}", e)
             return
 
