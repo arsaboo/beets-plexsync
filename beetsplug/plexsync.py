@@ -1064,13 +1064,14 @@ class PlexSync(BeetsPlugin):
 
         now = datetime.now()
         frm_dt = now - timedelta(days=interval)
-        album = []
-        # save album object, parenttitle, viewcount, and last played date in album list
+        album_data = {}  # Use dict to track albums instead of list
+
+        # First pass: collect all album data
         for track in tracks:
             history = track.history(mindate=frm_dt)
             count = len(history)
+
             try:
-                # Get the most recent play date for this track
                 last_played = max(
                     (h.lastViewedAt for h in history if h.lastViewedAt is not None),
                     default=None
@@ -1078,38 +1079,46 @@ class PlexSync(BeetsPlugin):
             except ValueError:
                 last_played = None
 
-            if track.parentTitle not in [a[1] for a in album]:
-                album.append(
-                    [track.album(), track.parentTitle, count, last_played]
-                )
+            if track.parentTitle not in album_data:
+                album_data[track.parentTitle] = {
+                    'album': track.album(),
+                    'count': count,
+                    'last_played': last_played
+                }
             else:
-                # Update existing album's play count and last played date
-                for i in album:
-                    if i[1] == track.parentTitle:
-                        i[2] += count
-                        # Update last played date only if this track was played more recently
-                        if last_played and (not i[3] or last_played > i[3]):
-                            i[3] = last_played
+                album_data[track.parentTitle]['count'] += count
+                if last_played and (
+                    not album_data[track.parentTitle]['last_played'] or
+                    last_played > album_data[track.parentTitle]['last_played']
+                ):
+                    album_data[track.parentTitle]['last_played'] = last_played
 
-        # Sort albums by play count (descending) and then by last played date (most recent first)
+        # Convert to sortable list and sort
+        albums_list = [
+            (data['album'], data['count'], data['last_played'])
+            for data in album_data.values()
+        ]
+
+        # Sort by count (descending) and last played (most recent first)
         sorted_albums = sorted(
-            album,
-            key=lambda x: (-x[2], -(x[3].timestamp() if x[3] else 0))
+            albums_list,
+            key=lambda x: (-x[1], -(x[2].timestamp() if x[2] else 0))
         )
 
-        # Add count and last played date to the album objects
-        sorted_albums = [i[0] for i in sorted_albums]
-        for album, original in zip(sorted_albums, sorted(album)):
-            album.count = original[2]
-            album.last_played_date = original[3]
+        # Extract just the album objects and add attributes
+        result = []
+        for album, count, last_played in sorted_albums:
+            album.count = count
+            album.last_played_date = last_played
+            result.append(album)
             self._log.debug(
                 "{} played {} times, last played on {}",
                 album.title,
-                album.count,
-                album.last_played_date
+                count,
+                last_played
             )
 
-        return sorted_albums
+        return result
 
     def _plex_sonicsage(self, number, prompt, playlist, clear):
         """Generate song recommendations using LLM based on a given prompt."""
