@@ -34,6 +34,9 @@ from plexapi.server import PlexServer
 from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
 from requests.exceptions import ContentDecodingError, ConnectionError
 import json
+import outlines
+import outlines.models as models
+from typing import List, Dict
 
 class PlexSync(BeetsPlugin):
     """Define plexsync class."""
@@ -1113,10 +1116,7 @@ class PlexSync(BeetsPlugin):
         return grid
 
     def _plex_sonicsage(self, number, prompt, playlist, clear):
-        """
-        Generate song recommendations using LLM based on a given prompt,
-        and add the recommended songs to a Plex playlist.
-        """
+        """Generate song recommendations using LLM based on a given prompt."""
         if self.llm_client is None:
             self._log.error("No LLM configured correctly")
             return
@@ -1124,23 +1124,20 @@ class PlexSync(BeetsPlugin):
             self._log.error("Prompt not provided")
             return
 
-        songs = self.get_llm_recommendations(number, prompt)
-        if songs is None:
+        recommendations = self.get_llm_recommendations(number, prompt)
+        if recommendations is None:
             return
 
         song_list = []
-        for song in songs["songs"]:
-            title = song["title"]
-            album = song["album"]
-            artist = song["artist"]
-            year = song["year"]
+        for song in recommendations.songs:
             song_dict = {
-                "title": title.strip(),
-                "album": album.strip(),
-                "artist": artist.strip(),
-                "year": int(year),
+                "title": song.title.strip(),
+                "album": song.album.strip(),
+                "artist": song.artist.strip(),
+                "year": int(song.year) if song.year.isdigit() else None,
             }
             song_list.append(song_dict)
+
         self._log.debug(
             "{} songs to be added in Plex library: {}", len(song_list), song_list
         )
@@ -1166,6 +1163,17 @@ class PlexSync(BeetsPlugin):
         except Exception as e:
             self._log.error("Unable to add songs to playlist. Error: {}", e)
 
+    class SongSchema(models.Schema):
+        """Schema for song recommendations."""
+        title: str
+        artist: str
+        album: str
+        year: str
+
+    class RecommendationsSchema(models.Schema):
+        """Schema for list of song recommendations."""
+        songs: List[SongSchema]
+
     def setup_llm(self):
         """Setup LLM client using OpenAI-compatible API."""
         try:
@@ -1183,48 +1191,34 @@ class PlexSync(BeetsPlugin):
             return
 
     def get_llm_recommendations(self, number, prompt):
-        """Get song recommendations from LLM service."""
+        """Get song recommendations from LLM service using outlines for validation."""
         model = config["llm"]["model"].get()
         num_songs = int(number)
+
         sys_prompt = f"""
         You are a music recommender. You will reply with {num_songs} song
-        recommendations in a JSON format. Only reply with the JSON object,
-        no need to send anything else. Include title, artist, album, and
-        year in the JSON response. Use the JSON format:
-        {{
-            "songs": [
-                {{
-                    "title": "Title of song 1",
-                    "artist": "Artist of Song 1",
-                    "album": "Album of Song 1",
-                    "year": "Year of release"
-                }}
-            ]
-        }}
+        recommendations. Include title, artist, album, and year in the response.
         """
+
         messages = [{"role": "system", "content": sys_prompt}]
         messages.append({"role": "user", "content": prompt})
+
         try:
             self._log.info("Sending request to LLM service")
-            chat = self.llm_client.chat.completions.create(
-                model=model, messages=messages, temperature=0.7
+            generator = outlines.generate.ChatCompletion(
+                model=model,
+                messages=messages,
+                temperature=0.7,
+                client=self.llm_client
             )
-        except Exception as e:
-            self._log.error("Unable to connect to LLM service. Error: {}", e)
-            return
-        reply = chat.choices[0].message.content
-        tokens = chat.usage.total_tokens
-        self._log.debug("LLM service used {} tokens and replied: {}", tokens, reply)
-        return self.extract_json(reply)
 
-    def extract_json(self, jsonString):
-        """Extract and parse JSON from a string."""
-        try:
-            json_data = re.search(r'\{.*\}', jsonString, re.DOTALL).group()
-            return json.loads(json_data)
-        except (json.JSONDecodeError, AttributeError) as e:
-            self._log.error("Unable to parse JSON. Error: {}", e)
-            return
+            result = generator.generate(RecommendationsSchema)
+            self._log.debug("LLM service replied with validated schema: {}", result)
+            return result
+
+        except Exception as e:
+            self._log.error("Unable to get recommendations from LLM service. Error: {}", e)
+            return None
 
     def import_yt_playlist(self, url):
         try:

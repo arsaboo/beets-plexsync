@@ -17,5 +17,6 @@ setup(
         'jiosaavn-python>=0.2',
         'spotipy',
         'openai',
+        'outlines>=0.1',
     ],
 )
