@@ -131,26 +131,6 @@ class PlexSync(BeetsPlugin):
             )
         self.register_listener("database_change", self.listen_for_db_change)
 
-    def authenticate_spotify_old(self):
-        ID = config["spotify"]["client_id"].get()
-        SECRET = config["spotify"]["client_secret"].get()
-        redirect_uri = "http://localhost/"
-        scope = (
-            "user-read-private user-read-email playlist-modify-public "
-            "playlist-modify-private playlist-read-private"
-        )
-        # Create a SpotifyOAuth object with your credentials and scope
-        self.auth_manager = SpotifyOAuth(
-            client_id=ID,
-            client_secret=SECRET,
-            redirect_uri=redirect_uri,
-            scope=scope,
-            open_browser=False,
-            cache_path=self.plexsync_token,
-        )
-        # Create a Spotify object with the auth_manager
-        self.sp = spotipy.Spotify(auth_manager=self.auth_manager)
-
     def authenticate_spotify(self):
         ID = config["spotify"]["client_id"].get()
         SECRET = config["spotify"]["client_secret"].get()
@@ -569,47 +549,6 @@ class PlexSync(BeetsPlugin):
         # Return only the first element of each tuple in the matches
         # list as a new list
         return [m[0] for m in matches]
-
-    def import_gaana_playlist_old(self, playlist_url):
-        # Make a GET request to the playlist url
-        response = requests.get(playlist_url)
-        # Check if the response is successful
-        if response.status_code == 200:
-            # Parse the html data from the response
-            soup = BeautifulSoup(response.text, "html.parser")
-            # Find all the div elements with class "s_c"
-            result = soup.find_all("ul", {"class": "_row list_data"})
-            # Create an empty list to store the tracks
-            tracks = []
-            # Loop through each div element
-            for div in result:
-                div_art = div.find("div", {"class": "_art"})
-                artist = div_art.text.strip()
-                div_alb = div.find("div", {"class": "_alb"})
-                album = div_alb.text.strip()
-                span = div.find("span", {"class": "t_over"})
-                # Get the text content of the span element
-                title_tmp = span.text.strip()
-                title_orig = re.sub("^Premium  ", "", title_tmp)
-                if '(From "' in title_orig or '[From "' in title_orig:
-                    title, album = self.parse_title(title_orig)
-                else:
-                    title = title_orig.strip()
-                song_dict = {
-                    "title": title.strip(),
-                    "album": self.clean_album_name(album.strip()),
-                    "artist": artist,
-                }
-                # Append the title to the tracks list
-                tracks.append(song_dict)
-            # Return the tracks as a list of strings
-            return tracks
-        else:
-            # Raise an exception if the response is not successful
-            raise Exception(
-                f"Gaana website returned status code \
-                            {response.status_code}"
-            )
 
     def import_apple_playlist(self, url):
         import json
@@ -1332,49 +1271,6 @@ class PlexSync(BeetsPlugin):
                     ]
                 spotify_tracks.append(spotify_track_id)
         self.add_tracks_to_spotify_playlist(playlist, spotify_tracks)
-
-    def add_tracks_to_spotify_playlist_old(self, playlist_name, track_uris):
-        user_id = self.sp.current_user()["id"]
-        playlists = self.sp.user_playlists(user_id)
-        playlist_exists = False
-        for playlist in playlists["items"]:
-            self._log.debug(
-                f'Processing Playlist {playlist["name"]} ' f'with id {playlist["id"]}'
-            )
-            if playlist["name"].lower() == playlist_name.lower():
-                playlist_id = playlist["id"]
-                playlist_exists = True
-                self._log.debug(
-                    f"Playlist {playlist_name} exists " f"with id {playlist_id}"
-                )
-                # get the tracks in the playlist
-                playlist_tracks = self.get_playlist_tracks(playlist_id)
-                # get the track uris in the playlist
-                uris = [
-                    track["track"]["uri"].replace("spotify:track:", "")
-                    for track in playlist_tracks["items"]
-                ]
-                self._log.debug(f"Playlist track uris: {uris}")
-                # remove the tracks that are already in the playlist
-                track_uris = list(set(track_uris) - set(uris))
-                self._log.debug(f"Tracks to be added: {track_uris}")
-                break
-        if not playlist_exists:
-            playlist = self.sp.user_playlist_create(
-                user_id, playlist_name, public=False
-            )
-            playlist_id = playlist["id"]
-            self._log.debug(
-                f"Playlist {playlist_name} created " f"with id {playlist_id}"
-            )
-        self._log.debug(f"Adding tracks to playlist {playlist_id}")
-        # add the tracks to the playlist
-        if len(track_uris) > 0:
-            for i in range(0, len(track_uris), 100):
-                chunk = track_uris[i : i + 100]
-                self.sp.user_playlist_add_tracks(user_id, playlist_id, chunk)
-        else:
-            self._log.debug("No tracks to add to playlist")
 
     def add_tracks_to_spotify_playlist(self, playlist_name, track_uris):
         user_id = self.sp.current_user()["id"]
