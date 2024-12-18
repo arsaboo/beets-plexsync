@@ -19,5 +19,9 @@ setup(
         'openai',
         'pydantic>=2.0.0',
         'python-dateutil',
+        'confuse',
+        'requests',
+        'beautifulsoup4',
+        'pillow',
     ],
 )
