@@ -33,7 +33,6 @@ from openai import OpenAI
 from plexapi import exceptions
 from plexapi.server import PlexServer
 from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
-from spotipy_anon import SpotifyAnon  # Import SpotifyAnon
 from requests.exceptions import ContentDecodingError, ConnectionError
 from pydantic import BaseModel, Field
 import json
@@ -166,8 +165,6 @@ class PlexSync(BeetsPlugin):
             self.token_info = new_token
         # Create a Spotify object with the auth_manager
         self.sp = spotipy.Spotify(auth=self.token_info.get("access_token"))
-        # Create a SpotifyAnon object as a fallback
-        self.sp_anon = SpotifyAnon()
 
     def import_spotify_playlist(self, playlist_id):
         """This function returns a list of tracks in a Spotify playlist."""
@@ -239,17 +236,7 @@ class PlexSync(BeetsPlugin):
 
         except spotipy.exceptions.SpotifyException as e:
             self._log.error("Failed to fetch playlist: {} - {}", playlist_id, str(e))
-            # Fallback to SpotifyAnon
-            self._log.info("Falling back to SpotifyAnon")
-            playlist = self.sp_anon.playlist(playlist_id)
-            tracks = playlist['tracks']['items']
-
-            # Fetch remaining tracks if playlist has more than 100 tracks
-            while playlist['tracks']['next']:
-                playlist = self.sp_anon.next(playlist['tracks'])
-                tracks.extend(playlist['items'])
-
-            return tracks
+            return []
 
     def listen_for_db_change(self, lib, model):
         """Listens for beets db change and register the update for the end."""
