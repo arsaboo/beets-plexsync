@@ -241,16 +241,13 @@ class PlexSync(BeetsPlugin):
             self._log.error("Failed to fetch playlist: {} - {}", playlist_id, str(e))
             # Fallback to SpotifyAnon
             self._log.info("Falling back to SpotifyAnon")
-            tracks_response = self.sp_anon.playlist_items(
-                playlist_id,
-                additional_types=['track']
-            )
-            tracks = tracks_response['items']
+            playlist = self.sp_anon.playlist(playlist_id)
+            tracks = playlist['tracks']['items']
 
             # Fetch remaining tracks if playlist has more than 100 tracks
-            while tracks_response['next']:
-                tracks_response = self.sp_anon.next(tracks_response)
-                tracks.extend(tracks_response['items'])
+            while playlist['tracks']['next']:
+                playlist = self.sp_anon.next(playlist['tracks'])
+                tracks.extend(playlist['items'])
 
             return tracks
 
