@@ -219,13 +219,24 @@ class PlexSync(BeetsPlugin):
         Returns:
             list: tracks in a Spotify playlist
         """
+        try:
+            # Use playlist_items instead of playlist_tracks
+            tracks_response = self.sp.playlist_items(
+                playlist_id,
+                additional_types=['track']
+            )
+            tracks = tracks_response['items']
 
-        tracks_response = self.sp.playlist_tracks(playlist_id)
-        tracks = tracks_response["items"]
-        while tracks_response["next"]:
-            tracks_response = self.sp.next(tracks_response)
-            tracks.extend(tracks_response["items"])
-        return tracks
+            # Fetch remaining tracks if playlist has more than 100 tracks
+            while tracks_response['next']:
+                tracks_response = self.sp.next(tracks_response)
+                tracks.extend(tracks_response['items'])
+
+            return tracks
+
+        except spotipy.exceptions.SpotifyException as e:
+            self._log.error("Failed to fetch playlist: {} - {}", playlist_id, str(e))
+            return []
 
     def listen_for_db_change(self, lib, model):
         """Listens for beets db change and register the update for the end."""
