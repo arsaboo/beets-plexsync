@@ -1536,6 +1536,11 @@ class PlexSync(BeetsPlugin):
             "mood_party",
             "mood_relaxed",
             "mood_mirex",
+            "mood_mirex_cluster_1",
+            "mood_mirex_cluster_2",
+            "mood_mirex_cluster_3",
+            "mood_mirex_cluster_4",
+            "mood_mirex_cluster_5",
         ]
         for track in tracks:
             for mood in mood_attributes:
