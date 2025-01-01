@@ -147,9 +147,7 @@ class PlexSync(BeetsPlugin):
             status_forcelist=[429, 500, 502, 503, 504],
         )
         adapter = requests.adapters.HTTPAdapter(
-            pool_connections=100,
-            pool_maxsize=100,
-            max_retries=retry_strategy
+            pool_connections=100, pool_maxsize=100, max_retries=retry_strategy
         )
         self.session.mount("http://", adapter)
         self.session.mount("https://", adapter)
@@ -731,7 +729,7 @@ class PlexSync(BeetsPlugin):
 
         # Batch process playlist additions
         for i in range(0, len(plex_items), BATCH_SIZE):
-            batch = plex_items[i:i + BATCH_SIZE]
+            batch = plex_items[i : i + BATCH_SIZE]
             try:
                 if i == 0 and not self.plex.playlist(playlist):
                     self.plex.createPlaylist(playlist, items=batch)
@@ -802,14 +800,13 @@ class PlexSync(BeetsPlugin):
     def _update_recently_played(self, lib, days=7):
         """Optimized recent plays update."""
         tracks = self.music.search(
-            filters={"track.lastViewedAt>>": f"{days}d"},
-            libtype="track"
+            filters={"track.lastViewedAt>>": f"{days}d"}, libtype="track"
         )
 
         # Process tracks in batches
         BATCH_SIZE = 50
         for i in range(0, len(tracks), BATCH_SIZE):
-            batch = tracks[i:i + BATCH_SIZE]
+            batch = tracks[i : i + BATCH_SIZE]
             with lib.transaction():
                 with ThreadPoolExecutor(max_workers=10) as executor:
                     futures = [
@@ -1187,7 +1184,7 @@ class PlexSync(BeetsPlugin):
                 album.count = count
                 album.last_played_date = last_played
                 result.append(album)
-                self._log.info(
+                self._log.debug(
                     "{} played {} times, last played on {}",
                     album.title,
                     count,
