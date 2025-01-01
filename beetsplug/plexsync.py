@@ -1434,7 +1434,9 @@ class PlexSync(BeetsPlugin):
         # Define user preferences based on listening habits
         preferred_genres = self.get_preferred_genres()
         preferred_moods = self.get_preferred_moods()
-        max_tracks = config["plexsync"]["max_tracks"].get(int, 20)
+        max_tracks = config["plexsync"]["max_tracks"].get(int)
+        if not max_tracks:
+            max_tracks = 20
 
         # Fetch tracks from the library
         tracks = self.music.search(libtype="track")
