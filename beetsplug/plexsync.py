@@ -1444,6 +1444,7 @@ class PlexSync(BeetsPlugin):
 
         # Fetch tracks from the library
         tracks = self.music.search(libtype="track")
+        self._log.debug(f"Total tracks: {len(tracks)}")
 
         # Filter tracks based on user preferences and user rating
         filtered_tracks = [
@@ -1494,6 +1495,7 @@ class PlexSync(BeetsPlugin):
 
         # Sort genres by count and return the top genres
         sorted_genres = sorted(genre_counts, key=genre_counts.get, reverse=True)
+        self._log.debug("Sorted genres: {}", sorted_genres[:5])
         return sorted_genres[:5]  # Return top 5 genres
 
     def get_preferred_moods(self):
