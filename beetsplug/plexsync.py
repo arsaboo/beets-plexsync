@@ -1026,7 +1026,7 @@ class PlexSync(BeetsPlugin):
         for album in sorted_albums:
             if hasattr(album, "thumbUrl") and album.thumbUrl:
                 album_art_urls.append(album.thumbUrl)
-                self._log.debug("Added album art for: {}", album.title)
+                self._log.debug("Added album art for: {} (played {} times)", album.title, album.count)
 
         if not album_art_urls:
             self._log.error("No album artwork found")
