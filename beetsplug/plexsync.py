@@ -219,13 +219,24 @@ class PlexSync(BeetsPlugin):
         Returns:
             list: tracks in a Spotify playlist
         """
+        try:
+            # Use playlist_items instead of playlist_tracks
+            tracks_response = self.sp.playlist_items(
+                playlist_id,
+                additional_types=['track']
+            )
+            tracks = tracks_response['items']
 
-        tracks_response = self.sp.playlist_tracks(playlist_id)
-        tracks = tracks_response["items"]
-        while tracks_response["next"]:
-            tracks_response = self.sp.next(tracks_response)
-            tracks.extend(tracks_response["items"])
-        return tracks
+            # Fetch remaining tracks if playlist has more than 100 tracks
+            while tracks_response['next']:
+                tracks_response = self.sp.next(tracks_response)
+                tracks.extend(tracks_response['items'])
+
+            return tracks
+
+        except spotipy.exceptions.SpotifyException as e:
+            self._log.error("Failed to fetch playlist: {} - {}", playlist_id, str(e))
+            return []
 
     def listen_for_db_change(self, lib, model):
         """Listens for beets db change and register the update for the end."""
@@ -1076,34 +1087,47 @@ class PlexSync(BeetsPlugin):
 
         now = datetime.now()
         frm_dt = now - timedelta(days=interval)
-        album_data = {}  # Use dict to track albums instead of list
+        album_data = {}
 
-        # First pass: collect all album data
         for track in tracks:
-            history = track.history(mindate=frm_dt)
-            count = len(history)
-
             try:
-                last_played = max(
-                    (h.lastViewedAt for h in history if h.lastViewedAt is not None),
-                    default=None,
-                )
-            except ValueError:
-                last_played = None
+                history = track.history(mindate=frm_dt)
+                count = len(history)
 
-            if track.parentTitle not in album_data:
-                album_data[track.parentTitle] = {
-                    "album": track.album(),
-                    "count": count,
-                    "last_played": last_played,
-                }
-            else:
-                album_data[track.parentTitle]["count"] += count
-                if last_played and (
-                    not album_data[track.parentTitle]["last_played"]
-                    or last_played > album_data[track.parentTitle]["last_played"]
-                ):
-                    album_data[track.parentTitle]["last_played"] = last_played
+                # Get last played date from track directly if available
+                track_last_played = track.lastViewedAt
+
+                # If track has history entries, get the most recent one
+                if history:
+                    history_last_played = max(
+                        (h.viewedAt for h in history if h.viewedAt is not None),
+                        default=None
+                    )
+                    # Use the more recent of track.lastViewedAt and history
+                    last_played = max(
+                        filter(None, [track_last_played, history_last_played]),
+                        default=None
+                    )
+                else:
+                    last_played = track_last_played
+
+                if track.parentTitle not in album_data:
+                    album_data[track.parentTitle] = {
+                        "album": track.album(),
+                        "count": count,
+                        "last_played": last_played,
+                    }
+                else:
+                    album_data[track.parentTitle]["count"] += count
+                    if last_played and (
+                        not album_data[track.parentTitle]["last_played"]
+                        or last_played > album_data[track.parentTitle]["last_played"]
+                    ):
+                        album_data[track.parentTitle]["last_played"] = last_played
+
+            except Exception as e:
+                self._log.debug("Error processing track history for {}: {}", track.title, e)
+                continue
 
         # Convert to sortable list and sort
         albums_list = [
@@ -1113,18 +1137,23 @@ class PlexSync(BeetsPlugin):
 
         # Sort by count (descending) and last played (most recent first)
         sorted_albums = sorted(
-            albums_list, key=lambda x: (-x[1], -(x[2].timestamp() if x[2] else 0))
+            albums_list,
+            key=lambda x: (-x[1], -(x[2].timestamp() if x[2] else 0))
         )
 
         # Extract just the album objects and add attributes
         result = []
         for album, count, last_played in sorted_albums:
-            album.count = count
-            album.last_played_date = last_played
-            result.append(album)
-            self._log.debug(
-                "{} played {} times, last played on {}", album.title, count, last_played
-            )
+            if count > 0:  # Only include albums that have been played
+                album.count = count
+                album.last_played_date = last_played
+                result.append(album)
+                self._log.info(
+                    "{} played {} times, last played on {}",
+                    album.title,
+                    count,
+                    last_played.strftime("%Y-%m-%d %H:%M:%S") if last_played else "Never"
+                )
 
         return result
 
