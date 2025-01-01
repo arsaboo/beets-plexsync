@@ -12,7 +12,7 @@ import difflib
 import os
 import re
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import List
 
@@ -35,6 +35,9 @@ from plexapi.server import PlexServer
 from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
 from requests.exceptions import ContentDecodingError, ConnectionError
 from pydantic import BaseModel, Field
+from functools import lru_cache
+import requests.adapters
+from requests.packages.urllib3.util.retry import Retry
 import json
 
 
@@ -135,6 +138,24 @@ class PlexSync(BeetsPlugin):
                 library not found"
             )
         self.register_listener("database_change", self.listen_for_db_change)
+
+        # Setup connection pooling
+        self.session = requests.Session()
+        retry_strategy = Retry(
+            total=3,
+            backoff_factor=1,
+            status_forcelist=[429, 500, 502, 503, 504],
+        )
+        adapter = requests.adapters.HTTPAdapter(
+            pool_connections=100,
+            pool_maxsize=100,
+            max_retries=retry_strategy
+        )
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
+
+        # Initialize thread pool
+        self.thread_pool = ThreadPoolExecutor(max_workers=10)
 
     def authenticate_spotify(self):
         ID = config["spotify"]["client_id"].get()
@@ -611,13 +632,21 @@ class PlexSync(BeetsPlugin):
             self._log.warning("{} Update failed", self.config["plex"]["library_name"])
 
     def _fetch_plex_info(self, items, write, force):
-        """Obtain track information from Plex."""
-        items_len = len(items)
-        with ThreadPoolExecutor() as executor:
+        """Parallel version of Plex info fetching."""
+        futures = []
+        with ThreadPoolExecutor(max_workers=10) as executor:
             for index, item in enumerate(items, start=1):
-                executor.submit(
-                    self._process_item, index, item, write, force, items_len
+                future = executor.submit(
+                    self._process_item, index, item, write, force, len(items)
                 )
+                futures.append(future)
+
+        # Wait for all futures to complete
+        for future in as_completed(futures):
+            try:
+                future.result()
+            except Exception as e:
+                self._log.error("Error processing item: {}", e)
 
     def _process_item(self, index, item, write, force, items_len):
         self._log.info("Processing {}/{} tracks - {} ", index, items_len, item)
@@ -640,8 +669,9 @@ class PlexSync(BeetsPlugin):
         if write:
             item.try_write()
 
+    @lru_cache(maxsize=1000)
     def search_plex_track(self, item):
-        """Fetch the Plex track key."""
+        """Cached version of Plex track search."""
         tracks = self.music.searchTracks(
             **{"album.title": item.album, "track.title": item.title}
         )
@@ -683,36 +713,37 @@ class PlexSync(BeetsPlugin):
             playlist.addItems(item)
 
     def _plex_add_playlist_item(self, items, playlist):
-        """Add items to Plex playlist."""
-        plex_set = set()
-        try:
-            plst = self.plex.playlist(playlist)
-            playlist_set = set(plst.items())
-        except exceptions.NotFound:
-            plst = None
-            playlist_set = set()
-        for item in items:
+        """Optimized batch playlist addition."""
+        BATCH_SIZE = 100
+        plex_items = []
+
+        # Convert items to Plex items in parallel
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            future_to_item = {
+                executor.submit(self.plex.fetchItem, item.plex_ratingkey): item
+                for item in items
+            }
+            for future in as_completed(future_to_item):
+                try:
+                    plex_items.append(future.result())
+                except Exception as e:
+                    self._log.warning("Error fetching Plex item: {}", e)
+
+        # Batch process playlist additions
+        for i in range(0, len(plex_items), BATCH_SIZE):
+            batch = plex_items[i:i + BATCH_SIZE]
             try:
-                plex_set.add(self.plex.fetchItem(item.plex_ratingkey))
-            except (exceptions.NotFound, AttributeError) as e:
-                self._log.warning("{} not found in Plex library. Error: {}", item, e)
-                continue
-        to_add = plex_set - playlist_set
-        self._log.info("Adding {} tracks to {} playlist", len(to_add), playlist)
-        if plst is None:
-            self._log.info("{} playlist will be created", playlist)
-            self.plex.createPlaylist(playlist, items=list(to_add))
-        else:
-            try:
-                plst.addItems(items=list(to_add))
-            except exceptions.BadRequest as e:
-                self._log.error(
-                    "Error adding items {} to {} playlist. Error: {}",
-                    items,
-                    playlist,
-                    e,
-                )
-        self.sort_plex_playlist(playlist, "lastViewedAt")
+                if i == 0 and not self.plex.playlist(playlist):
+                    self.plex.createPlaylist(playlist, items=batch)
+                else:
+                    self.plex.playlist(playlist).addItems(items=batch)
+            except Exception as e:
+                self._log.error("Error adding batch to playlist: {}", e)
+
+    @lru_cache(maxsize=100)
+    def _get_plex_playlist(self, playlist_name):
+        """Cached playlist getter."""
+        return self.plex.playlist(playlist_name)
 
     def _plex_playlist_to_collection(self, playlist):
         """Convert a Plex playlist to a Plex collection."""
@@ -769,41 +800,38 @@ class PlexSync(BeetsPlugin):
         plst.removeItems(items=list(to_remove))
 
     def _update_recently_played(self, lib, days=7):
-        """Fetch the Plex track key."""
+        """Optimized recent plays update."""
         tracks = self.music.search(
-            filters={"track.lastViewedAt>>": f"{days}d"}, libtype="track"
+            filters={"track.lastViewedAt>>": f"{days}d"},
+            libtype="track"
         )
-        self._log.info("Updating information for {} tracks", len(tracks))
-        with lib.transaction():
-            for track in tracks:
-                query = MatchQuery("plex_ratingkey", track.ratingKey, fast=False)
-                items = lib.items(query)
-                if not items:
-                    self._log.debug("{} | track not found", query)
-                    continue
-                elif len(items) == 1:
-                    self._log.info("Updating information for {} ", items[0])
-                    try:
-                        items[0].plex_userrating = track.userRating
-                        items[0].plex_skipcount = track.skipCount
-                        items[0].plex_viewcount = track.viewCount
-                        items[0].plex_lastviewedat = (
-                            track.lastViewedAt.timestamp()
-                            if track.lastViewedAt
-                            else None
-                        )
-                        items[0].plex_lastratedat = (
-                            track.lastRatedAt.timestamp() if track.lastRatedAt else None
-                        )
-                        items[0].plex_updated = time.time()
-                        items[0].store()
-                        items[0].try_write()
-                    except exceptions.NotFound:
-                        self._log.debug("{} | track not found", items[0])
-                        continue
-                else:
-                    self._log.debug("Please sync Plex library again")
-                    continue
+
+        # Process tracks in batches
+        BATCH_SIZE = 50
+        for i in range(0, len(tracks), BATCH_SIZE):
+            batch = tracks[i:i + BATCH_SIZE]
+            with lib.transaction():
+                with ThreadPoolExecutor(max_workers=10) as executor:
+                    futures = [
+                        executor.submit(self._update_track_info, lib, track)
+                        for track in batch
+                    ]
+                    for future in as_completed(futures):
+                        try:
+                            future.result()
+                        except Exception as e:
+                            self._log.error("Error updating track: {}", e)
+
+    def _update_track_info(self, lib, track):
+        """Helper method for updating track information."""
+        query = MatchQuery("plex_ratingkey", track.ratingKey, fast=False)
+        items = lib.items(query)
+        if not items:
+            self._log.debug("{} | track not found", query)
+            return
+
+        if len(items) == 1:
+            self._update_single_track(items[0], track)
 
     def search_plex_song(self, song, manual_search=False):
         """Fetch the Plex track key."""
