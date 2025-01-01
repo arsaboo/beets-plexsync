@@ -1453,6 +1453,7 @@ class PlexSync(BeetsPlugin):
             and any(getattr(track, mood) for mood in preferred_moods)
             and (track.plex_userrating or 0) > 3  # Include tracks with user rating > 3
         ]
+        self._log.debug(f"Filtered tracks: {len(filtered_tracks)}")
 
         # Sort tracks by user rating and Spotify popularity
         sorted_tracks = sorted(
@@ -1460,9 +1461,14 @@ class PlexSync(BeetsPlugin):
             key=lambda x: (x.plex_userrating or 0, x.spotify_track_popularity or 0),
             reverse=True,
         )
+        self._log.debug(f"Sorted tracks: {len(sorted_tracks)}")
 
         # Select tracks for the playlist
         selected_tracks = sorted_tracks[:max_tracks]
+
+        if not selected_tracks:
+            self._log.info("No tracks found for Daily Discovery playlist")
+            return
 
         # Create or update the Daily Discovery playlist in Plex
         playlist_name = "Daily Discovery"
