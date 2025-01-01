@@ -463,6 +463,16 @@ class PlexSync(BeetsPlugin):
 
         plex2spotify_cmd.func = func_plex2spotify
 
+        # Add daily discovery command
+        daily_discovery_cmd = ui.Subcommand(
+            "dailydiscovery", help="Generate Daily Discovery playlist"
+        )
+
+        def func_daily_discovery(lib, opts, args):
+            self.generate_daily_discovery()
+
+        daily_discovery_cmd.func = func_daily_discovery
+
         return [
             plexupdate_cmd,
             sync_cmd,
@@ -476,6 +486,7 @@ class PlexSync(BeetsPlugin):
             searchimport_cmd,
             plexplaylist2collection_cmd,
             plex2spotify_cmd,
+            daily_discovery_cmd,
         ]
 
     def parse_title(self, title_orig):
@@ -1415,3 +1426,84 @@ class PlexSync(BeetsPlugin):
             )
         else:
             self._log.debug("No tracks to add to playlist")
+
+    def generate_daily_discovery(self):
+        """Generate a Daily Discovery playlist."""
+        self._log.info("Generating Daily Discovery playlist")
+
+        # Define user preferences based on listening habits
+        preferred_genres = self.get_preferred_genres()
+        preferred_moods = self.get_preferred_moods()
+        max_tracks = config["plexsync"].get("max_tracks", 20)
+
+        # Fetch tracks from the library
+        tracks = self.music.search(libtype="track")
+
+        # Filter tracks based on user preferences and user rating
+        filtered_tracks = [
+            track
+            for track in tracks
+            if track.genre in preferred_genres
+            and any(getattr(track, mood) for mood in preferred_moods)
+            and (track.plex_userrating or 0) > 3  # Include tracks with user rating > 3
+        ]
+
+        # Sort tracks by user rating and Spotify popularity
+        sorted_tracks = sorted(
+            filtered_tracks,
+            key=lambda x: (x.plex_userrating or 0, x.spotify_track_popularity or 0),
+            reverse=True,
+        )
+
+        # Select tracks for the playlist
+        selected_tracks = sorted_tracks[:max_tracks]
+
+        # Create or update the Daily Discovery playlist in Plex
+        playlist_name = "Daily Discovery"
+        self._plex_add_playlist_item(selected_tracks, playlist_name)
+
+        self._log.info(
+            "Daily Discovery playlist generated with {} tracks", len(selected_tracks)
+        )
+
+    def get_preferred_genres(self):
+        """Determine preferred genres based on user listening habits."""
+        # Fetch tracks from the library
+        tracks = self.music.search(libtype="track")
+
+        # Count occurrences of each genre
+        genre_counts = {}
+        for track in tracks:
+            genre = track.genre
+            if genre:
+                genre_counts[genre] = genre_counts.get(genre, 0) + 1
+
+        # Sort genres by count and return the top genres
+        sorted_genres = sorted(genre_counts, key=genre_counts.get, reverse=True)
+        return sorted_genres[:5]  # Return top 5 genres
+
+    def get_preferred_moods(self):
+        """Determine preferred moods based on user listening habits."""
+        # Fetch tracks from the library
+        tracks = self.music.search(libtype="track")
+
+        # Count occurrences of each mood
+        mood_counts = {}
+        mood_attributes = [
+            "mood_acoustic",
+            "mood_aggressive",
+            "mood_electronic",
+            "mood_happy",
+            "mood_sad",
+            "mood_party",
+            "mood_relaxed",
+            "mood_mirex",
+        ]
+        for track in tracks:
+            for mood in mood_attributes:
+                if getattr(track, mood, False):
+                    mood_counts[mood] = mood_counts.get(mood, 0) + 1
+
+        # Sort moods by count and return the top moods
+        sorted_moods = sorted(mood_counts, key=mood_counts.get, reverse=True)
+        return sorted_moods[:3]  # Return top 3 moods
