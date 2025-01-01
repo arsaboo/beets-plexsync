@@ -495,7 +495,7 @@ class PlexSync(BeetsPlugin):
             album = re.sub(r'^[^"]+"|(?<!^)"[^"]+"|"[^"]+$', "", title_orig)
         elif '[From "' in title_orig:
             title = re.sub(r"\[From.*\]", "", title_orig)
-            album = re.sub(r'^[^"]+"|(?<!^)"[^"]+"|"[^"]+$', "", title_orig)
+            album = re.sub(r'^[^"]+"|(?<!^)"[^"]+$', "", title_orig)
         else:
             title = title_orig
             album = ""
@@ -508,9 +508,9 @@ class PlexSync(BeetsPlugin):
             .strip()
         )
         if '(From "' in album_orig:
-            album = re.sub(r'^[^"]+"|(?<!^)"[^"]+"|"[^"]+$', "", album_orig)
+            album = re.sub(r'^[^"]+"|(?<!^)"[^"]+$', "", album_orig)
         elif '[From "' in album_orig:
-            album = re.sub(r'^[^"]+"|(?<!^)"[^"]+"|"[^"]+$', "", album_orig)
+            album = re.sub(r'^[^"]+"|(?<!^)"[^"]+$', "", album_orig)
         else:
             album = album_orig
         return album
@@ -1470,8 +1470,10 @@ class PlexSync(BeetsPlugin):
 
     def get_preferred_genres(self):
         """Determine preferred genres based on user listening habits."""
-        # Fetch tracks from the library
-        tracks = self.music.search(libtype="track")
+        # Fetch tracks played in the last 15 days
+        tracks = self.music.search(
+            filters={"track.lastViewedAt>>": "15d"}, libtype="track"
+        )
 
         # Count occurrences of each genre
         genre_counts = {}
@@ -1486,8 +1488,10 @@ class PlexSync(BeetsPlugin):
 
     def get_preferred_moods(self):
         """Determine preferred moods based on user listening habits."""
-        # Fetch tracks from the library
-        tracks = self.music.search(libtype="track")
+        # Fetch tracks played in the last 15 days
+        tracks = self.music.search(
+            filters={"track.lastViewedAt>>": "15d"}, libtype="track"
+        )
 
         # Count occurrences of each mood
         mood_counts = {}
