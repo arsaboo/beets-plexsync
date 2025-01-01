@@ -1456,7 +1456,7 @@ class PlexSync(BeetsPlugin):
                 continue
             beets_item = items[0]
 
-            track_genres = beets_item.genres
+            track_genres = beets_item.genre.split(";")
             track_moods = [
                 mood for mood in preferred_moods if getattr(beets_item, mood, False)
             ]
