@@ -1463,7 +1463,7 @@ class PlexSync(BeetsPlugin):
             user_rating = getattr(beets_item, "userRating", 0)
             if (
                 any(genre in preferred_genres for genre in track_genres)
-                and track_moods
+                and any(getattr(beets_item, mood, False) for mood in preferred_moods)
                 and user_rating > 3
             ):
                 filtered_tracks.append(track)
