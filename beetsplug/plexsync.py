@@ -1443,7 +1443,7 @@ class PlexSync(BeetsPlugin):
         filtered_tracks = [
             track
             for track in tracks
-            if track.genre in preferred_genres
+            if any(genre in preferred_genres for genre in track.genres)
             and any(getattr(track, mood) for mood in preferred_moods)
             and (track.plex_userrating or 0) > 3  # Include tracks with user rating > 3
         ]
@@ -1474,9 +1474,9 @@ class PlexSync(BeetsPlugin):
         # Count occurrences of each genre
         genre_counts = {}
         for track in tracks:
-            genre = track.genre
-            if genre:
-                genre_counts[genre] = genre_counts.get(genre, 0) + 1
+            for genre in track.genres:
+                if genre:
+                    genre_counts[genre] = genre_counts.get(genre, 0) + 1
 
         # Sort genres by count and return the top genres
         sorted_genres = sorted(genre_counts, key=genre_counts.get, reverse=True)
