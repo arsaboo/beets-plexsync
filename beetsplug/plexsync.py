@@ -1449,12 +1449,21 @@ class PlexSync(BeetsPlugin):
         # Filter tracks based on user preferences and user rating
         filtered_tracks = []
         for track in tracks:
-            track_genres = track.genres
-            track_moods = [mood.tag for mood in track.moods]
-            user_rating = getattr(track, "userRating", 0)
+            # Fetch the corresponding beets library item using the plex_ratingkey
+            query = MatchQuery("plex_ratingkey", track.ratingKey, fast=False)
+            items = self.lib.items(query)
+            if not items:
+                continue
+            beets_item = items[0]
+
+            track_genres = beets_item.genres
+            track_moods = [
+                mood for mood in preferred_moods if getattr(beets_item, mood, False)
+            ]
+            user_rating = getattr(beets_item, "userRating", 0)
             if (
                 any(genre in preferred_genres for genre in track_genres)
-                and any(mood in preferred_moods for mood in track_moods)
+                and track_moods
                 and user_rating > 3
             ):
                 filtered_tracks.append(track)
