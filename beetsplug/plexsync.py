@@ -99,7 +99,11 @@ class PlexSync(BeetsPlugin):
         )
 
         config["plexsync"].add(
-            {"tokenfile": "spotify_plexsync.json", "manual_search": False}
+            {
+                "tokenfile": "spotify_plexsync.json",
+                "manual_search": False,
+                "max_tracks": 20,  # Add default value for max_tracks
+            }
         )
         self.plexsync_token = config["plexsync"]["tokenfile"].get(
             confuse.Filename(in_app_dir=True)
