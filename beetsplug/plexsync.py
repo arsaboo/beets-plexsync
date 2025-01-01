@@ -1447,13 +1447,14 @@ class PlexSync(BeetsPlugin):
         self._log.debug(f"Total tracks: {len(tracks)}")
 
         # Filter tracks based on user preferences and user rating
-        filtered_tracks = [
-            track
-            for track in tracks
-            if any(genre in preferred_genres for genre in track.genres)
-            and any(getattr(track, mood) for mood in preferred_moods)
-            and (track.plex_userrating or 0) > 3  # Include tracks with user rating > 3
-        ]
+        filtered_tracks = []
+        for track in tracks:
+            track_genres = track.genres
+            track_moods = [mood for mood in preferred_moods if getattr(track, mood, False)]
+            if any(genre in preferred_genres for genre in track_genres) and track_moods and (track.plex_userrating or 0) > 3:
+                filtered_tracks.append(track)
+            self._log.debug(f"Track: {track.title}, Genres: {track_genres}, Moods: {track_moods}, User Rating: {track.plex_userrating}")
+
         self._log.debug(f"Filtered tracks: {len(filtered_tracks)}")
 
         # Sort tracks by user rating and Spotify popularity
