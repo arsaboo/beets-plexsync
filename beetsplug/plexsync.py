@@ -473,7 +473,7 @@ class PlexSync(BeetsPlugin):
         )
 
         def func_daily_discovery(lib, opts, args):
-            self.generate_daily_discovery()
+            self.generate_daily_discovery(lib)
 
         daily_discovery_cmd.func = func_daily_discovery
 
@@ -1431,7 +1431,7 @@ class PlexSync(BeetsPlugin):
         else:
             self._log.debug("No tracks to add to playlist")
 
-    def generate_daily_discovery(self):
+    def generate_daily_discovery(self, lib):
         """Generate a Daily Discovery playlist."""
         self._log.info("Generating Daily Discovery playlist")
 
@@ -1451,7 +1451,7 @@ class PlexSync(BeetsPlugin):
         for track in tracks:
             # Fetch the corresponding beets library item using the plex_ratingkey
             query = MatchQuery("plex_ratingkey", track.ratingKey, fast=False)
-            items = self.lib.items(query)
+            items = lib.items(query)
             if not items:
                 continue
             beets_item = items[0]
