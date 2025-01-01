@@ -222,15 +222,14 @@ class PlexSync(BeetsPlugin):
         try:
             # Use playlist_items instead of playlist_tracks
             tracks_response = self.sp.playlist_items(
-                playlist_id,
-                additional_types=['track']
+                playlist_id, additional_types=["track"]
             )
-            tracks = tracks_response['items']
+            tracks = tracks_response["items"]
 
             # Fetch remaining tracks if playlist has more than 100 tracks
-            while tracks_response['next']:
+            while tracks_response["next"]:
                 tracks_response = self.sp.next(tracks_response)
-                tracks.extend(tracks_response['items'])
+                tracks.extend(tracks_response["items"])
 
             return tracks
 
@@ -673,7 +672,7 @@ class PlexSync(BeetsPlugin):
                 if getattr(x, sort_field) is not None
                 else 0
             ),
-            reverse=True  # Sort most recent first
+            reverse=True,  # Sort most recent first
         )
 
         # Remove all items from the playlist
@@ -794,9 +793,7 @@ class PlexSync(BeetsPlugin):
                             else None
                         )
                         items[0].plex_lastratedat = (
-                            track.lastRatedAt.timestamp()
-                            if track.lastRatedAt
-                            else None
+                            track.lastRatedAt.timestamp() if track.lastRatedAt else None
                         )
                         items[0].plex_updated = time.time()
                         items[0].store()
@@ -1026,7 +1023,11 @@ class PlexSync(BeetsPlugin):
         for album in sorted_albums:
             if hasattr(album, "thumbUrl") and album.thumbUrl:
                 album_art_urls.append(album.thumbUrl)
-                self._log.debug("Added album art for: {} (played {} times)", album.title, album.count)
+                self._log.debug(
+                    "Added album art for: {} (played {} times)",
+                    album.title,
+                    album.count,
+                )
 
         if not album_art_urls:
             self._log.error("No album artwork found")
@@ -1110,12 +1111,12 @@ class PlexSync(BeetsPlugin):
                 if history:
                     history_last_played = max(
                         (h.viewedAt for h in history if h.viewedAt is not None),
-                        default=None
+                        default=None,
                     )
                     # Use the more recent of track.lastViewedAt and history
                     last_played = max(
                         filter(None, [track_last_played, history_last_played]),
-                        default=None
+                        default=None,
                     )
                 else:
                     last_played = track_last_played
@@ -1135,7 +1136,9 @@ class PlexSync(BeetsPlugin):
                         album_data[track.parentTitle]["last_played"] = last_played
 
             except Exception as e:
-                self._log.debug("Error processing track history for {}: {}", track.title, e)
+                self._log.debug(
+                    "Error processing track history for {}: {}", track.title, e
+                )
                 continue
 
         # Convert to sortable list and sort
@@ -1146,8 +1149,7 @@ class PlexSync(BeetsPlugin):
 
         # Sort by count (descending) and last played (most recent first)
         sorted_albums = sorted(
-            albums_list,
-            key=lambda x: (-x[1], -(x[2].timestamp() if x[2] else 0))
+            albums_list, key=lambda x: (-x[1], -(x[2].timestamp() if x[2] else 0))
         )
 
         # Extract just the album objects and add attributes
@@ -1161,7 +1163,11 @@ class PlexSync(BeetsPlugin):
                     "{} played {} times, last played on {}",
                     album.title,
                     count,
-                    last_played.strftime("%Y-%m-%d %H:%M:%S") if last_played else "Never"
+                    (
+                        last_played.strftime("%Y-%m-%d %H:%M:%S")
+                        if last_played
+                        else "Never"
+                    ),
                 )
 
         return result
