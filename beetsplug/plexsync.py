@@ -669,10 +669,11 @@ class PlexSync(BeetsPlugin):
         sorted_items = sorted(
             items,
             key=lambda x: (
-                getattr(x, sort_field)
+                getattr(x, sort_field).timestamp()
                 if getattr(x, sort_field) is not None
-                else datetime(1900, 1, 1)
+                else 0
             ),
+            reverse=True  # Sort most recent first
         )
 
         # Remove all items from the playlist
@@ -787,8 +788,16 @@ class PlexSync(BeetsPlugin):
                         items[0].plex_userrating = track.userRating
                         items[0].plex_skipcount = track.skipCount
                         items[0].plex_viewcount = track.viewCount
-                        items[0].plex_lastviewedat = track.lastViewedAt
-                        items[0].plex_lastratedat = track.lastRatedAt
+                        items[0].plex_lastviewedat = (
+                            track.lastViewedAt.timestamp()
+                            if track.lastViewedAt
+                            else None
+                        )
+                        items[0].plex_lastratedat = (
+                            track.lastRatedAt.timestamp()
+                            if track.lastRatedAt
+                            else None
+                        )
                         items[0].plex_updated = time.time()
                         items[0].store()
                         items[0].try_write()
