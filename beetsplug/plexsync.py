@@ -1457,18 +1457,16 @@ class PlexSync(BeetsPlugin):
             beets_item = items[0]
 
             track_genres = beets_item.genre.split(";")
-            track_moods = [
-                mood for mood in preferred_moods if getattr(beets_item, mood, False)
-            ]
+            has_preferred_mood = any(getattr(beets_item, mood, False) for mood in preferred_moods)
             user_rating = getattr(beets_item, "userRating", 0)
             if (
                 any(genre in preferred_genres for genre in track_genres)
-                and any(getattr(beets_item, mood, False) for mood in preferred_moods)
+                and has_preferred_mood
                 and user_rating > 3
             ):
                 filtered_tracks.append(track)
             self._log.debug(
-                f"Track: {track.title}, Genres: {track_genres}, Moods: {track_moods}, User Rating: {user_rating}"
+                f"Track: {track.title}, Genres: {track_genres}, User Rating: {user_rating}, Has Preferred Mood: {has_preferred_mood}"
             )
 
         self._log.debug(f"Filtered tracks: {len(filtered_tracks)}")
