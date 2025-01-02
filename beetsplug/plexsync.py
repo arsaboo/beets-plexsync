@@ -1436,8 +1436,8 @@ class PlexSync(BeetsPlugin):
         self._log.info("Generating Daily Discovery playlist")
 
         # Define user preferences based on listening habits
-        preferred_genres = [genre.lower() for genre in self.get_preferred_genres()]
-        self._log.debug(f"Preferred genres: {preferred_genres}")  # Debug preferred genres
+        preferred_genres = self.get_preferred_genres()  # Already returns lowercase strings
+        self._log.debug(f"Preferred genres: {preferred_genres}")
 
         # ... existing mood_attributes and max_tracks code ...
         mood_attributes = [
@@ -1546,7 +1546,9 @@ class PlexSync(BeetsPlugin):
         for track in tracks:
             for genre in track.genres:
                 if genre:
-                    genre_counts[genre] = genre_counts.get(genre, 0) + 1
+                    # Convert Genre object to string using tag attribute
+                    genre_str = str(genre.tag).lower()
+                    genre_counts[genre_str] = genre_counts.get(genre_str, 0) + 1
 
         # Sort genres by count and return the top genres
         sorted_genres = sorted(genre_counts, key=genre_counts.get, reverse=True)
