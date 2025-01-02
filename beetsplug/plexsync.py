@@ -1435,6 +1435,7 @@ class PlexSync(BeetsPlugin):
         """Generate a Daily Discovery playlist."""
         self._log.info("Generating Daily Discovery playlist")
 
+        # Setup and configuration
         preferred_genres = self.get_preferred_genres()
         self._log.debug(f"Using preferred genres: {preferred_genres}")
 
@@ -1448,12 +1449,14 @@ class PlexSync(BeetsPlugin):
         if not max_tracks:
             max_tracks = 20
 
+        # Get all tracks
         all_tracks = lib.items()
-        self._log.debug(f"Total tracks in library: {len(all_tracks)}")
+        self._log.debug(f"Processing {len(all_tracks)} tracks from library")
 
+        # Filter tracks
         filtered_tracks = []
         for beets_item in all_tracks:
-            # Handle genres
+            # Genre handling
             track_genres = []
             if hasattr(beets_item, 'genre') and beets_item.genre:
                 if isinstance(beets_item.genre, list):
@@ -1461,47 +1464,44 @@ class PlexSync(BeetsPlugin):
                 else:
                     track_genres = [g.lower().strip() for g in beets_item.genre.split(';')]
 
-            # Handle moods
+            # Basic criteria
             has_mood = any(bool(getattr(beets_item, mood, False)) for mood in mood_attributes)
             user_rating = float(getattr(beets_item, "plex_userrating", 0))
-
-            # Genre matching
             genre_match = any(pg in tg or tg in pg for pg in preferred_genres for tg in track_genres)
 
             if genre_match and has_mood and user_rating > 3:
                 filtered_tracks.append(beets_item)
                 self._log.debug(
-                    "Added: {} by {} (Rating: {})",
-                    beets_item.title,
+                    "Matched: {} - {} (Rating: {}, Genres: {})",
                     beets_item.artist,
-                    user_rating
+                    beets_item.title,
+                    user_rating,
+                    track_genres
                 )
 
-        self._log.info("Found {} tracks matching criteria", len(filtered_tracks))
+        self._log.info("Found {} tracks matching initial criteria", len(filtered_tracks))
 
-        # Sort tracks by user rating and Spotify popularity
-        sorted_tracks = sorted(
+        # Sort and select tracks
+        selected_tracks = sorted(
             filtered_tracks,
             key=lambda x: (
                 float(getattr(x, "plex_userrating", 0)),
                 int(getattr(x, "spotify_track_popularity", 0))
             ),
             reverse=True
-        )
-
-        # Select tracks for the playlist
-        selected_tracks = sorted_tracks[:max_tracks]
+        )[:max_tracks]
 
         if not selected_tracks:
-            self._log.info("No tracks found for Daily Discovery playlist")
+            self._log.warning("No tracks matched criteria for Daily Discovery playlist")
             return
 
-        # Create or update the Daily Discovery playlist in Plex
+        # Create playlist
         playlist_name = "Daily Discovery"
         self._plex_add_playlist_item(selected_tracks, playlist_name)
 
         self._log.info(
-            "Daily Discovery playlist generated with {} tracks", len(selected_tracks)
+            "Successfully updated Daily Discovery playlist with {} tracks",
+            len(selected_tracks)
         )
 
     def get_preferred_genres(self):
