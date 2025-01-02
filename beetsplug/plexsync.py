@@ -1436,8 +1436,16 @@ class PlexSync(BeetsPlugin):
         self._log.info("Generating Daily Discovery playlist")
 
         # Define user preferences based on listening habits
-        preferred_genres = self.get_preferred_genres()
-        preferred_moods = self.get_preferred_moods()
+        preferred_genres = [genre.lower() for genre in self.get_preferred_genres()]
+        self._log.debug(f"Preferred genres: {preferred_genres}")  # Debug preferred genres
+
+        # ... existing mood_attributes and max_tracks code ...
+        mood_attributes = [
+            "mood_acoustic", "mood_aggressive", "mood_electronic",
+            "mood_happy", "mood_sad", "mood_party", "mood_relaxed",
+            "mood_mirex", "mood_mirex_cluster_1", "mood_mirex_cluster_2",
+            "mood_mirex_cluster_3", "mood_mirex_cluster_4", "mood_mirex_cluster_5"
+        ]
         max_tracks = config["plexsync"]["max_tracks"].get(int)
         if not max_tracks:
             max_tracks = 20
@@ -1449,40 +1457,55 @@ class PlexSync(BeetsPlugin):
         # Filter tracks based on user preferences and user rating
         filtered_tracks = []
         for beets_item in all_tracks:
-            track_genres = beets_item.genre.split(";")
-            has_preferred_mood = any(
-                getattr(beets_item, mood, False)
-                for mood in [
-                    "mood_acoustic",
-                    "mood_aggressive",
-                    "mood_electronic",
-                    "mood_happy",
-                    "mood_sad",
-                    "mood_party",
-                    "mood_relaxed",
-                    "mood_mirex",
-                    "mood_mirex_cluster_1",
-                    "mood_mirex_cluster_2",
-                    "mood_mirex_cluster_3",
-                    "mood_mirex_cluster_4",
-                    "mood_mirex_cluster_5",
-                ]
-            )
+            # Normalize genres to lowercase and split if necessary
+            track_genres = []
+            if hasattr(beets_item, 'genre') and beets_item.genre:
+                # Handle both list and string genre formats
+                if isinstance(beets_item.genre, list):
+                    track_genres = [g.lower().strip() for g in beets_item.genre]
+                else:
+                    track_genres = [g.lower().strip() for g in beets_item.genre.split(';')]
+
+            # Check for any mood attributes
+            track_moods = {}
+            for mood in mood_attributes:
+                if hasattr(beets_item, mood):
+                    track_moods[mood] = getattr(beets_item, mood)
+
+            has_mood = any(track_moods.values())
+
             user_rating = getattr(beets_item, "plex_userrating", None)
-            self._log.debug(f"Track: {beets_item.title}, User Rating: {user_rating}")
             if user_rating is not None:
-                user_rating = int(user_rating)
+                user_rating = float(user_rating)
             else:
-                user_rating = 0
-            if (
-                any(genre in preferred_genres for genre in track_genres)
-                and has_preferred_mood
-                and user_rating > 3
-            ):
+                user_rating = 0.0
+
+            # Debug logging
+            self._log.debug(f"Processing track: {beets_item.title}")
+            self._log.debug(f"Track genres: {track_genres}")
+
+            # More flexible genre matching
+            genre_match = False
+            for track_genre in track_genres:
+                for preferred_genre in preferred_genres:
+                    if (preferred_genre in track_genre) or (track_genre in preferred_genre):
+                        genre_match = True
+                        break
+                if genre_match:
+                    break
+
+            self._log.debug(f"Genre match: {genre_match}")
+            self._log.debug(f"Has mood: {has_mood}")
+            self._log.debug(f"User rating: {user_rating}")
+
+            if genre_match and has_mood and user_rating > 3:
                 filtered_tracks.append(beets_item)
-            self._log.debug(
-                f"Track: {beets_item.title}, Genres: {track_genres}, User Rating: {user_rating}, Has Preferred Mood: {has_preferred_mood}"
-            )
+                self._log.debug(
+                    f"Added track: {beets_item.title}, "
+                    f"Genres: {track_genres}, "
+                    f"Moods: {track_moods}, "
+                    f"User Rating: {user_rating}"
+                )
 
         self._log.debug(f"Filtered tracks: {len(filtered_tracks)}")
 
@@ -1490,12 +1513,11 @@ class PlexSync(BeetsPlugin):
         sorted_tracks = sorted(
             filtered_tracks,
             key=lambda x: (
-                getattr(x, "plex_userrating", 0),
-                getattr(x, "spotify_track_popularity", 0),
+                float(getattr(x, "plex_userrating", 0)),
+                int(getattr(x, "spotify_track_popularity", 0))
             ),
-            reverse=True,
+            reverse=True
         )
-        self._log.debug(f"Sorted tracks: {len(sorted_tracks)}")
 
         # Select tracks for the playlist
         selected_tracks = sorted_tracks[:max_tracks]
