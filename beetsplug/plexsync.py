@@ -1432,22 +1432,15 @@ class PlexSync(BeetsPlugin):
             self._log.debug("No tracks to add to playlist")
 
     def get_preferred_attributes(self):
-        """Determine preferred genres and moods based on user listening habits."""
+        """Determine preferred genres and similar tracks based on user listening habits."""
         # Fetch tracks played in the last 15 days
         tracks = self.music.search(
             filters={"track.lastViewedAt>>": "15d"}, libtype="track"
         )
 
-        # Track both genre and mood counts
+        # Track genre counts and similar tracks
         genre_counts = {}
-        mood_counts = {}
-
-        mood_attributes = [
-            "mood_acoustic", "mood_aggressive", "mood_electronic",
-            "mood_happy", "mood_sad", "mood_party", "mood_relaxed",
-            "mood_mirex", "mood_mirex_cluster_1", "mood_mirex_cluster_2",
-            "mood_mirex_cluster_3", "mood_mirex_cluster_4", "mood_mirex_cluster_5"
-        ]
+        similar_tracks = set()
 
         for track in tracks:
             # Count genres
@@ -1456,19 +1449,21 @@ class PlexSync(BeetsPlugin):
                     genre_str = str(genre.tag).lower()
                     genre_counts[genre_str] = genre_counts.get(genre_str, 0) + 1
 
-            # Count moods
-            for mood in mood_attributes:
-                if getattr(track, mood, False):
-                    mood_counts[mood] = mood_counts.get(mood, 0) + 1
+            # Get sonically similar tracks
+            try:
+                sonic_matches = track.sonicallySimilar()[:10]  # Get top 10 similar tracks
+                similar_tracks.update(sonic_matches)
+            except Exception as e:
+                self._log.debug(
+                    "Error getting similar tracks for {}: {}", track.title, e
+                )
 
-        # Sort both genres and moods by count
+        # Sort genres by count
         sorted_genres = sorted(genre_counts, key=genre_counts.get, reverse=True)[:5]
-        sorted_moods = sorted(mood_counts, key=mood_counts.get, reverse=True)[:3]
-
         self._log.debug("Top genres: {}", sorted_genres)
-        self._log.debug("Top moods: {}", sorted_moods)
+        self._log.debug("Found {} similar tracks", len(similar_tracks))
 
-        return sorted_genres, sorted_moods
+        return sorted_genres, list(similar_tracks)
 
     def generate_daily_discovery(self, lib):
         """Generate a Daily Discovery playlist."""
@@ -1483,55 +1478,51 @@ class PlexSync(BeetsPlugin):
             self._log.debug("No existing Daily Discovery playlist found")
 
         # Setup and configuration
-        preferred_genres, preferred_moods = self.get_preferred_attributes()
+        preferred_genres, similar_tracks = self.get_preferred_attributes()
         self._log.debug(f"Using preferred genres: {preferred_genres}")
-        self._log.debug(f"Using preferred moods: {preferred_moods}")
+        self._log.debug(f"Processing {len(similar_tracks)} similar tracks")
 
-        mood_attributes = [
-            "mood_acoustic", "mood_aggressive", "mood_electronic",
-            "mood_happy", "mood_sad", "mood_party", "mood_relaxed",
-            "mood_mirex", "mood_mirex_cluster_1", "mood_mirex_cluster_2",
-            "mood_mirex_cluster_3", "mood_mirex_cluster_4", "mood_mirex_cluster_5"
-        ]
         max_tracks = config["plexsync"]["max_tracks"].get(int)
         if not max_tracks:
             max_tracks = 20
 
-        # Get all tracks
-        all_tracks = lib.items()
-        self._log.debug(f"Processing {len(all_tracks)} tracks from library")
+        # Find matching tracks in beets library
+        matched_tracks = []
+        for plex_track in similar_tracks:
+            try:
+                query = MatchQuery("plex_ratingkey", plex_track.ratingKey, fast=False)
+                items = lib.items(query)
+                if items:
+                    beets_item = items[0]
+                    # Check if track is in preferred genres
+                    track_genres = []
+                    if hasattr(beets_item, 'genre') and beets_item.genre:
+                        if isinstance(beets_item.genre, list):
+                            track_genres = [g.lower().strip() for g in beets_item.genre]
+                        else:
+                            track_genres = [g.lower().strip() for g in beets_item.genre.split(';')]
 
-        # Filter tracks
-        filtered_tracks = []
-        for beets_item in all_tracks:
-            # Genre handling
-            track_genres = []
-            if hasattr(beets_item, 'genre') and beets_item.genre:
-                if isinstance(beets_item.genre, list):
-                    track_genres = [g.lower().strip() for g in beets_item.genre]
-                else:
-                    track_genres = [g.lower().strip() for g in beets_item.genre.split(';')]
+                    genre_match = any(pg in tg or tg in pg for pg in preferred_genres for tg in track_genres)
+                    user_rating = float(getattr(beets_item, "plex_userrating", 0))
 
-            # Basic criteria
-            has_mood = any(bool(getattr(beets_item, mood, False)) for mood in mood_attributes)
-            user_rating = float(getattr(beets_item, "plex_userrating", 0))
-            genre_match = any(pg in tg or tg in pg for pg in preferred_genres for tg in track_genres)
+                    if genre_match and user_rating > 3:
+                        matched_tracks.append(beets_item)
+                        self._log.debug(
+                            "Matched: {} - {} (Rating: {}, Genres: {})",
+                            beets_item.artist,
+                            beets_item.title,
+                            user_rating,
+                            track_genres
+                        )
+            except Exception as e:
+                self._log.debug("Error processing track {}: {}", plex_track.title, e)
+                continue
 
-            if genre_match and has_mood and user_rating > 3:
-                filtered_tracks.append(beets_item)
-                self._log.debug(
-                    "Matched: {} - {} (Rating: {}, Genres: {})",
-                    beets_item.artist,
-                    beets_item.title,
-                    user_rating,
-                    track_genres
-                )
-
-        self._log.info("Found {} tracks matching initial criteria", len(filtered_tracks))
+        self._log.info("Found {} tracks matching criteria", len(matched_tracks))
 
         # Sort and select tracks
         selected_tracks = sorted(
-            filtered_tracks,
+            matched_tracks,
             key=lambda x: (
                 float(getattr(x, "plex_userrating", 0)),
                 int(getattr(x, "spotify_track_popularity", 0))
