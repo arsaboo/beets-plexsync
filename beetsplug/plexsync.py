@@ -1468,11 +1468,11 @@ class PlexSync(BeetsPlugin):
                     "mood_mirex_cluster_5",
                 ]
             )
-            user_rating = getattr(beets_item, "plex_userrating", 0)
+            user_rating = int(getattr(beets_item, "plex_userrating", 0.0))
             if (
                 any(genre in preferred_genres for genre in track_genres)
                 and has_preferred_mood
-                and user_rating > 3
+                and user_rating > 3.0
             ):
                 filtered_tracks.append(beets_item)
             self._log.debug(
@@ -1485,7 +1485,7 @@ class PlexSync(BeetsPlugin):
         sorted_tracks = sorted(
             filtered_tracks,
             key=lambda x: (
-                getattr(x, "plex_userrating", 0),
+                getattr(x, "plex_userrating", 0.0),
                 getattr(x, "spotify_track_popularity", 0),
             ),
             reverse=True,
