@@ -1436,7 +1436,7 @@ class PlexSync(BeetsPlugin):
         self._log.info("Generating Daily Discovery playlist")
 
         preferred_genres = self.get_preferred_genres()
-        self._log.debug(f"Preferred genres: {preferred_genres}")
+        self._log.debug(f"Using preferred genres: {preferred_genres}")
 
         mood_attributes = [
             "mood_acoustic", "mood_aggressive", "mood_electronic",
@@ -1462,21 +1462,8 @@ class PlexSync(BeetsPlugin):
                     track_genres = [g.lower().strip() for g in beets_item.genre.split(';')]
 
             # Handle moods
-            track_moods = {}
-            for mood in mood_attributes:
-                if hasattr(beets_item, mood):
-                    track_moods[mood] = bool(getattr(beets_item, mood))
-
-            has_mood = any(track_moods.values())
-
+            has_mood = any(bool(getattr(beets_item, mood, False)) for mood in mood_attributes)
             user_rating = float(getattr(beets_item, "plex_userrating", 0))
-
-            # Debug logging
-            self._log.debug(f"Processing track: {beets_item.title}")
-            self._log.debug(f"Track genres: {track_genres}")
-            self._log.debug(f"Genre match: {any(pg in tg or tg in pg for pg in preferred_genres for tg in track_genres)}")
-            self._log.debug(f"Has mood: {has_mood}")
-            self._log.debug(f"User rating: {user_rating}")
 
             # Genre matching
             genre_match = any(pg in tg or tg in pg for pg in preferred_genres for tg in track_genres)
@@ -1484,13 +1471,13 @@ class PlexSync(BeetsPlugin):
             if genre_match and has_mood and user_rating > 3:
                 filtered_tracks.append(beets_item)
                 self._log.debug(
-                    "Added track: {} (Genres: {}, User Rating: {})",
+                    "Added: {} by {} (Rating: {})",
                     beets_item.title,
-                    track_genres,
+                    beets_item.artist,
                     user_rating
                 )
 
-        self._log.debug(f"Filtered tracks: {len(filtered_tracks)}")
+        self._log.info("Found {} tracks matching criteria", len(filtered_tracks))
 
         # Sort tracks by user rating and Spotify popularity
         sorted_tracks = sorted(
