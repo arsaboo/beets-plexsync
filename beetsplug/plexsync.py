@@ -1451,7 +1451,8 @@ class PlexSync(BeetsPlugin):
         for beets_item in all_tracks:
             track_genres = beets_item.genre.split(";")
             has_preferred_mood = any(
-                getattr(beets_item, mood, False) for mood in [
+                getattr(beets_item, mood, False)
+                for mood in [
                     "mood_acoustic",
                     "mood_aggressive",
                     "mood_electronic",
