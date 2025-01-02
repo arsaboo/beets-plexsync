@@ -1442,20 +1442,13 @@ class PlexSync(BeetsPlugin):
         if not max_tracks:
             max_tracks = 20
 
-        # Fetch tracks from the library
-        tracks = self.music.search(libtype="track")
-        self._log.debug(f"Total tracks: {len(tracks)}")
+        # Fetch all tracks from the beets library
+        all_tracks = lib.items()
+        self._log.debug(f"Total tracks in library: {len(all_tracks)}")
 
         # Filter tracks based on user preferences and user rating
         filtered_tracks = []
-        for track in tracks:
-            # Fetch the corresponding beets library item using the plex_ratingkey
-            query = MatchQuery("plex_ratingkey", track.ratingKey, fast=False)
-            items = lib.items(query)
-            if not items:
-                continue
-            beets_item = items[0]
-
+        for beets_item in all_tracks:
             track_genres = beets_item.genre.split(";")
             has_preferred_mood = any(
                 getattr(beets_item, mood, False) for mood in [
@@ -1480,9 +1473,9 @@ class PlexSync(BeetsPlugin):
                 and has_preferred_mood
                 and user_rating > 3
             ):
-                filtered_tracks.append(track)
+                filtered_tracks.append(beets_item)
             self._log.debug(
-                f"Track: {track.title}, Genres: {track_genres}, User Rating: {user_rating}, Has Preferred Mood: {has_preferred_mood}"
+                f"Track: {beets_item.title}, Genres: {track_genres}, User Rating: {user_rating}, Has Preferred Mood: {has_preferred_mood}"
             )
 
         self._log.debug(f"Filtered tracks: {len(filtered_tracks)}")
@@ -1491,7 +1484,7 @@ class PlexSync(BeetsPlugin):
         sorted_tracks = sorted(
             filtered_tracks,
             key=lambda x: (
-                getattr(x, "userRating", 0),
+                getattr(x, "plex_userrating", 0),
                 getattr(x, "spotify_track_popularity", 0),
             ),
             reverse=True,
