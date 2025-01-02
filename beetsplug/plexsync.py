@@ -1457,8 +1457,24 @@ class PlexSync(BeetsPlugin):
             beets_item = items[0]
 
             track_genres = beets_item.genre.split(";")
-            has_preferred_mood = any(getattr(beets_item, mood, False) for mood in preferred_moods)
-            user_rating = getattr(beets_item, "userRating", 0)
+            has_preferred_mood = any(
+                getattr(beets_item, mood, False) for mood in [
+                    "mood_acoustic",
+                    "mood_aggressive",
+                    "mood_electronic",
+                    "mood_happy",
+                    "mood_sad",
+                    "mood_party",
+                    "mood_relaxed",
+                    "mood_mirex",
+                    "mood_mirex_cluster_1",
+                    "mood_mirex_cluster_2",
+                    "mood_mirex_cluster_3",
+                    "mood_mirex_cluster_4",
+                    "mood_mirex_cluster_5",
+                ]
+            )
+            user_rating = getattr(beets_item, "plex_userrating", 0)
             if (
                 any(genre in preferred_genres for genre in track_genres)
                 and has_preferred_mood
