@@ -1431,13 +1431,61 @@ class PlexSync(BeetsPlugin):
         else:
             self._log.debug("No tracks to add to playlist")
 
+    def get_preferred_attributes(self):
+        """Determine preferred genres and moods based on user listening habits."""
+        # Fetch tracks played in the last 15 days
+        tracks = self.music.search(
+            filters={"track.lastViewedAt>>": "15d"}, libtype="track"
+        )
+
+        # Track both genre and mood counts
+        genre_counts = {}
+        mood_counts = {}
+
+        mood_attributes = [
+            "mood_acoustic", "mood_aggressive", "mood_electronic",
+            "mood_happy", "mood_sad", "mood_party", "mood_relaxed",
+            "mood_mirex", "mood_mirex_cluster_1", "mood_mirex_cluster_2",
+            "mood_mirex_cluster_3", "mood_mirex_cluster_4", "mood_mirex_cluster_5"
+        ]
+
+        for track in tracks:
+            # Count genres
+            for genre in track.genres:
+                if genre:
+                    genre_str = str(genre.tag).lower()
+                    genre_counts[genre_str] = genre_counts.get(genre_str, 0) + 1
+
+            # Count moods
+            for mood in mood_attributes:
+                if getattr(track, mood, False):
+                    mood_counts[mood] = mood_counts.get(mood, 0) + 1
+
+        # Sort both genres and moods by count
+        sorted_genres = sorted(genre_counts, key=genre_counts.get, reverse=True)[:5]
+        sorted_moods = sorted(mood_counts, key=mood_counts.get, reverse=True)[:3]
+
+        self._log.debug("Top genres: {}", sorted_genres)
+        self._log.debug("Top moods: {}", sorted_moods)
+
+        return sorted_genres, sorted_moods
+
     def generate_daily_discovery(self, lib):
         """Generate a Daily Discovery playlist."""
+        playlist_name = "Daily Discovery"
         self._log.info("Generating Daily Discovery playlist")
 
+        # Clear existing playlist first
+        try:
+            self._plex_clear_playlist(playlist_name)
+            self._log.info("Cleared existing Daily Discovery playlist")
+        except exceptions.NotFound:
+            self._log.debug("No existing Daily Discovery playlist found")
+
         # Setup and configuration
-        preferred_genres = self.get_preferred_genres()
+        preferred_genres, preferred_moods = self.get_preferred_attributes()
         self._log.debug(f"Using preferred genres: {preferred_genres}")
+        self._log.debug(f"Using preferred moods: {preferred_moods}")
 
         mood_attributes = [
             "mood_acoustic", "mood_aggressive", "mood_electronic",
@@ -1496,64 +1544,9 @@ class PlexSync(BeetsPlugin):
             return
 
         # Create playlist
-        playlist_name = "Daily Discovery"
         self._plex_add_playlist_item(selected_tracks, playlist_name)
 
         self._log.info(
             "Successfully updated Daily Discovery playlist with {} tracks",
             len(selected_tracks)
         )
-
-    def get_preferred_genres(self):
-        """Determine preferred genres based on user listening habits."""
-        # Fetch tracks played in the last 15 days
-        tracks = self.music.search(
-            filters={"track.lastViewedAt>>": "15d"}, libtype="track"
-        )
-
-        # Count occurrences of each genre
-        genre_counts = {}
-        for track in tracks:
-            for genre in track.genres:
-                if genre:
-                    # Convert Genre object to string using tag attribute
-                    genre_str = str(genre.tag).lower()
-                    genre_counts[genre_str] = genre_counts.get(genre_str, 0) + 1
-
-        # Sort genres by count and return the top genres
-        sorted_genres = sorted(genre_counts, key=genre_counts.get, reverse=True)
-        self._log.debug("Sorted genres: {}", sorted_genres[:5])
-        return sorted_genres[:5]  # Return top 5 genres
-
-    def get_preferred_moods(self):
-        """Determine preferred moods based on user listening habits."""
-        # Fetch tracks played in the last 15 days
-        tracks = self.music.search(
-            filters={"track.lastViewedAt>>": "15d"}, libtype="track"
-        )
-
-        # Count occurrences of each mood
-        mood_counts = {}
-        mood_attributes = [
-            "mood_acoustic",
-            "mood_aggressive",
-            "mood_electronic",
-            "mood_happy",
-            "mood_sad",
-            "mood_party",
-            "mood_relaxed",
-            "mood_mirex",
-            "mood_mirex_cluster_1",
-            "mood_mirex_cluster_2",
-            "mood_mirex_cluster_3",
-            "mood_mirex_cluster_4",
-            "mood_mirex_cluster_5",
-        ]
-        for track in tracks:
-            for mood in mood_attributes:
-                if getattr(track, mood, False):
-                    mood_counts[mood] = mood_counts.get(mood, 0) + 1
-
-        # Sort moods by count and return the top moods
-        sorted_moods = sorted(mood_counts, key=mood_counts.get, reverse=True)
-        return sorted_moods[:3]  # Return top 3 moods
