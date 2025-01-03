@@ -102,8 +102,9 @@ class PlexSync(BeetsPlugin):
             {
                 "tokenfile": "spotify_plexsync.json",
                 "manual_search": False,
-                "max_tracks": 20,  # Add default value for max_tracks
-                "exclusion_days": 30,  # Add default value for exclusion period
+                "max_tracks": 20,      # Maximum number of tracks for Daily Discovery
+                "exclusion_days": 30,   # Days to exclude recently played tracks
+                "history_days": 15,     # Days to look back for base tracks
             }
         )
         self.plexsync_token = config["plexsync"]["tokenfile"].get(
@@ -1434,9 +1435,12 @@ class PlexSync(BeetsPlugin):
 
     def get_preferred_attributes(self):
         """Determine preferred genres and similar tracks based on user listening habits."""
-        # Fetch tracks played in the last 15 days
+        # Get history period from config
+        history_days = config["plexsync"]["history_days"].get(int)
+
+        # Fetch tracks played in the configured period
         tracks = self.music.search(
-            filters={"track.lastViewedAt>>": "15d"}, libtype="track"
+            filters={"track.lastViewedAt>>": f"{history_days}d"}, libtype="track"
         )
 
         # Track genre counts and similar tracks

@@ -68,6 +68,14 @@ This plugin allows you to sync your Plex library with beets, create playlists ba
 
 - **Album Collage**: `beet plexcollage` creates a collage of most played albums. Use the `-i` flag to specify the number of days and `-g` flag to specify the grid size.
 
+- **Daily Discovery Playlist**: `beet dailydiscovery` creates a personalized playlist based on your listening habits. It analyzes your recently played tracks, considers genres and ratings, and finds sonically similar tracks to create a curated playlist. The feature:
+  - Uses tracks you've played in the last 15 days as a base (configurable via `history_days`)
+  - Excludes tracks played in the last 30 days (configurable via `exclusion_days`)
+  - Prioritizes highly rated tracks (rated 4 or above)
+  - Matches genres with your recent listening history
+  - Uses Plex's sonic analysis to find similar tracks
+  - Limits the playlist size (configurable via `max_tracks`, default 20)
+
 ## Configuration
 
 * The `beet plexsonic` command allows you to create AI-based playlists using an OpenAI-compatible language model. To use this feature, you will need to configure the AI model with an API key. Once you have obtained an API key, you can configure `beets` to use it by adding the following to your `config.yaml` file:
@@ -121,6 +129,9 @@ Plex matching may be less than perfect and it can miss tracks if the tags don't 
 ```yaml
 plexsync:
   manual_search: yes
+  max_tracks: 20     # Maximum number of tracks for Daily Discovery playlist
+  exclusion_days: 30 # Number of days to exclude recently played tracks from recommendations
+  history_days: 15 # Number of days to use to learn user listening habits.
 ```
 
 [collage]: collage.png
