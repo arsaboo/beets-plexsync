@@ -1468,10 +1468,10 @@ class PlexSync(BeetsPlugin):
                 # Filter sonic matches
                 for match in sonic_matches:
                     # Check rating - include unrated (-1) and highly rated (>=4) tracks
-                    rating = match.userRating if hasattr(match, 'userRating') else -1
+                    rating = getattr(match, 'userRating', -1)  # Default to -1 if attribute doesn't exist
                     if (match.ratingKey not in recently_played and  # Not recently played
                         any(g.tag.lower() in track_genres for g in match.genres) and  # Genre match
-                        (rating == -1 or rating >= 4)):  # Rating criteria
+                        (rating is None or rating == -1 or rating >= 4)):  # Rating criteria including None
                         similar_tracks.add(match)
             except Exception as e:
                 self._log.debug(
