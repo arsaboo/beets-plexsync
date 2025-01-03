@@ -1445,11 +1445,13 @@ class PlexSync(BeetsPlugin):
         exclusion_days = config["plexsync"]["exclusion_days"].get(int)
 
         # Get tracks to exclude (played in last exclusion_days)
-        exclusion_date = (datetime.now() - timedelta(days=exclusion_days))
-        recently_played = set(track.ratingKey for track in
-            self.music.search(filters={
-                "track.lastViewedAt>>": f"{exclusion_days}d"
-            }, libtype="track"))
+        exclusion_date = datetime.now() - timedelta(days=exclusion_days)
+        recently_played = set(
+            track.ratingKey
+            for track in self.music.search(
+                filters={"track.lastViewedAt>>": f"{exclusion_days}d"}, libtype="track"
+            )
+        )
 
         for track in tracks:
             # Count genres
@@ -1462,11 +1464,15 @@ class PlexSync(BeetsPlugin):
 
             # Get sonically similar tracks
             try:
-                sonic_matches = track.sonicallySimilar()
+                sonic_matches = track.sonicallySimilar()[
+                    :5
+                ]  # Limit to top 5 similar tracks
                 # Filter sonic matches
                 for match in sonic_matches:
-                    if (match.ratingKey not in recently_played and  # Not recently played
-                        any(g.tag.lower() in track_genres for g in match.genres)):  # Genre match
+                    if (
+                        match.ratingKey not in recently_played  # Not recently played
+                        and any(g.tag.lower() in track_genres for g in match.genres)
+                    ):  # Genre match
                         similar_tracks.add(match)
             except Exception as e:
                 self._log.debug(
@@ -1513,7 +1519,7 @@ class PlexSync(BeetsPlugin):
                         "Matched: {} - {} (Rating: {})",
                         items[0].artist,
                         items[0].title,
-                        getattr(items[0], "plex_userrating", 0)
+                        getattr(items[0], "plex_userrating", 0),
                     )
             except Exception as e:
                 self._log.debug("Error processing track {}: {}", plex_track.title, e)
@@ -1526,9 +1532,9 @@ class PlexSync(BeetsPlugin):
             matched_tracks,
             key=lambda x: (
                 float(getattr(x, "plex_userrating", 0)),
-                int(getattr(x, "spotify_track_popularity", 0))
+                int(getattr(x, "spotify_track_popularity", 0)),
             ),
-            reverse=True
+            reverse=True,
         )[:max_tracks]
 
         if not selected_tracks:
@@ -1540,5 +1546,5 @@ class PlexSync(BeetsPlugin):
 
         self._log.info(
             "Successfully updated Daily Discovery playlist with {} tracks",
-            len(selected_tracks)
+            len(selected_tracks),
         )
