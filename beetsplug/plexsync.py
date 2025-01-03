@@ -105,6 +105,7 @@ class PlexSync(BeetsPlugin):
                 "max_tracks": 20,      # Maximum number of tracks for Daily Discovery
                 "exclusion_days": 30,   # Days to exclude recently played tracks
                 "history_days": 15,     # Days to look back for base tracks
+                "discovery_ratio": 70,  # Percentage of highly rated tracks (0-100)
             }
         )
         self.plexsync_token = config["plexsync"]["tokenfile"].get(
@@ -1468,9 +1469,7 @@ class PlexSync(BeetsPlugin):
 
             # Get sonically similar tracks
             try:
-                sonic_matches = track.sonicallySimilar()[
-                    :5
-                ]  # Limit to top 5 similar tracks
+                sonic_matches = track.sonicallySimilar()
                 # Filter sonic matches
                 for match in sonic_matches:
                     # Check rating - include unrated (-1) and highly rated (>=4) tracks
@@ -1537,15 +1536,56 @@ class PlexSync(BeetsPlugin):
 
         self._log.info("Found {} tracks matching criteria", len(matched_tracks))
 
-        # Sort and select tracks
-        selected_tracks = sorted(
-            matched_tracks,
+        # Replace the sorting and selection block with:
+        import random
+
+        # Get the discovery ratio from config (default 70%)
+        discovery_ratio = config["plexsync"]["discovery_ratio"].get(int)
+        discovery_ratio = max(0, min(100, discovery_ratio)) / 100.0  # Ensure it's between 0-1
+
+        # Calculate how many tracks of each type we want
+        rated_tracks_count = int(max_tracks * discovery_ratio)
+        discovery_tracks_count = max_tracks - rated_tracks_count
+
+        # Split tracks into rated and unrated
+        rated_tracks = []
+        unrated_tracks = []
+        for track in matched_tracks:
+            rating = float(getattr(track, "plex_userrating", 0))
+            if rating > 3:
+                rated_tracks.append(track)
+            elif rating == 0:  # Only truly unrated tracks
+                unrated_tracks.append(track)
+
+        # Sort rated tracks by rating and popularity
+        rated_tracks = sorted(
+            rated_tracks,
             key=lambda x: (
                 float(getattr(x, "plex_userrating", 0)),
-                int(getattr(x, "spotify_track_popularity", 0)),
+                int(getattr(x, "spotify_track_popularity", 0))
             ),
-            reverse=True,
-        )[:max_tracks]
+            reverse=True
+        )
+
+        # Sort unrated tracks by popularity
+        unrated_tracks = sorted(
+            unrated_tracks,
+            key=lambda x: int(getattr(x, "spotify_track_popularity", 0)),
+            reverse=True
+        )
+
+        # Select tracks
+        selected_rated = rated_tracks[:rated_tracks_count]
+        selected_unrated = unrated_tracks[:discovery_tracks_count]
+
+        # If we don't have enough unrated tracks, fill with rated ones
+        if len(selected_unrated) < discovery_tracks_count:
+            additional_rated = rated_tracks[rated_tracks_count:rated_tracks_count + (discovery_tracks_count - len(selected_unrated))]
+            selected_rated.extend(additional_rated)
+
+        # Combine and shuffle
+        selected_tracks = selected_rated + selected_unrated
+        random.shuffle(selected_tracks)
 
         if not selected_tracks:
             self._log.warning("No tracks matched criteria for Daily Discovery playlist")
