@@ -1244,7 +1244,7 @@ class PlexSync(BeetsPlugin):
             }
 
             base_url = config["llm"]["base_url"].get()
-            if (base_url):
+            if base_url:
                 client_args["base_url"] = base_url
 
             self.llm_client = OpenAI(**client_args)
@@ -1464,14 +1464,22 @@ class PlexSync(BeetsPlugin):
 
             # Get sonically similar tracks
             try:
-                sonic_matches = track.sonicallySimilar()[:5]  # Limit to top 5 similar tracks
+                sonic_matches = track.sonicallySimilar()[
+                    :5
+                ]  # Limit to top 5 similar tracks
                 # Filter sonic matches
                 for match in sonic_matches:
                     # Check rating - include unrated (-1) and highly rated (>=4) tracks
-                    rating = getattr(match, 'userRating', -1)  # Default to -1 if attribute doesn't exist
-                    if (match.ratingKey not in recently_played and  # Not recently played
-                        any(g.tag.lower() in track_genres for g in match.genres) and  # Genre match
-                        (rating is None or rating == -1 or rating >= 4)):  # Rating criteria including None
+                    rating = getattr(
+                        match, "userRating", -1
+                    )  # Default to -1 if attribute doesn't exist
+                    if (
+                        match.ratingKey not in recently_played  # Not recently played
+                        and any(
+                            g.tag.lower() in track_genres for g in match.genres
+                        )  # Genre match
+                        and (rating is None or rating == -1 or rating >= 4)
+                    ):  # Rating criteria including None
                         similar_tracks.add(match)
             except Exception as e:
                 self._log.debug(
@@ -1490,18 +1498,11 @@ class PlexSync(BeetsPlugin):
         playlist_name = "Daily Discovery"
         self._log.info("Generating Daily Discovery playlist")
 
-        # Clear existing playlist first
-        try:
-            self._plex_clear_playlist(playlist_name)
-            self._log.info("Cleared existing Daily Discovery playlist")
-        except exceptions.NotFound:
-            self._log.debug("No existing Daily Discovery playlist found")
-
         # Create a lookup dictionary of plex_ratingkey -> beets_item
         self._log.debug("Building lookup dictionary for Plex rating keys")
         plex_lookup = {}
         for item in lib.items():
-            if hasattr(item, 'plex_ratingkey'):
+            if hasattr(item, "plex_ratingkey"):
                 plex_lookup[item.plex_ratingkey] = item
 
         # Setup and configuration
@@ -1545,6 +1546,13 @@ class PlexSync(BeetsPlugin):
         if not selected_tracks:
             self._log.warning("No tracks matched criteria for Daily Discovery playlist")
             return
+
+        # Clear existing playlist only right before adding new tracks
+        try:
+            self._plex_clear_playlist(playlist_name)
+            self._log.info("Cleared existing Daily Discovery playlist")
+        except exceptions.NotFound:
+            self._log.debug("No existing Daily Discovery playlist found")
 
         # Create playlist
         self._plex_add_playlist_item(selected_tracks, playlist_name)
