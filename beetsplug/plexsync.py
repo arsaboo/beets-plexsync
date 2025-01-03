@@ -13,7 +13,7 @@ import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List
 
 import confuse
@@ -103,6 +103,7 @@ class PlexSync(BeetsPlugin):
                 "tokenfile": "spotify_plexsync.json",
                 "manual_search": False,
                 "max_tracks": 20,  # Add default value for max_tracks
+                "exclusion_days": 30,  # Add default value for exclusion period
             }
         )
         self.plexsync_token = config["plexsync"]["tokenfile"].get(
@@ -1441,18 +1442,32 @@ class PlexSync(BeetsPlugin):
         # Track genre counts and similar tracks
         genre_counts = {}
         similar_tracks = set()
+        exclusion_days = config["plexsync"]["exclusion_days"].get(int)
+
+        # Get tracks to exclude (played in last exclusion_days)
+        exclusion_date = (datetime.now() - timedelta(days=exclusion_days))
+        recently_played = set(track.ratingKey for track in
+            self.music.search(filters={
+                "track.lastViewedAt>>": f"{exclusion_days}d"
+            }, libtype="track"))
 
         for track in tracks:
             # Count genres
+            track_genres = set()
             for genre in track.genres:
                 if genre:
                     genre_str = str(genre.tag).lower()
                     genre_counts[genre_str] = genre_counts.get(genre_str, 0) + 1
+                    track_genres.add(genre_str)
 
             # Get sonically similar tracks
             try:
-                sonic_matches = track.sonicallySimilar()[:10]  # Get top 10 similar tracks
-                similar_tracks.update(sonic_matches)
+                sonic_matches = track.sonicallySimilar()
+                # Filter sonic matches
+                for match in sonic_matches:
+                    if (match.ratingKey not in recently_played and  # Not recently played
+                        any(g.tag.lower() in track_genres for g in match.genres)):  # Genre match
+                        similar_tracks.add(match)
             except Exception as e:
                 self._log.debug(
                     "Error getting similar tracks for {}: {}", track.title, e
@@ -1461,7 +1476,7 @@ class PlexSync(BeetsPlugin):
         # Sort genres by count
         sorted_genres = sorted(genre_counts, key=genre_counts.get, reverse=True)[:5]
         self._log.debug("Top genres: {}", sorted_genres)
-        self._log.debug("Found {} similar tracks", len(similar_tracks))
+        self._log.debug("Found {} similar tracks after filtering", len(similar_tracks))
 
         return sorted_genres, list(similar_tracks)
 
@@ -1480,40 +1495,26 @@ class PlexSync(BeetsPlugin):
         # Setup and configuration
         preferred_genres, similar_tracks = self.get_preferred_attributes()
         self._log.debug(f"Using preferred genres: {preferred_genres}")
-        self._log.debug(f"Processing {len(similar_tracks)} similar tracks")
+        self._log.debug(f"Processing {len(similar_tracks)} pre-filtered similar tracks")
 
         max_tracks = config["plexsync"]["max_tracks"].get(int)
         if not max_tracks:
             max_tracks = 20
 
-        # Find matching tracks in beets library
+        # Since tracks are pre-filtered, we can simplify the matching process
         matched_tracks = []
         for plex_track in similar_tracks:
             try:
                 query = MatchQuery("plex_ratingkey", plex_track.ratingKey, fast=False)
                 items = lib.items(query)
-                if items:
-                    beets_item = items[0]
-                    # Check if track is in preferred genres
-                    track_genres = []
-                    if hasattr(beets_item, 'genre') and beets_item.genre:
-                        if isinstance(beets_item.genre, list):
-                            track_genres = [g.lower().strip() for g in beets_item.genre]
-                        else:
-                            track_genres = [g.lower().strip() for g in beets_item.genre.split(';')]
-
-                    genre_match = any(pg in tg or tg in pg for pg in preferred_genres for tg in track_genres)
-                    user_rating = float(getattr(beets_item, "plex_userrating", 0))
-
-                    if genre_match and user_rating > 3:
-                        matched_tracks.append(beets_item)
-                        self._log.debug(
-                            "Matched: {} - {} (Rating: {}, Genres: {})",
-                            beets_item.artist,
-                            beets_item.title,
-                            user_rating,
-                            track_genres
-                        )
+                if items and float(getattr(items[0], "plex_userrating", 0)) > 3:
+                    matched_tracks.append(items[0])
+                    self._log.debug(
+                        "Matched: {} - {} (Rating: {})",
+                        items[0].artist,
+                        items[0].title,
+                        getattr(items[0], "plex_userrating", 0)
+                    )
             except Exception as e:
                 self._log.debug("Error processing track {}: {}", plex_track.title, e)
                 continue
