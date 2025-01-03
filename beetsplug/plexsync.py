@@ -102,9 +102,9 @@ class PlexSync(BeetsPlugin):
             {
                 "tokenfile": "spotify_plexsync.json",
                 "manual_search": False,
-                "max_tracks": 20,      # Maximum number of tracks for Daily Discovery
-                "exclusion_days": 30,   # Days to exclude recently played tracks
-                "history_days": 15,     # Days to look back for base tracks
+                "max_tracks": 20,  # Maximum number of tracks for Daily Discovery
+                "exclusion_days": 30,  # Days to exclude recently played tracks
+                "history_days": 15,  # Days to look back for base tracks
                 "discovery_ratio": 70,  # Percentage of highly rated tracks (0-100)
             }
         )
@@ -1541,7 +1541,9 @@ class PlexSync(BeetsPlugin):
 
         # Get the discovery ratio from config (default 70%)
         discovery_ratio = config["plexsync"]["discovery_ratio"].get(int)
-        discovery_ratio = max(0, min(100, discovery_ratio)) / 100.0  # Ensure it's between 0-1
+        discovery_ratio = (
+            max(0, min(100, discovery_ratio)) / 100.0
+        )  # Ensure it's between 0-1
 
         # Calculate how many tracks of each type we want
         rated_tracks_count = int(max_tracks * discovery_ratio)
@@ -1562,16 +1564,16 @@ class PlexSync(BeetsPlugin):
             rated_tracks,
             key=lambda x: (
                 float(getattr(x, "plex_userrating", 0)),
-                int(getattr(x, "spotify_track_popularity", 0))
+                int(getattr(x, "spotify_track_popularity", 0)),
             ),
-            reverse=True
+            reverse=True,
         )
 
         # Sort unrated tracks by popularity
         unrated_tracks = sorted(
             unrated_tracks,
             key=lambda x: int(getattr(x, "spotify_track_popularity", 0)),
-            reverse=True
+            reverse=True,
         )
 
         # Select tracks
@@ -1580,7 +1582,10 @@ class PlexSync(BeetsPlugin):
 
         # If we don't have enough unrated tracks, fill with rated ones
         if len(selected_unrated) < discovery_tracks_count:
-            additional_rated = rated_tracks[rated_tracks_count:rated_tracks_count + (discovery_tracks_count - len(selected_unrated))]
+            additional_rated = rated_tracks[
+                rated_tracks_count : rated_tracks_count
+                + (discovery_tracks_count - len(selected_unrated))
+            ]
             selected_rated.extend(additional_rated)
 
         # Combine and shuffle
