@@ -1464,15 +1464,14 @@ class PlexSync(BeetsPlugin):
 
             # Get sonically similar tracks
             try:
-                sonic_matches = track.sonicallySimilar()[
-                    :5
-                ]  # Limit to top 5 similar tracks
+                sonic_matches = track.sonicallySimilar()[:5]  # Limit to top 5 similar tracks
                 # Filter sonic matches
                 for match in sonic_matches:
-                    if (
-                        match.ratingKey not in recently_played  # Not recently played
-                        and any(g.tag.lower() in track_genres for g in match.genres)
-                    ):  # Genre match
+                    # Check rating - include unrated (-1) and highly rated (>=4) tracks
+                    rating = match.userRating if hasattr(match, 'userRating') else -1
+                    if (match.ratingKey not in recently_played and  # Not recently played
+                        any(g.tag.lower() in track_genres for g in match.genres) and  # Genre match
+                        (rating == -1 or rating >= 4)):  # Rating criteria
                         similar_tracks.add(match)
             except Exception as e:
                 self._log.debug(
