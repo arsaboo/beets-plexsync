@@ -1244,7 +1244,7 @@ class PlexSync(BeetsPlugin):
             }
 
             base_url = config["llm"]["base_url"].get()
-            if base_url:
+            if (base_url):
                 client_args["base_url"] = base_url
 
             self.llm_client = OpenAI(**client_args)
@@ -1497,6 +1497,13 @@ class PlexSync(BeetsPlugin):
         except exceptions.NotFound:
             self._log.debug("No existing Daily Discovery playlist found")
 
+        # Create a lookup dictionary of plex_ratingkey -> beets_item
+        self._log.debug("Building lookup dictionary for Plex rating keys")
+        plex_lookup = {}
+        for item in lib.items():
+            if hasattr(item, 'plex_ratingkey'):
+                plex_lookup[item.plex_ratingkey] = item
+
         # Setup and configuration
         preferred_genres, similar_tracks = self.get_preferred_attributes()
         self._log.debug(f"Using preferred genres: {preferred_genres}")
@@ -1506,19 +1513,18 @@ class PlexSync(BeetsPlugin):
         if not max_tracks:
             max_tracks = 20
 
-        # Since tracks are pre-filtered, we can simplify the matching process
+        # Use lookup dictionary instead of individual queries
         matched_tracks = []
         for plex_track in similar_tracks:
             try:
-                query = MatchQuery("plex_ratingkey", plex_track.ratingKey, fast=False)
-                items = lib.items(query)
-                if items and float(getattr(items[0], "plex_userrating", 0)) > 3:
-                    matched_tracks.append(items[0])
+                beets_item = plex_lookup.get(plex_track.ratingKey)
+                if beets_item and float(getattr(beets_item, "plex_userrating", 0)) > 3:
+                    matched_tracks.append(beets_item)
                     self._log.debug(
                         "Matched: {} - {} (Rating: {})",
-                        items[0].artist,
-                        items[0].title,
-                        getattr(items[0], "plex_userrating", 0),
+                        beets_item.artist,
+                        beets_item.title,
+                        getattr(beets_item, "plex_userrating", 0),
                     )
             except Exception as e:
                 self._log.debug("Error processing track {}: {}", plex_track.title, e)
