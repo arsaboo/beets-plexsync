@@ -9,6 +9,7 @@ Put something like the following in your config.yaml to configure:
 
 import asyncio
 import difflib
+import json
 import os
 import re
 import time
@@ -32,10 +33,9 @@ from jiosaavn import JioSaavn
 from openai import OpenAI
 from plexapi import exceptions
 from plexapi.server import PlexServer
-from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
-from requests.exceptions import ContentDecodingError, ConnectionError
 from pydantic import BaseModel, Field
-import json
+from requests.exceptions import ConnectionError, ContentDecodingError
+from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
 
 
 class Song(BaseModel):
@@ -1070,6 +1070,7 @@ class PlexSync(BeetsPlugin):
             PIL.Image: The generated collage image
         """
         from io import BytesIO
+
         from PIL import Image
 
         thumbnail_size = 300  # Size of each album art
