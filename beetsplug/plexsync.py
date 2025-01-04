@@ -496,6 +496,8 @@ class PlexSync(BeetsPlugin):
                     self.generate_daily_discovery(lib, p, plex_lookup)
                 elif playlist_id == "unheard_gems":
                     self.generate_unheard_gems(lib, p, plex_lookup)
+                elif playlist_id == "unrated_gems":
+                    self.generate_unrated_gems(lib, p, plex_lookup)
 
         plex_smartplaylists_cmd.func = func_plex_smartplaylists
 
@@ -1747,3 +1749,209 @@ class PlexSync(BeetsPlugin):
             playlist_name,
             len(selected_tracks),
         )
+
+    def generate_unrated_gems(self, lib, ug_config, plex_lookup):
+        """Generate an Unrated Gems playlist using hybrid recommendations."""
+        playlist_name = ug_config.get("name", "Unrated Gems")
+        self._log.info("Generating {} playlist", playlist_name)
+
+        # Get configuration
+        if (
+            "playlists" in config["plexsync"]
+            and "defaults" in config["plexsync"]["playlists"]
+        ):
+            defaults_cfg = config["plexsync"]["playlists"]["defaults"].get({})
+        else:
+            defaults_cfg = {}
+
+        max_tracks = self.get_config_value(ug_config, defaults_cfg, "max_tracks", 20)
+
+        # 1. Analyze user preferences from rated tracks
+        rated_tracks = []
+        for item in lib.items():
+            if hasattr(item, "plex_userrating") and float(item.plex_userrating) > 5:
+                rated_tracks.append(item)
+
+        if not rated_tracks:
+            self._log.warning("No rated tracks found for building user preferences")
+            return
+
+        # 2. Build user preference profile
+        preferences = self._build_user_preferences(rated_tracks)
+
+        # 3. Find candidate unrated tracks
+        candidates = []
+        for item in lib.items():
+            if (
+                not hasattr(item, "plex_userrating")
+                or item.plex_userrating == 0
+                or item.plex_userrating is None
+            ):
+                candidates.append(item)
+
+        # 4. Score candidates
+        scored_tracks = []
+        for track in candidates:
+            score = self._calculate_track_score(track, preferences)
+            if score > 0:
+                scored_tracks.append((track, score))
+
+        # 5. Sort and select top tracks
+        scored_tracks.sort(key=lambda x: x[1], reverse=True)
+        selected_tracks = [track for track, _ in scored_tracks[:max_tracks]]
+
+        if not selected_tracks:
+            self._log.warning("No suitable unrated tracks found")
+            return
+
+        # 6. Update playlist
+        try:
+            self._plex_clear_playlist(playlist_name)
+            self._log.info("Cleared existing Unrated Gems playlist")
+        except exceptions.NotFound:
+            self._log.debug("No existing Unrated Gems playlist found")
+
+        self._plex_add_playlist_item(selected_tracks, playlist_name)
+        self._log.info(
+            "Successfully updated {} playlist with {} tracks",
+            playlist_name,
+            len(selected_tracks),
+        )
+
+    def _build_user_preferences(self, rated_tracks):
+        """Build user preference profile from rated tracks."""
+        preferences = {
+            "genres": {},
+            "moods": {},
+            "artist_gender": {"male": 0, "female": 0},
+            "audio_features": {
+                "bpm": [],
+                "danceability": [],
+                "loudness": [],
+            },
+        }
+
+        for track in rated_tracks:
+            # Genre preferences
+            if hasattr(track, "genre"):
+                genres = track.genre.split(";")
+                for genre in genres:
+                    preferences["genres"][genre.strip()] = (
+                        preferences["genres"].get(genre.strip(), 0) + 1
+                    )
+
+            # Mood preferences
+            mood_attributes = [
+                "mood_acoustic",
+                "mood_aggressive",
+                "mood_electronic",
+                "mood_happy",
+                "mood_sad",
+                "mood_party",
+                "mood_relaxed",
+            ]
+            for attr in mood_attributes:
+                if hasattr(track, attr):
+                    preferences["moods"][attr] = preferences["moods"].get(attr, [])
+                    preferences["moods"][attr].append(float(getattr(track, attr, 0)))
+
+            # Artist gender preferences
+            if hasattr(track, "is_male") and track.is_male:
+                preferences["artist_gender"]["male"] += 1
+            if hasattr(track, "is_female") and track.is_female:
+                preferences["artist_gender"]["female"] += 1
+
+            # Audio features
+            if hasattr(track, "bpm"):
+                preferences["audio_features"]["bpm"].append(float(track.bpm))
+            if hasattr(track, "danceability"):
+                preferences["audio_features"]["danceability"].append(
+                    float(track.danceability)
+                )
+            if hasattr(track, "average_loudness"):
+                preferences["audio_features"]["loudness"].append(
+                    float(track.average_loudness)
+                )
+
+        # Normalize preferences
+        self._normalize_preferences(preferences)
+        return preferences
+
+    def _normalize_preferences(self, preferences):
+        """Normalize preference values."""
+        # Normalize genres
+        total_genres = sum(preferences["genres"].values())
+        if total_genres > 0:
+            for genre in preferences["genres"]:
+                preferences["genres"][genre] /= total_genres
+
+        # Calculate averages for moods and audio features
+        for mood in preferences["moods"]:
+            if preferences["moods"][mood]:
+                preferences["moods"][mood] = sum(preferences["moods"][mood]) / len(
+                    preferences["moods"][mood]
+                )
+
+        for feature in preferences["audio_features"]:
+            if preferences["audio_features"][feature]:
+                preferences["audio_features"][feature] = {
+                    "mean": sum(preferences["audio_features"][feature])
+                    / len(preferences["audio_features"][feature]),
+                    "std": self._calculate_std(preferences["audio_features"][feature]),
+                }
+
+    def _calculate_track_score(self, track, preferences):
+        """Calculate similarity score between track and user preferences."""
+        score = 0.0
+        weights = {"genre": 0.3, "mood": 0.25, "audio": 0.25, "popularity": 0.2}
+
+        # Genre similarity
+        if hasattr(track, "genre"):
+            genre_score = 0
+            track_genres = track.genre.split(";")
+            for genre in track_genres:
+                genre_score += preferences["genres"].get(genre.strip(), 0)
+            score += weights["genre"] * (
+                genre_score / len(track_genres) if track_genres else 0
+            )
+
+        # Mood similarity
+        mood_score = 0
+        mood_count = 0
+        for mood in preferences["moods"]:
+            if hasattr(track, mood):
+                mood_value = float(getattr(track, mood, 0))
+                mood_score += 1 - abs(mood_value - preferences["moods"][mood])
+                mood_count += 1
+        if mood_count > 0:
+            score += weights["mood"] * (mood_score / mood_count)
+
+        # Audio features similarity
+        audio_score = 0
+        audio_count = 0
+        for feature in preferences["audio_features"]:
+            if hasattr(track, feature):
+                feature_value = float(getattr(track, feature))
+                feature_stats = preferences["audio_features"][feature]
+                if feature_stats.get("std", 0) > 0:
+                    z_score = (
+                        abs(feature_value - feature_stats["mean"])
+                        / feature_stats["std"]
+                    )
+                    audio_score += 1 / (1 + z_score)  # Convert to similarity score
+                    audio_count += 1
+        if audio_count > 0:
+            score += weights["audio"] * (audio_score / audio_count)
+
+        # Popularity bonus
+        if hasattr(track, "spotify_track_popularity"):
+            popularity = float(track.spotify_track_popularity) / 100
+            score += weights["popularity"] * popularity
+
+        return score
+
+    def _calculate_std(self, values):
+        """Calculate standard deviation."""
+        mean = sum(values) / len(values)
+        squared_diff_sum = sum((x - mean) ** 2 for x in values)
+        return (squared_diff_sum / len(values)) ** 0.5
