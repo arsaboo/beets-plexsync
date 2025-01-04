@@ -1691,17 +1691,19 @@ class PlexSync(BeetsPlugin):
         max_tracks = self.get_config_value(ug_config, defaults_cfg, "max_tracks", 20)
         max_plays = self.get_config_value(ug_config, defaults_cfg, "max_plays", 2)
 
+        # Build filters for unplayed/barely played tracks
+        filters = {
+            "track.viewCount<=": max_plays,  # Tracks played max_plays times or less
+            "track.userRating!=": 1,  # Exclude 1-star rated tracks
+            "track.userRating!=": 2,  # Exclude 2-star rated tracks
+        }
+
         # Find tracks with matching genres but low play count
         unheard_tracks = []
-        for track in self.music.searchTracks():
-            try:
-                # Skip if track has been played more than max_plays times
-                if getattr(track, "viewCount", 0) > max_plays:
-                    continue
-                # Skip if track has been explicitly rated as bad by the user
-                if getattr(track, "userRating", 0) in (1, 2):
-                    continue
+        tracks = self.music.searchTracks(**filters)
 
+        for track in tracks:
+            try:
                 # Check if track genres match user preferences
                 track_genres = {str(g.tag).lower() for g in track.genres}
                 if any(genre in track_genres for genre in preferred_genres):
@@ -1712,7 +1714,7 @@ class PlexSync(BeetsPlugin):
                             "Found unheard gem: {} - {} (Plays: {})",
                             beets_item.artist,
                             beets_item.title,
-                            getattr(track, "viewCount", 0),
+                            track.viewCount,
                         )
             except Exception as e:
                 self._log.debug("Error processing track {}: {}", track.title, e)
