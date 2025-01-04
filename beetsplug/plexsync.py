@@ -473,17 +473,23 @@ class PlexSync(BeetsPlugin):
         # Replace the "dailydiscovery" command with "plex_smartplaylists" command:
         plex_smartplaylists_cmd = ui.Subcommand(
             "plex_smartplaylists",
-            help="Generate system-defined or custom smart playlists"
+            help="Generate system-defined or custom smart playlists",
         )
 
         def func_plex_smartplaylists(lib, opts, args):
             # Retrieve playlists from config
             playlists_config = config["plexsync"]["playlists"]["items"].get(list)
+            if not playlists_config:
+                self._log.warning(
+                    "No playlists defined in config['plexsync']['playlists']['items']. Skipping."
+                )
+                return
+
             for p in playlists_config:
                 if p["id"] == "daily_discovery":
                     # Use p["max_tracks"], p["exclusion_days"], etc. instead of old config
                     self._log.info("Generating Daily Discovery playlist...")
-                    self.generate_daily_discovery(lib)
+                    self.generate_daily_discovery(lib, p)
 
         plex_smartplaylists_cmd.func = func_plex_smartplaylists
 
@@ -1505,10 +1511,10 @@ class PlexSync(BeetsPlugin):
 
         return sorted_genres, list(similar_tracks)
 
-    def generate_daily_discovery(self, lib):
+    def generate_daily_discovery(self, lib, dd_config):
         """Generate a Daily Discovery playlist."""
-        playlist_name = "Daily Discovery"
-        self._log.info("Generating Daily Discovery playlist")
+        playlist_name = dd_config.get("name", "Daily Discovery")
+        self._log.info("Generating {} playlist", playlist_name)
 
         # Create a lookup dictionary of plex_ratingkey -> beets_item
         self._log.debug("Building lookup dictionary for Plex rating keys")
@@ -1522,7 +1528,7 @@ class PlexSync(BeetsPlugin):
         self._log.debug(f"Using preferred genres: {preferred_genres}")
         self._log.debug(f"Processing {len(similar_tracks)} pre-filtered similar tracks")
 
-        max_tracks = config["plexsync"]["max_tracks"].get(int)
+        max_tracks = dd_config.get("max_tracks", 20)  # use daily_discovery config
         if not max_tracks:
             max_tracks = 20
 
@@ -1549,10 +1555,8 @@ class PlexSync(BeetsPlugin):
         import random
 
         # Get the discovery ratio from config (default 70%)
-        discovery_ratio = config["plexsync"]["discovery_ratio"].get(int)
-        discovery_ratio = (
-            max(0, min(100, discovery_ratio)) / 100.0
-        )  # Ensure it's between 0-1
+        discovery_ratio = dd_config.get("discovery_ratio", 70)
+        discovery_ratio = max(0, min(100, discovery_ratio)) / 100.0
 
         # Calculate how many tracks of each type we want
         rated_tracks_count = int(max_tracks * discovery_ratio)
@@ -1616,6 +1620,7 @@ class PlexSync(BeetsPlugin):
         self._plex_add_playlist_item(selected_tracks, playlist_name)
 
         self._log.info(
-            "Successfully updated Daily Discovery playlist with {} tracks",
+            "Successfully updated {} playlist with {} tracks",
+            playlist_name,
             len(selected_tracks),
         )
