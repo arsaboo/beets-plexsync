@@ -1698,6 +1698,9 @@ class PlexSync(BeetsPlugin):
                 # Skip if track has been played more than max_plays times
                 if getattr(track, "viewCount", 0) > max_plays:
                     continue
+                # Skip if track has been explicitly rated as bad by the user
+                if getattr(track, "userRating", 0) in (1, 2):
+                    continue
 
                 # Check if track genres match user preferences
                 track_genres = {str(g.tag).lower() for g in track.genres}
