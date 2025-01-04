@@ -1682,7 +1682,10 @@ class PlexSync(BeetsPlugin):
         self._log.debug(f"Using preferred genres: {preferred_genres}")
 
         # Get configuration
-        if "playlists" in config["plexsync"] and "defaults" in config["plexsync"]["playlists"]:
+        if (
+            "playlists" in config["plexsync"]
+            and "defaults" in config["plexsync"]["playlists"]
+        ):
             defaults_cfg = config["plexsync"]["playlists"]["defaults"].get({})
         else:
             defaults_cfg = {}
@@ -1695,7 +1698,7 @@ class PlexSync(BeetsPlugin):
         for track in self.music.searchTracks():
             try:
                 # Skip if track has been played more than max_plays times
-                if getattr(track, 'viewCount', 0) > max_plays:
+                if getattr(track, "viewCount", 0) > max_plays:
                     continue
 
                 # Check if track genres match user preferences
@@ -1708,7 +1711,7 @@ class PlexSync(BeetsPlugin):
                             "Found unheard gem: {} - {} (Plays: {})",
                             beets_item.artist,
                             beets_item.title,
-                            getattr(track, 'viewCount', 0)
+                            getattr(track, "viewCount", 0),
                         )
             except Exception as e:
                 self._log.debug("Error processing track {}: {}", track.title, e)
@@ -1716,8 +1719,7 @@ class PlexSync(BeetsPlugin):
 
         # Sort by popularity if available
         unheard_tracks.sort(
-            key=lambda x: int(getattr(x, "spotify_track_popularity", 0)),
-            reverse=True
+            key=lambda x: int(getattr(x, "spotify_track_popularity", 0)), reverse=True
         )
 
         # Select tracks
@@ -1740,5 +1742,5 @@ class PlexSync(BeetsPlugin):
         self._log.info(
             "Successfully updated {} playlist with {} tracks",
             playlist_name,
-            len(selected_tracks)
+            len(selected_tracks),
         )
