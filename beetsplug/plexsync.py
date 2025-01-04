@@ -1532,17 +1532,29 @@ class PlexSync(BeetsPlugin):
 
         return sorted_genres, list(similar_tracks)
 
-    def generate_daily_discovery(self, lib, dd_config):
-        """Generate a Daily Discovery playlist with plex_smartplaylists command."""
-        playlist_name = dd_config.get("name", "Daily Discovery")
-        self._log.info("Generating {} playlist", playlist_name)
+    def build_plex_lookup(self, lib):
+        """Build a lookup dictionary mapping Plex rating keys to beets items.
 
-        # Create a lookup dictionary of plex_ratingkey -> beets_item
+        Args:
+            lib: The beets library instance
+
+        Returns:
+            dict: A dictionary mapping Plex rating keys to their corresponding beets items
+        """
         self._log.debug("Building lookup dictionary for Plex rating keys")
         plex_lookup = {}
         for item in lib.items():
             if hasattr(item, "plex_ratingkey"):
                 plex_lookup[item.plex_ratingkey] = item
+        return plex_lookup
+
+    def generate_daily_discovery(self, lib, dd_config):
+        """Generate a Daily Discovery playlist with plex_smartplaylists command."""
+        playlist_name = dd_config.get("name", "Daily Discovery")
+        self._log.info("Generating {} playlist", playlist_name)
+
+        # Get lookup dictionary for Plex rating keys
+        plex_lookup = self.build_plex_lookup(lib)
 
         # Setup and configuration
         preferred_genres, similar_tracks = self.get_preferred_attributes()
