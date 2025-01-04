@@ -485,14 +485,19 @@ class PlexSync(BeetsPlugin):
                 )
                 return
 
+            # Build lookup dictionary once
+            self._log.info("Building Plex lookup dictionary for all playlists...")
+            plex_lookup = self.build_plex_lookup(lib)
+            self._log.debug("Found {} tracks in lookup dictionary", len(plex_lookup))
+
             for p in playlists_config:
                 playlist_id = p.get("id")
                 if playlist_id == "daily_discovery":
                     self._log.info("Generating Daily Discovery playlist...")
-                    self.generate_daily_discovery(lib, p)
+                    self.generate_daily_discovery(lib, p, plex_lookup)
                 elif playlist_id == "unheard_gems":
                     self._log.info("Generating Unheard Gems playlist...")
-                    self.generate_unheard_gems(lib, p)
+                    self.generate_unheard_gems(lib, p, plex_lookup)
 
         plex_smartplaylists_cmd.func = func_plex_smartplaylists
 
@@ -1552,13 +1557,10 @@ class PlexSync(BeetsPlugin):
                 plex_lookup[item.plex_ratingkey] = item
         return plex_lookup
 
-    def generate_daily_discovery(self, lib, dd_config):
+    def generate_daily_discovery(self, lib, dd_config, plex_lookup):
         """Generate a Daily Discovery playlist with plex_smartplaylists command."""
         playlist_name = dd_config.get("name", "Daily Discovery")
         self._log.info("Generating {} playlist", playlist_name)
-
-        # Get lookup dictionary for Plex rating keys
-        plex_lookup = self.build_plex_lookup(lib)
 
         # Setup and configuration
         preferred_genres, similar_tracks = self.get_preferred_attributes()
@@ -1670,13 +1672,10 @@ class PlexSync(BeetsPlugin):
             len(selected_tracks),
         )
 
-    def generate_unheard_gems(self, lib, ug_config):
+    def generate_unheard_gems(self, lib, ug_config, plex_lookup):
         """Generate an Unheard Gems playlist with tracks matching user taste but low play count."""
         playlist_name = ug_config.get("name", "Unheard Gems")
         self._log.info("Generating {} playlist", playlist_name)
-
-        # Get lookup dictionary for Plex rating keys
-        plex_lookup = self.build_plex_lookup(lib)
 
         # Get preferred genres from user's listening history
         preferred_genres, _ = self.get_preferred_attributes()
