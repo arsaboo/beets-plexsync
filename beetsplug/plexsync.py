@@ -1533,7 +1533,7 @@ class PlexSync(BeetsPlugin):
         return sorted_genres, list(similar_tracks)
 
     def generate_daily_discovery(self, lib, dd_config):
-        """Generate a Daily Discovery playlist."""
+        """Generate a Daily Discovery playlist with plex_smartplaylists command."""
         playlist_name = dd_config.get("name", "Daily Discovery")
         self._log.info("Generating {} playlist", playlist_name)
 
