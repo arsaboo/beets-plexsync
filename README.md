@@ -129,22 +129,18 @@ Plex matching may be less than perfect and it can miss tracks if the tags don't 
 ```yaml
 plexsync:
   manual_search: yes
-  max_tracks: 20      # Maximum number of tracks for Daily Discovery playlist
-  exclusion_days: 30  # Number of days to exclude recently played tracks from recommendations
-  history_days: 15    # Number of days to use to learn user listening habits
-  discovery_ratio: 70 # Percentage of highly rated tracks in Daily Discovery playlist (0-100); Lower values result in more discovery (unrated) tracks
-                      # Example: 70 = 70% highly rated + 30% discovery tracks
-                      #          30 = 30% highly rated + 70% discovery tracks
   playlists:
     defaults:
       max_tracks: 20
     items:
       - id: daily_discovery
         name: "Daily Discovery"
-        max_tracks: 50
-        exclusion_days: 30
-        history_days: 15
-        discovery_ratio: 70
+        max_tracks: 20      # Maximum number of tracks for Daily Discovery playlist
+        exclusion_days: 30  # Number of days to exclude recently played tracks from recommendations
+        history_days: 15    # Number of days to use to learn user listening habits
+        discovery_ratio: 70 # Percentage of highly rated tracks in Daily Discovery playlist (0-100); Lower values result in more discovery (unrated) tracks
+                            # Example: 70 = 70% highly rated + 30% discovery tracks
+                            #          30 = 30% highly rated + 70% discovery tracks
 ```
 
 [collage]: collage.png
