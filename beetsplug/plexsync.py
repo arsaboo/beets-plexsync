@@ -487,7 +487,6 @@ class PlexSync(BeetsPlugin):
 
             for p in playlists_config:
                 if p["id"] == "daily_discovery":
-                    # Use p["max_tracks"], p["exclusion_days"], etc. instead of old config
                     self._log.info("Generating Daily Discovery playlist...")
                     self.generate_daily_discovery(lib, p)
 
@@ -1449,10 +1448,20 @@ class PlexSync(BeetsPlugin):
         else:
             self._log.debug("No tracks to add to playlist")
 
+    def get_config_value(self, item_cfg, defaults_cfg, key, code_default):
+        """Return config[key] from item_cfg if defined, else defaults_cfg, else code_default."""
+        return item_cfg.get(key, defaults_cfg.get(key, code_default))
+
     def get_preferred_attributes(self):
         """Determine preferred genres and similar tracks based on user listening habits."""
         # Get history period from config
-        history_days = config["plexsync"]["history_days"].get(int)
+        defaults_cfg = config["plexsync"]["playlists"].get("defaults", {})
+        history_days = self.get_config_value(
+            config["plexsync"], defaults_cfg, "history_days", 15
+        )
+        exclusion_days = self.get_config_value(
+            config["plexsync"], defaults_cfg, "exclusion_days", 30
+        )
 
         # Fetch tracks played in the configured period
         tracks = self.music.search(
@@ -1462,7 +1471,6 @@ class PlexSync(BeetsPlugin):
         # Track genre counts and similar tracks
         genre_counts = {}
         similar_tracks = set()
-        exclusion_days = config["plexsync"]["exclusion_days"].get(int)
 
         # Get tracks to exclude (played in last exclusion_days)
         exclusion_date = datetime.now() - timedelta(days=exclusion_days)
@@ -1528,9 +1536,11 @@ class PlexSync(BeetsPlugin):
         self._log.debug(f"Using preferred genres: {preferred_genres}")
         self._log.debug(f"Processing {len(similar_tracks)} pre-filtered similar tracks")
 
-        max_tracks = dd_config.get("max_tracks", 20)  # use daily_discovery config
-        if not max_tracks:
-            max_tracks = 20
+        defaults_cfg = config["plexsync"]["playlists"].get("defaults", {})
+        max_tracks = self.get_config_value(dd_config, defaults_cfg, "max_tracks", 20)
+        discovery_ratio = self.get_config_value(
+            dd_config, defaults_cfg, "discovery_ratio", 70
+        )
 
         # Use lookup dictionary instead of individual queries
         matched_tracks = []
@@ -1555,7 +1565,6 @@ class PlexSync(BeetsPlugin):
         import random
 
         # Get the discovery ratio from config (default 70%)
-        discovery_ratio = dd_config.get("discovery_ratio", 70)
         discovery_ratio = max(0, min(100, discovery_ratio)) / 100.0
 
         # Calculate how many tracks of each type we want
