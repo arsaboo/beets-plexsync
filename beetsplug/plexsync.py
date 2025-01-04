@@ -1455,13 +1455,13 @@ class PlexSync(BeetsPlugin):
     def get_preferred_attributes(self):
         """Determine preferred genres and similar tracks based on user listening habits."""
         # Get history period from config
-        defaults_cfg = config["plexsync"]["playlists"].get("defaults", {})
-        history_days = self.get_config_value(
-            config["plexsync"], defaults_cfg, "history_days", 15
-        )
-        exclusion_days = self.get_config_value(
-            config["plexsync"], defaults_cfg, "exclusion_days", 30
-        )
+        if "playlists" in config["plexsync"] and "defaults" in config["plexsync"]["playlists"]:
+            defaults_cfg = config["plexsync"]["playlists"]["defaults"].get({})
+        else:
+            defaults_cfg = {}
+
+        history_days = self.get_config_value(config["plexsync"], defaults_cfg, "history_days", 15)
+        exclusion_days = self.get_config_value(config["plexsync"], defaults_cfg, "exclusion_days", 30)
 
         # Fetch tracks played in the configured period
         tracks = self.music.search(
@@ -1536,11 +1536,13 @@ class PlexSync(BeetsPlugin):
         self._log.debug(f"Using preferred genres: {preferred_genres}")
         self._log.debug(f"Processing {len(similar_tracks)} pre-filtered similar tracks")
 
-        defaults_cfg = config["plexsync"]["playlists"].get("defaults", {})
+        if "playlists" in config["plexsync"] and "defaults" in config["plexsync"]["playlists"]:
+            defaults_cfg = config["plexsync"]["playlists"]["defaults"].get({})
+        else:
+            defaults_cfg = {}
+
         max_tracks = self.get_config_value(dd_config, defaults_cfg, "max_tracks", 20)
-        discovery_ratio = self.get_config_value(
-            dd_config, defaults_cfg, "discovery_ratio", 70
-        )
+        discovery_ratio = self.get_config_value(dd_config, defaults_cfg, "discovery_ratio", 70)
 
         # Use lookup dictionary instead of individual queries
         matched_tracks = []
