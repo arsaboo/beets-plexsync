@@ -1693,7 +1693,7 @@ class PlexSync(BeetsPlugin):
 
         # Build filters for unplayed/barely played tracks
         filters = {
-            "track.viewCount<=": max_plays,  # Tracks played max_plays times or less
+            "track.viewCount<<": max_plays + 1,  # Tracks played max_plays times or less
             "track.userRating!=": 1,  # Exclude 1-star rated tracks
             "track.userRating!=": 2,  # Exclude 2-star rated tracks
         }
