@@ -486,17 +486,15 @@ class PlexSync(BeetsPlugin):
                 return
 
             # Build lookup dictionary once
-            self._log.info("Building Plex lookup dictionary for all playlists...")
+            self._log.info("Building Plex lookup dictionary...")
             plex_lookup = self.build_plex_lookup(lib)
             self._log.debug("Found {} tracks in lookup dictionary", len(plex_lookup))
 
             for p in playlists_config:
                 playlist_id = p.get("id")
                 if playlist_id == "daily_discovery":
-                    self._log.info("Generating Daily Discovery playlist...")
                     self.generate_daily_discovery(lib, p, plex_lookup)
                 elif playlist_id == "unheard_gems":
-                    self._log.info("Generating Unheard Gems playlist...")
                     self.generate_unheard_gems(lib, p, plex_lookup)
 
         plex_smartplaylists_cmd.func = func_plex_smartplaylists
