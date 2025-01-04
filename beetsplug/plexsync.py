@@ -1688,13 +1688,14 @@ class PlexSync(BeetsPlugin):
             defaults_cfg = {}
 
         max_tracks = self.get_config_value(ug_config, defaults_cfg, "max_tracks", 20)
+        max_plays = self.get_config_value(ug_config, defaults_cfg, "max_plays", 2)
 
         # Find tracks with matching genres but low play count
         unheard_tracks = []
         for track in self.music.searchTracks():
             try:
-                # Skip if track has been played more than twice
-                if getattr(track, 'viewCount', 0) > 2:
+                # Skip if track has been played more than max_plays times
+                if getattr(track, 'viewCount', 0) > max_plays:
                     continue
 
                 # Check if track genres match user preferences
