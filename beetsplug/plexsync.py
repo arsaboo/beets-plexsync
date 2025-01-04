@@ -1756,20 +1756,18 @@ class PlexSync(BeetsPlugin):
         self._log.info("Generating {} playlist", playlist_name)
 
         # Get configuration
-        if (
-            "playlists" in config["plexsync"]
-            and "defaults" in config["plexsync"]["playlists"]
-        ):
+        if "playlists" in config["plexsync"] and "defaults" in config["plexsync"]["playlists"]:
             defaults_cfg = config["plexsync"]["playlists"]["defaults"].get({})
         else:
             defaults_cfg = {}
 
         max_tracks = self.get_config_value(ug_config, defaults_cfg, "max_tracks", 20)
+        min_score = self.get_config_value(ug_config, defaults_cfg, "min_score", 0.3)  # Add minimum score threshold
 
-        # 1. Analyze user preferences from rated tracks
+        # 1. Analyze user preferences from rated tracks (lower rating threshold to 4)
         rated_tracks = []
         for item in lib.items():
-            if hasattr(item, "plex_userrating") and float(item.plex_userrating) > 5:
+            if hasattr(item, "plex_userrating") and float(item.plex_userrating) >= 4:
                 rated_tracks.append(item)
 
         if not rated_tracks:
@@ -1782,29 +1780,57 @@ class PlexSync(BeetsPlugin):
         # 3. Find candidate unrated tracks
         candidates = []
         for item in lib.items():
-            if (
-                not hasattr(item, "plex_userrating")
-                or item.plex_userrating == 0
-                or item.plex_userrating is None
-            ):
+            if (not hasattr(item, "plex_userrating") or
+                item.plex_userrating == 0 or
+                item.plex_userrating is None):
                 candidates.append(item)
 
-        # 4. Score candidates
+        self._log.debug("Found {} candidate tracks", len(candidates))
+
+        # 4. Score candidates with more lenient criteria
         scored_tracks = []
         for track in candidates:
             score = self._calculate_track_score(track, preferences)
-            if score > 0:
+            if score >= min_score:  # Only include tracks above minimum score
                 scored_tracks.append((track, score))
+                self._log.debug(
+                    "Track scored {:.2f}: {} - {}",
+                    score,
+                    track.artist,
+                    track.title
+                )
 
-        # 5. Sort and select top tracks
-        scored_tracks.sort(key=lambda x: x[1], reverse=True)
-        selected_tracks = [track for track, _ in scored_tracks[:max_tracks]]
+        # 5. Sort by score and optionally by additional criteria
+        scored_tracks.sort(
+            key=lambda x: (
+                x[1],  # Primary sort by score
+                int(getattr(x[0], "spotify_track_popularity", 0)),  # Secondary sort by popularity
+                getattr(x[0], "year", 0)  # Tertiary sort by year
+            ),
+            reverse=True
+        )
+
+        # 6. Select tracks, ensuring variety
+        selected_tracks = []
+        artist_limit = max(3, max_tracks // 5)  # Allow up to 3 tracks per artist or 20% of max_tracks
+        artist_count = {}
+
+        for track, score in scored_tracks:
+            artist = track.artist
+            if artist_count.get(artist, 0) < artist_limit:
+                selected_tracks.append(track)
+                artist_count[artist] = artist_count.get(artist, 0) + 1
+
+            if len(selected_tracks) >= max_tracks:
+                break
 
         if not selected_tracks:
             self._log.warning("No suitable unrated tracks found")
             return
 
-        # 6. Update playlist
+        self._log.info("Selected {} tracks for playlist", len(selected_tracks))
+
+        # 7. Update playlist
         try:
             self._plex_clear_playlist(playlist_name)
             self._log.info("Cleared existing Unrated Gems playlist")
@@ -1815,7 +1841,7 @@ class PlexSync(BeetsPlugin):
         self._log.info(
             "Successfully updated {} playlist with {} tracks",
             playlist_name,
-            len(selected_tracks),
+            len(selected_tracks)
         )
 
     def _build_user_preferences(self, rated_tracks):
@@ -1903,7 +1929,7 @@ class PlexSync(BeetsPlugin):
     def _calculate_track_score(self, track, preferences):
         """Calculate similarity score between track and user preferences."""
         score = 0.0
-        weights = {"genre": 0.3, "mood": 0.25, "audio": 0.25, "popularity": 0.2}
+        weights = {"genre": 0.2, "mood": 0.25, "audio": 0.25, "popularity": 0.3}
 
         # Genre similarity
         if hasattr(track, "genre"):
