@@ -1449,8 +1449,12 @@ class PlexSync(BeetsPlugin):
             self._log.debug("No tracks to add to playlist")
 
     def get_config_value(self, item_cfg, defaults_cfg, key, code_default):
-        """Return config[key] from item_cfg if defined, else defaults_cfg, else code_default."""
-        return item_cfg.get(key, defaults_cfg.get(key, code_default))
+        if key in item_cfg:
+            return item_cfg[key].get()
+        elif key in defaults_cfg:
+            return defaults_cfg[key].get()
+        else:
+            return code_default
 
     def get_preferred_attributes(self):
         """Determine preferred genres and similar tracks based on user listening habits."""
