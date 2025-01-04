@@ -470,16 +470,24 @@ class PlexSync(BeetsPlugin):
 
         plex2spotify_cmd.func = func_plex2spotify
 
-        # Add daily discovery command
-        daily_discovery_cmd = ui.Subcommand(
-            "dailydiscovery", help="Generate Daily Discovery playlist"
+        # Replace the "dailydiscovery" command with "plex_smartplaylists" command:
+        plex_smartplaylists_cmd = ui.Subcommand(
+            "plex_smartplaylists",
+            help="Generate system-defined or custom smart playlists"
         )
 
-        def func_daily_discovery(lib, opts, args):
-            self.generate_daily_discovery(lib)
+        def func_plex_smartplaylists(lib, opts, args):
+            # Retrieve playlists from config
+            playlists_config = config["plexsync"]["playlists"]["items"].get(list)
+            for p in playlists_config:
+                if p["id"] == "daily_discovery":
+                    # Use p["max_tracks"], p["exclusion_days"], etc. instead of old config
+                    self._log.info("Generating Daily Discovery playlist...")
+                    self.generate_daily_discovery(lib)
 
-        daily_discovery_cmd.func = func_daily_discovery
+        plex_smartplaylists_cmd.func = func_plex_smartplaylists
 
+        # Finally, register the new command instead of the old daily_discovery_cmd
         return [
             plexupdate_cmd,
             sync_cmd,
@@ -493,7 +501,7 @@ class PlexSync(BeetsPlugin):
             searchimport_cmd,
             plexplaylist2collection_cmd,
             plex2spotify_cmd,
-            daily_discovery_cmd,
+            plex_smartplaylists_cmd,
         ]
 
     def parse_title(self, title_orig):
