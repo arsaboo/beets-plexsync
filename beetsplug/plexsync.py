@@ -486,9 +486,13 @@ class PlexSync(BeetsPlugin):
                 return
 
             for p in playlists_config:
-                if p["id"] == "daily_discovery":
+                playlist_id = p.get("id")
+                if playlist_id == "daily_discovery":
                     self._log.info("Generating Daily Discovery playlist...")
                     self.generate_daily_discovery(lib, p)
+                elif playlist_id == "unheard_gems":
+                    self._log.info("Generating Unheard Gems playlist...")
+                    self.generate_unheard_gems(lib, p)
 
         plex_smartplaylists_cmd.func = func_plex_smartplaylists
 
@@ -1664,4 +1668,77 @@ class PlexSync(BeetsPlugin):
             "Successfully updated {} playlist with {} tracks",
             playlist_name,
             len(selected_tracks),
+        )
+
+    def generate_unheard_gems(self, lib, ug_config):
+        """Generate an Unheard Gems playlist with tracks matching user taste but low play count."""
+        playlist_name = ug_config.get("name", "Unheard Gems")
+        self._log.info("Generating {} playlist", playlist_name)
+
+        # Get lookup dictionary for Plex rating keys
+        plex_lookup = self.build_plex_lookup(lib)
+
+        # Get preferred genres from user's listening history
+        preferred_genres, _ = self.get_preferred_attributes()
+        self._log.debug(f"Using preferred genres: {preferred_genres}")
+
+        # Get configuration
+        if "playlists" in config["plexsync"] and "defaults" in config["plexsync"]["playlists"]:
+            defaults_cfg = config["plexsync"]["playlists"]["defaults"].get({})
+        else:
+            defaults_cfg = {}
+
+        max_tracks = self.get_config_value(ug_config, defaults_cfg, "max_tracks", 20)
+
+        # Find tracks with matching genres but low play count
+        unheard_tracks = []
+        for track in self.music.searchTracks():
+            try:
+                # Skip if track has been played more than twice
+                if getattr(track, 'viewCount', 0) > 2:
+                    continue
+
+                # Check if track genres match user preferences
+                track_genres = {str(g.tag).lower() for g in track.genres}
+                if any(genre in track_genres for genre in preferred_genres):
+                    beets_item = plex_lookup.get(track.ratingKey)
+                    if beets_item:
+                        unheard_tracks.append(beets_item)
+                        self._log.debug(
+                            "Found unheard gem: {} - {} (Plays: {})",
+                            beets_item.artist,
+                            beets_item.title,
+                            getattr(track, 'viewCount', 0)
+                        )
+            except Exception as e:
+                self._log.debug("Error processing track {}: {}", track.title, e)
+                continue
+
+        # Sort by popularity if available
+        unheard_tracks.sort(
+            key=lambda x: int(getattr(x, "spotify_track_popularity", 0)),
+            reverse=True
+        )
+
+        # Select tracks
+        selected_tracks = unheard_tracks[:max_tracks]
+
+        if not selected_tracks:
+            self._log.warning("No tracks matched criteria for Unheard Gems playlist")
+            return
+
+        # Clear existing playlist
+        try:
+            self._plex_clear_playlist(playlist_name)
+            self._log.info("Cleared existing Unheard Gems playlist")
+        except exceptions.NotFound:
+            self._log.debug("No existing Unheard Gems playlist found")
+
+        # Create playlist
+        self._plex_add_playlist_item(selected_tracks, playlist_name)
+
+        self._log.info(
+            "Successfully updated {} playlist with {} tracks",
+            playlist_name,
+            len(selected_tracks)
         )
