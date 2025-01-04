@@ -1450,9 +1450,11 @@ class PlexSync(BeetsPlugin):
 
     def get_config_value(self, item_cfg, defaults_cfg, key, code_default):
         if key in item_cfg:
-            return item_cfg[key].get()
+            val = item_cfg[key]
+            return val.get() if hasattr(val, "get") else val
         elif key in defaults_cfg:
-            return defaults_cfg[key].get()
+            val = defaults_cfg[key]
+            return val.get() if hasattr(val, "get") else val
         else:
             return code_default
 
