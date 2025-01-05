@@ -2082,3 +2082,107 @@ class PlexSync(BeetsPlugin):
         model = Ridge()
         model.fit(features_scaled, labels)
         return model, scaler
+
+    def _build_user_preferences(self, rated_tracks):
+        """Build user preference profile from rated tracks."""
+        preferences = {
+            "genres": {},
+            "moods": {},
+            "artist_gender": {"male": 0, "female": 0},
+            "audio_features": {
+                "bpm": [],
+                "danceability": [],
+                "loudness": [],
+            },
+        }
+
+        for track in rated_tracks:
+            # Genre preferences
+            if hasattr(track, "genre"):
+                genres = track.genre.split(";")
+                for genre in genres:
+                    preferences["genres"][genre.strip()] = (
+                        preferences["genres"].get(genre.strip(), 0) + 1
+                    )
+
+            # Mood preferences
+            mood_attributes = [
+                "mood_acoustic",
+                "mood_aggressive",
+                "mood_electronic",
+                "mood_happy",
+                "mood_sad",
+                "mood_party",
+                "mood_relaxed",
+            ]
+            for attr in mood_attributes:
+                if hasattr(track, attr):
+                    preferences["moods"][attr] = preferences["moods"].get(attr, [])
+                    preferences["moods"][attr].append(float(getattr(track, attr, 0)))
+
+            # Artist gender preferences
+            if hasattr(track, "is_male") and track.is_male:
+                preferences["artist_gender"]["male"] += 1
+            if hasattr(track, "is_female") and track.is_female:
+                preferences["artist_gender"]["female"] += 1
+
+            # Audio features
+            if hasattr(track, "bpm"):
+                preferences["audio_features"]["bpm"].append(float(track.bpm))
+            if hasattr(track, "danceability"):
+                preferences["audio_features"]["danceability"].append(
+                    float(track.danceability)
+                )
+            if hasattr(track, "average_loudness"):
+                preferences["audio_features"]["loudness"].append(
+                    float(track.average_loudness)
+                )
+
+        # Normalize preferences
+        self._normalize_preferences(preferences)
+
+        # Create aggregated feature vector from sample track
+        if rated_tracks:
+            # Use first track as template and extract features
+            template_features = self._extract_track_features(rated_tracks[0])
+            if template_features:
+                preferences["feature_vector"] = template_features
+
+            # If template features not available, create empty feature vector
+            if "feature_vector" not in preferences:
+                preferences["feature_vector"] = {}
+
+        return preferences
+
+    def _normalize_preferences(self, preferences):
+        """Normalize preference values."""
+        # Normalize genres
+        total_genres = sum(preferences["genres"].values())
+        if total_genres > 0:
+            for genre in preferences["genres"]:
+                preferences["genres"][genre] /= total_genres
+
+        # Calculate averages for moods and audio features
+        for mood in preferences["moods"]:
+            if preferences["moods"][mood]:
+                preferences["moods"][mood] = sum(preferences["moods"][mood]) / len(
+                    preferences["moods"][mood]
+                )
+
+        for feature in preferences["audio_features"]:
+            if preferences["audio_features"][feature]:
+                preferences["audio_features"][feature] = {
+                    "mean": sum(preferences["audio_features"][feature])
+                    / len(preferences["audio_features"][feature]),
+                    "std": self._calculate_std(preferences["audio_features"][feature]),
+                }
+
+    def _calculate_std(self, values):
+        """Calculate standard deviation of a list of numbers."""
+        if not values:
+            return 0.0
+
+        mean = sum(values) / len(values)
+        squared_diff_sum = sum((x - mean) ** 2 for x in values)
+        variance = squared_diff_sum / len(values)
+        return variance ** 0.5
