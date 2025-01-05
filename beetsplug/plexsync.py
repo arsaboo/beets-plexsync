@@ -1919,43 +1919,38 @@ class PlexSync(BeetsPlugin):
 
     def _train_regression_model(self, rated_tracks):
         """Train a regression model to learn feature weights from rated tracks."""
+        import numpy as np
         features = []
-        ratings = []
-
-        # Collect all possible feature names
-        all_feature_names = set()
+        labels = []
         for track in rated_tracks:
-            track_features = self._extract_track_features(track)
-            if track_features:
-                all_feature_names.update(track_features.keys())
-
-        all_feature_names = sorted(all_feature_names)  # Sort to ensure consistent order
-
-        for track in rated_tracks:
-            track_features = self._extract_track_features(track)
-            if track_features:
-                # Create a feature vector with default values (e.g., 0) for missing features
-                feature_vector = [track_features.get(name, 0) for name in all_feature_names]
-                features.append(feature_vector)
-                ratings.append(track.plex_userrating)
-
-        if not features or not ratings:
-            self._log.warning("No features or ratings available for training")
+            fv = self._extract_track_features(track)
+            # Skip if no features or if features are not a list
+            if not isinstance(fv, list):
+                continue
+            # Flatten nested lists and ensure numeric
+            flat = []
+            for v in fv:
+                if isinstance(v, (list, tuple)):
+                    flat.extend(float(x) if x is not None else 0.0 for x in v)
+                else:
+                    flat.append(float(v) if v is not None else 0.0)
+            # Track must remain consistent size
+            features.append(flat)
+            labels.append(float(getattr(track, "plex_userrating", 0)))
+        # Filter out any inconsistent sizes
+        if not features:
             return None
-
-        # Normalize features
+        dim = len(features[0])
+        features = [f for f in features if len(f) == dim]
+        if not features:
+            return None
+        features = np.array(features, dtype=float)
+        labels = np.array(labels[:len(features)], dtype=float)
         scaler = StandardScaler()
-        features = scaler.fit_transform(features)
-
-        # Train regression model
-        model = Ridge(alpha=1.0)
-        model.fit(features, ratings)
-
-        # Extract learned weights
-        weights = dict(zip(all_feature_names, model.coef_))
-
-        self._log.debug("Learned feature weights from regression model: {}", weights)
-        return weights
+        features_scaled = scaler.fit_transform(features)
+        model = Ridge()
+        model.fit(features_scaled, labels)
+        return model
 
     def _extract_track_features(self, track):
         """Extract and normalize feature vector from track."""
@@ -2040,7 +2035,10 @@ class PlexSync(BeetsPlugin):
 
         # Ensure the returned list is numeric only, e.g.,:
         # return [popularity, view_count, user_rating, ...]
-        return features
+        return [track.popularity if hasattr(track, 'popularity') else 0.0,
+                track.viewCount if hasattr(track, 'viewCount') else 0.0,
+                # ...additional numeric features...
+               ]
 
     def _weighted_cosine_similarity(self, vec1, vec2, weights):
         """Calculate weighted cosine similarity between two feature vectors."""
@@ -2242,36 +2240,37 @@ class PlexSync(BeetsPlugin):
 
     def _train_regression_model(self, rated_tracks):
         """Train a regression model to learn feature weights from rated tracks."""
+        import numpy as np
         features = []
         labels = []
-
-        # Collect all possible feature names
-        all_feature_names = set()
         for track in rated_tracks:
-            track_features = self._extract_track_features(track)
-            if track_features:
-                all_feature_names.update(track_features.keys())
-
-        all_feature_names = sorted(all_feature_names)  # Sort to ensure consistent order
-
-        for track in rated_tracks:
-            track_features = self._extract_track_features(track)
-            if track_features:
-                # Create a feature vector with default values (e.g., 0) for missing features
-                feature_vector = [track_features.get(name, 0) for name in all_feature_names]
-                # Convert feature list to a flat numeric array
-                feature_vector = np.asarray(feature_vector, dtype=float).flatten()
-                features.append(feature_vector)
-                labels.append(float(getattr(track, "plex_userrating", 0)))
-
-        features = np.array(features, dtype=float)
-        labels = np.array(labels, dtype=float)
-        if len(features) == 0:
+            fv = self._extract_track_features(track)
+            # Skip if no features or if features are not a list
+            if not isinstance(fv, list):
+                continue
+            # Flatten nested lists and ensure numeric
+            flat = []
+            for v in fv:
+                if isinstance(v, (list, tuple)):
+                    flat.extend(float(x) if x is not None else 0.0 for x in v)
+                else:
+                    flat.append(float(v) if v is not None else 0.0)
+            # Track must remain consistent size
+            features.append(flat)
+            labels.append(float(getattr(track, "plex_userrating", 0)))
+        # Filter out any inconsistent sizes
+        if not features:
             return None
+        dim = len(features[0])
+        features = [f for f in features if len(f) == dim]
+        if not features:
+            return None
+        features = np.array(features, dtype=float)
+        labels = np.array(labels[:len(features)], dtype=float)
         scaler = StandardScaler()
-        features = scaler.fit_transform(features)
+        features_scaled = scaler.fit_transform(features)
         model = Ridge()
-        model.fit(features, labels)
+        model.fit(features_scaled, labels)
         return model
 
     def _extract_track_features(self, track):
@@ -2357,4 +2356,205 @@ class PlexSync(BeetsPlugin):
 
         # Ensure the returned list is numeric only, e.g.,:
         # return [popularity, view_count, user_rating, ...]
-        return features
+        return [track.popularity if hasattr(track, 'popularity') else 0.0,
+                track.viewCount if hasattr(track, 'viewCount') else 0.0,
+                # ...additional numeric features...
+               ]
+
+    def _weighted_cosine_similarity(self, vec1, vec2, weights):
+        """Calculate weighted cosine similarity between two feature vectors."""
+        if not vec1 or not vec2:
+            return 0.0
+
+        numerator = 0.0
+        norm1 = 0.0
+        norm2 = 0.0
+
+        # Calculate weighted dot product and norms
+        for feature in vec1:
+            if feature in vec2 and feature in weights:
+                weight = weights.get(feature, 1.0)
+                numerator += weight * vec1[feature] * vec2[feature]
+                norm1 += weight * vec1[feature] * vec1[feature]
+                norm2 += weight * vec2[feature] * vec2[feature]
+
+        # Avoid division by zero
+        if norm1 == 0.0 or norm2 == 0.0:
+            return 0.0
+
+        return numerator / ((norm1 * norm2) ** 0.5)
+
+    def _calculate_temporal_weight(self, timestamp):
+        """Calculate temporal weight to favor more recent preferences."""
+        if not timestamp:
+            return 1.0
+
+        # Convert timestamp to datetime if needed
+        if isinstance(timestamp, (int, float)):
+            timestamp = datetime.fromtimestamp(timestamp)
+
+        # Calculate days since the track was added
+        days_old = (datetime.now() - timestamp).days
+
+        # Use a half-life decay function
+        half_life = 365  # Adjust this value to control decay rate
+        temporal_weight = 2 ** (-days_old / half_life)
+
+        return temporal_weight
+
+    def _calculate_consistency(self, history, feature_type):
+        """Calculate consistency score for a particular feature type."""
+        if not history:
+            return 1.0
+
+        # Group ratings by feature values
+        feature_ratings = {}
+        for entry in history:
+            feature_val = entry.get(feature_type)
+            rating = entry.get('rating')
+            if feature_val and rating:
+                if feature_val not in feature_ratings:
+                    feature_ratings[feature_val] = []
+                feature_ratings[feature_val].append(rating)
+
+        # Calculate rating variance for each feature value
+        variances = []
+        for ratings in feature_ratings.values():
+            if len(ratings) > 1:
+                mean = sum(ratings) / len(ratings)
+                variance = sum((r - mean) ** 2 for r in ratings) / len(ratings)
+                variances.append(variance)
+
+        # Return inverse of average variance (higher consistency = lower variance)
+        if variances:
+            avg_variance = sum(variances) / len(variances)
+            return 1.0 / (1.0 + avg_variance)
+        return 1.0
+
+    def _encode_genres(self, genres):
+        """Encode genres using pre-trained embeddings or one-hot encoding."""
+        # If using pre-trained embeddings (recommended)
+        if hasattr(self, 'genre_embeddings') and self.genre_embeddings is not None:
+            try:
+                genre_vec = np.zeros(self.genre_embeddings.vector_size)
+                count = 0
+                for genre in genres:
+                    if genre in self.genre_embeddings:
+                        genre_vec += self.genre_embeddings[genre]
+                        count += 1
+                return genre_vec / count if count > 0 else genre_vec
+            except (AttributeError, TypeError):
+                # Fall through to one-hot encoding if embeddings fail
+                pass
+
+        # Fallback to one-hot encoding
+        genre_vec = np.zeros(len(self.genre_vocabulary))
+        for genre in genres:
+            if genre in self.genre_vocabulary:
+                idx = self.genre_vocabulary.index(genre)
+                genre_vec[idx] = 1
+        return genre_vec
+
+    def _build_user_preferences(self, rated_tracks):
+        """Build user preference profile from rated tracks."""
+        preferences = {
+            "genres": {},
+            "moods": {},
+            "artist_gender": {"male": 0, "female": 0},
+            "audio_features": {
+                "bpm": [],
+                "danceability": [],
+                "loudness": [],
+            },
+        }
+
+        for track in rated_tracks:
+            # Genre preferences
+            if hasattr(track, "genre"):
+                genres = track.genre.split(";")
+                for genre in genres:
+                    preferences["genres"][genre.strip()] = (
+                        preferences["genres"].get(genre.strip(), 0) + 1
+                    )
+
+            # Mood preferences
+            mood_attributes = [
+                "mood_acoustic",
+                "mood_aggressive",
+                "mood_electronic",
+                "mood_happy",
+                "mood_sad",
+                "mood_party",
+                "mood_relaxed",
+            ]
+            for attr in mood_attributes:
+                if hasattr(track, attr):
+                    preferences["moods"][attr] = preferences["moods"].get(attr, [])
+                    preferences["moods"][attr].append(float(getattr(track, attr, 0)))
+
+            # Artist gender preferences
+            if hasattr(track, "is_male") and track.is_male:
+                preferences["artist_gender"]["male"] += 1
+            if hasattr(track, "is_female") and track.is_female:
+                preferences["artist_gender"]["female"] += 1
+
+            # Audio features
+            if hasattr(track, "bpm"):
+                preferences["audio_features"]["bpm"].append(float(track.bpm))
+            if hasattr(track, "danceability"):
+                preferences["audio_features"]["danceability"].append(
+                    float(track.danceability)
+                )
+            if hasattr(track, "average_loudness"):
+                preferences["audio_features"]["loudness"].append(
+                    float(track.average_loudness)
+                )
+
+        # Normalize preferences
+        self._normalize_preferences(preferences)
+
+        # Create aggregated feature vector from sample track
+        if rated_tracks:
+            # Use first track as template and extract features
+            template_features = self._extract_track_features(rated_tracks[0])
+            if template_features:
+                preferences["feature_vector"] = template_features
+
+            # If template features not available, create empty feature vector
+            if "feature_vector" not in preferences:
+                preferences["feature_vector"] = {}
+
+        return preferences
+
+    def _normalize_preferences(self, preferences):
+        """Normalize preference values."""
+        # Normalize genres
+        total_genres = sum(preferences["genres"].values())
+        if total_genres > 0:
+            for genre in preferences["genres"]:
+                preferences["genres"][genre] /= total_genres
+
+        # Calculate averages for moods and audio features
+        for mood in preferences["moods"]:
+            if preferences["moods"][mood]:
+                preferences["moods"][mood] = sum(preferences["moods"][mood]) / len(
+                    preferences["moods"][mood]
+                )
+
+        for feature in preferences["audio_features"]:
+            if preferences["audio_features"][feature]:
+                preferences["audio_features"][feature] = {
+                    "mean": sum(preferences["audio_features"][feature])
+                    / len(preferences["audio_features"][feature]),
+                    "std": self._calculate_std(preferences["audio_features"][feature]),
+                }
+
+    def _calculate_std(self, values):
+        """Calculate standard deviation of a list of numbers."""
+        if not values:
+            return 0.0
+
+        mean = sum(values) / len(values)
+        squared_diff_sum = sum((x - mean) ** 2 for x in values)
+        variance = squared_diff_sum / len(values)
+        return variance ** 0.5
