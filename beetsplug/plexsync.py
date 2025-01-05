@@ -1991,8 +1991,8 @@ class PlexSync(BeetsPlugin):
 
         # User-created genres (one-hot encoding)
         if hasattr(track, 'genre'):
-            self._log.debug("User genres: {}", track.genre)
-            genres_user = str(track.genre).split(',')
+            genres_user = str(track.genre).split(',').trim()
+            self._log.debug("User genres: {}", genres_user)
             for genre in genres_user:
                 features[f'genre_user_{genre.strip()}'] = 1.0
 
