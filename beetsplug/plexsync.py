@@ -2014,12 +2014,14 @@ class PlexSync(BeetsPlugin):
         # User-created genres (one-hot encoding)
         if hasattr(track, 'genre'):
             genres_user = re.split(r'[;,]', str(track.genre))
+            self._log.debug("User genres: {}", genres_user)
             for genre in genres_user:
                 normalized_genre = genre.strip().lower().replace(' ', '_')
-                features[f'genre_user_{normalized_genre}'] = 1.0
-                if normalized_genre not in self.genre_vocabulary:
-                    self._log.debug("Adding new genre to vocabulary: {}", normalized_genre)
-                    self.genre_vocabulary.append(normalized_genre)
+                if normalized_genre:  # Avoid adding empty genres
+                    features[f'genre_user_{normalized_genre}'] = 1.0
+                    if normalized_genre not in self.genre_vocabulary:
+                        self._log.debug("Adding new genre to vocabulary: {}", normalized_genre)
+                        self.genre_vocabulary.append(normalized_genre)
 
         # Voice/Instrumental classification (convert to binary)
         if hasattr(track, 'voice_instrumental'):
