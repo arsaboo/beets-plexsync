@@ -84,8 +84,14 @@ class PlexSync(BeetsPlugin):
 
         # Initialize minimal genre vocabulary for fallback encoding
         self.genre_vocabulary = [
-            'rock', 'pop', 'electronic', 'hip hop',
-            'classical', 'jazz', 'metal', 'indie'
+            "rock",
+            "pop",
+            "electronic",
+            "hip hop",
+            "classical",
+            "jazz",
+            "metal",
+            "indie",
         ]
 
         # Initialize genre embeddings as None (will be loaded on demand)
@@ -1281,7 +1287,7 @@ class PlexSync(BeetsPlugin):
             }
 
             base_url = config["llm"]["base_url"].get()
-            if (base_url):
+            if base_url:
                 client_args["base_url"] = base_url
 
             self.llm_client = OpenAI(**client_args)
@@ -1766,7 +1772,10 @@ class PlexSync(BeetsPlugin):
         self._log.info("Generating {} playlist", playlist_name)
 
         # Get configuration
-        if "playlists" in config["plexsync"] and "defaults" in config["plexsync"]["playlists"]:
+        if (
+            "playlists" in config["plexsync"]
+            and "defaults" in config["plexsync"]["playlists"]
+        ):
             defaults_cfg = config["plexsync"]["playlists"]["defaults"].get({})
         else:
             defaults_cfg = {}
@@ -1792,9 +1801,11 @@ class PlexSync(BeetsPlugin):
         # 4. Find candidate unrated tracks
         candidates = []
         for item in lib.items():
-            if (not hasattr(item, "plex_userrating") or
-                item.plex_userrating == 0 or
-                item.plex_userrating is None):
+            if (
+                not hasattr(item, "plex_userrating")
+                or item.plex_userrating == 0
+                or item.plex_userrating is None
+            ):
                 candidates.append(item)
 
         self._log.debug("Found {} candidate tracks", len(candidates))
@@ -1803,21 +1814,27 @@ class PlexSync(BeetsPlugin):
         candidate_features = self._extract_features_for_tracks(candidates)
 
         # 6. Score all candidates using vectorized operations
-        scored_tracks = self._score_tracks(candidate_features, preferences, weights, candidates)
+        scored_tracks = self._score_tracks(
+            candidate_features, preferences, weights, candidates
+        )
 
         # 7. Sort by score and additional criteria
         scored_tracks.sort(
             key=lambda x: (
                 x[1],  # Primary sort by score
-                int(getattr(x[0], "spotify_track_popularity", 0)),  # Secondary sort by popularity
-                getattr(x[0], "year", 0)  # Tertiary sort by year
+                int(
+                    getattr(x[0], "spotify_track_popularity", 0)
+                ),  # Secondary sort by popularity
+                getattr(x[0], "year", 0),  # Tertiary sort by year
             ),
-            reverse=True
+            reverse=True,
         )
 
         # 8. Select top tracks while ensuring artist diversity
         selected_tracks = []
-        artist_limit = max(3, max_tracks // 5)  # Allow up to 3 tracks per artist or 20% of max_tracks
+        artist_limit = max(
+            3, max_tracks // 5
+        )  # Allow up to 3 tracks per artist or 20% of max_tracks
         artist_count = {}
 
         for track, score in scored_tracks:
@@ -1829,7 +1846,7 @@ class PlexSync(BeetsPlugin):
                     "Selected track: {} - {} (Score: {:.2f})",
                     track.artist,
                     track.title,
-                    score
+                    score,
                 )
 
             if len(selected_tracks) >= max_tracks:
@@ -1843,19 +1860,26 @@ class PlexSync(BeetsPlugin):
 
         # Log user preference summary
         if len(scored_tracks) > 0:
-            top_genres = sorted(preferences["genres"].items(),
-                              key=lambda x: x[1], reverse=True)[:5]
+            top_genres = sorted(
+                preferences["genres"].items(), key=lambda x: x[1], reverse=True
+            )[:5]
 
             self._log.info("User Listening Profile Summary:")
-            self._log.info("Feature weights:\n{}", self._format_feature_weights(weights))
-            self._log.info("Top genres: {}", ", ".join(f"{g}({s:.2f})" for g, s in top_genres))
+            self._log.info(
+                "Feature weights:\n{}", self._format_feature_weights(weights)
+            )
+            self._log.info(
+                "Top genres: {}", ", ".join(f"{g}({s:.2f})" for g, s in top_genres)
+            )
 
             if preferences.get("audio_features"):
                 af = preferences["audio_features"]
-                self._log.info("Audio preferences: BPM mean: {:.1f}, Danceability: {:.2f}, Loudness: {:.1f}",
-                             af.get("bpm", {}).get("mean", 0),
-                             af.get("danceability", {}).get("mean", 0),
-                             af.get("loudness", {}).get("mean", 0))
+                self._log.info(
+                    "Audio preferences: BPM mean: {:.1f}, Danceability: {:.2f}, Loudness: {:.1f}",
+                    af.get("bpm", {}).get("mean", 0),
+                    af.get("danceability", {}).get("mean", 0),
+                    af.get("loudness", {}).get("mean", 0),
+                )
 
             avg_score = sum(score for _, score in scored_tracks) / len(scored_tracks)
             self._log.info("Average track match score: {:.2f}", avg_score)
@@ -1871,7 +1895,7 @@ class PlexSync(BeetsPlugin):
         self._log.info(
             "Successfully updated {} playlist with {} tracks",
             playlist_name,
-            len(selected_tracks)
+            len(selected_tracks),
         )
 
     def _format_feature_weights(self, weights):
@@ -1905,9 +1929,7 @@ class PlexSync(BeetsPlugin):
 
         # Calculate weighted cosine similarity
         similarity_score = self._weighted_cosine_similarity(
-            track_features,
-            preferences["feature_vector"],
-            weights
+            track_features, preferences["feature_vector"], weights
         )
 
         # Apply temporal decay to favor more recent preferences
@@ -1923,34 +1945,32 @@ class PlexSync(BeetsPlugin):
         features = {}
 
         # Audio features (normalize to 0-1 range based on a reasonable range of ages)
-        if hasattr(track, 'year'):
-            year = int(getattr(track, 'year', 0))
+        if hasattr(track, "year"):
+            year = int(getattr(track, "year", 0))
             current_year = datetime.now().year
             age = current_year - year
             max_age = current_year - 1900  # Assuming music from 1900 onwards
-            features['age'] = age / max_age
+            features["age"] = age / max_age
 
         # Audio features (normalize to 0-1 range)
         audio_features = {
-            'bpm': (0, 200),  # Most songs under 200 BPM
-            'beats_count': (0, 1000),  # Normalize beat count
-            'average_loudness': (-60, 0),  # Typical loudness range in dB
-            'danceability': (0, 1)  # Already normalized
+            "bpm": (0, 200),  # Most songs under 200 BPM
+            "beats_count": (0, 1000),  # Normalize beat count
+            "average_loudness": (-60, 0),  # Typical loudness range in dB
+            "danceability": (0, 1),  # Already normalized
         }
 
         for feature, (min_val, max_val) in audio_features.items():
             if hasattr(track, feature):
                 value = float(getattr(track, feature))
-                if feature == 'average_loudness':
+                if feature == "average_loudness":
                     # Normalize loudness from dB range to 0-1
                     features[feature] = (value - min_val) / (max_val - min_val)
                 else:
                     features[feature] = max(0.0, min(1.0, value / max_val))
 
         # Boolean features
-        binary_features = [
-            'danceable', 'is_voice', 'is_instrumental'
-        ]
+        binary_features = ["danceable", "is_voice", "is_instrumental"]
 
         for feature in binary_features:
             if hasattr(track, feature):
@@ -1958,8 +1978,13 @@ class PlexSync(BeetsPlugin):
 
         # Mood features (assumed to be already normalized 0-1)
         mood_features = [
-            'mood_acoustic', 'mood_aggressive', 'mood_electronic',
-            'mood_happy', 'mood_sad', 'mood_party', 'mood_relaxed'
+            "mood_acoustic",
+            "mood_aggressive",
+            "mood_electronic",
+            "mood_happy",
+            "mood_sad",
+            "mood_party",
+            "mood_relaxed",
         ]
 
         for feature in mood_features:
@@ -1968,9 +1993,11 @@ class PlexSync(BeetsPlugin):
 
         # MIREX mood clusters (one-hot encoding)
         mirex_clusters = [
-            'mood_mirex_cluster_1', 'mood_mirex_cluster_2',
-            'mood_mirex_cluster_3', 'mood_mirex_cluster_4',
-            'mood_mirex_cluster_5'
+            "mood_mirex_cluster_1",
+            "mood_mirex_cluster_2",
+            "mood_mirex_cluster_3",
+            "mood_mirex_cluster_4",
+            "mood_mirex_cluster_5",
         ]
 
         for cluster in mirex_clusters:
@@ -1978,64 +2005,82 @@ class PlexSync(BeetsPlugin):
                 features[cluster] = float(getattr(track, cluster))
 
         # Gender features
-        if hasattr(track, 'is_male'):
-            features['is_male'] = float(track.is_male)
-        if hasattr(track, 'is_female'):
-            features['is_female'] = float(track.is_female)
+        if hasattr(track, "is_male"):
+            features["is_male"] = float(track.is_male)
+        if hasattr(track, "is_female"):
+            features["is_female"] = float(track.is_female)
 
         # Genre features (using rosamerica classification)
-        if hasattr(track, 'genre_rosamerica'):
-            genres_rosamerica = str(track.genre_rosamerica).split(';')
+        if hasattr(track, "genre_rosamerica"):
+            genres_rosamerica = str(track.genre_rosamerica).split(";")
             for genre in genres_rosamerica:
-                features[f'genre_rosamerica_{genre}'] = 1.0
+                features[f"genre_rosamerica_{genre}"] = 1.0
 
         # User-created genres (one-hot encoding)
-        if hasattr(track, 'genre'):
-            genres_user = str(track.genre).split(',')
+        if hasattr(track, "genre"):
+            genres_user = str(track.genre).split(",")
             self._log.debug("User genres: {}", genres_user)
             for genre in genres_user:
-                features[f'genre_user_{genre.strip()}'] = 1.0
+                normalized_genre = genre.strip().lower().replace(" ", "_")
+                features[f"genre_user_{normalized_genre}"] = 1.0
 
         # Voice/Instrumental classification (convert to binary)
-        if hasattr(track, 'voice_instrumental'):
+        if hasattr(track, "voice_instrumental"):
             # Convert categorical to binary (1.0 for 'voice', 0.0 for 'instrumental')
-            features['voice_instrumental'] = 1.0 if track.voice_instrumental == 'voice' else 0.0
+            features["voice_instrumental"] = (
+                1.0 if track.voice_instrumental == "voice" else 0.0
+            )
 
         # Year feature (normalize to 0-1 range based on a reasonable range of years)
-        if hasattr(track, 'year'):
-            year = int(getattr(track, 'year', 0))
-            min_year, max_year = 1900, datetime.now().year  # Assuming music from 1900 onwards
-            features['year'] = (year - min_year) / (max_year - min_year)
+        if hasattr(track, "year"):
+            year = int(getattr(track, "year", 0))
+            min_year, max_year = (
+                1900,
+                datetime.now().year,
+            )  # Assuming music from 1900 onwards
+            features["year"] = (year - min_year) / (max_year - min_year)
 
         # Ensure the returned list is numeric only, e.g.,:
         # return [popularity, view_count, skip_count, ...]
         return [
-            track.spotify_track_popularity if hasattr(track, 'spotify_track_popularity') else 0.0,
-            track.plex_viewcount if hasattr(track, 'plex_viewcount') else 0.0,
-            track.plex_skipcount if hasattr(track, 'plex_skipcount') else 0.0,
-            features.get('bpm', 0.0),
-            features.get('beats_count', 0.0),
-            features.get('average_loudness', 0.0),
-            features.get('danceability', 0.0),
-            features.get('age', 0.0),
-            features.get('is_male', 0.0),
-            features.get('is_female', 0.0),
-            features.get('voice_instrumental', 0.0),
-            features.get('mood_acoustic', 0.0),
-            features.get('mood_aggressive', 0.0),
-            features.get('mood_electronic', 0.0),
-            features.get('mood_happy', 0.0),
-            features.get('mood_sad', 0.0),
-            features.get('mood_party', 0.0),
-            features.get('mood_relaxed', 0.0),
-            features.get('mood_mirex_cluster_1', 0.0),
-            features.get('mood_mirex_cluster_2', 0.0),
-            features.get('mood_mirex_cluster_3', 0.0),
-            features.get('mood_mirex_cluster_4', 0.0),
-            features.get('mood_mirex_cluster_5', 0.0),
+            (
+                track.spotify_track_popularity
+                if hasattr(track, "spotify_track_popularity")
+                else 0.0
+            ),
+            track.plex_viewcount if hasattr(track, "plex_viewcount") else 0.0,
+            track.plex_skipcount if hasattr(track, "plex_skipcount") else 0.0,
+            features.get("bpm", 0.0),
+            features.get("beats_count", 0.0),
+            features.get("average_loudness", 0.0),
+            features.get("danceability", 0.0),
+            features.get("age", 0.0),
+            features.get("is_male", 0.0),
+            features.get("is_female", 0.0),
+            features.get("voice_instrumental", 0.0),
+            features.get("mood_acoustic", 0.0),
+            features.get("mood_aggressive", 0.0),
+            features.get("mood_electronic", 0.0),
+            features.get("mood_happy", 0.0),
+            features.get("mood_sad", 0.0),
+            features.get("mood_party", 0.0),
+            features.get("mood_relaxed", 0.0),
+            features.get("mood_mirex_cluster_1", 0.0),
+            features.get("mood_mirex_cluster_2", 0.0),
+            features.get("mood_mirex_cluster_3", 0.0),
+            features.get("mood_mirex_cluster_4", 0.0),
+            features.get("mood_mirex_cluster_5", 0.0),
             # Add genre features
-            *[features.get(f'genre_rosamerica_{genre}', 0.0) for genre in ['cla', 'dan', 'hip', 'jaz', 'pop', 'rhy', 'roc', 'spe']],
-            *[features.get(f'genre_user_{genre.strip()}', 0.0) for genre in self.genre_vocabulary]
+            *[
+                features.get(f"genre_rosamerica_{genre}", 0.0)
+                for genre in ["cla", "dan", "hip", "jaz", "pop", "rhy", "roc", "spe"]
+            ],
+            *[
+                features.get(
+                    f'genre_user_{genre.strip().lower().replace(" ", "_")}', 0.0
+                )
+                for genre in self.genre_vocabulary
+            ],
         ]
 
     def _calculate_feature_weights(self, rated_tracks):
@@ -2054,22 +2099,41 @@ class PlexSync(BeetsPlugin):
     def _get_feature_names(self):
         """Get the list of feature names in the order they are used in the model."""
         return [
-            'popularity', 'view_count', 'skip_count',
-            'bpm', 'beats_count', 'average_loudness', 'danceability',
-            'age', 'is_male', 'is_female', 'voice_instrumental',
-            'mood_acoustic', 'mood_aggressive', 'mood_electronic',
-            'mood_happy', 'mood_sad', 'mood_party', 'mood_relaxed',
-            'mood_mirex_cluster_1', 'mood_mirex_cluster_2',
-            'mood_mirex_cluster_3', 'mood_mirex_cluster_4',
-            'mood_mirex_cluster_5',
+            "popularity",
+            "view_count",
+            "skip_count",
+            "bpm",
+            "beats_count",
+            "average_loudness",
+            "danceability",
+            "age",
+            "is_male",
+            "is_female",
+            "voice_instrumental",
+            "mood_acoustic",
+            "mood_aggressive",
+            "mood_electronic",
+            "mood_happy",
+            "mood_sad",
+            "mood_party",
+            "mood_relaxed",
+            "mood_mirex_cluster_1",
+            "mood_mirex_cluster_2",
+            "mood_mirex_cluster_3",
+            "mood_mirex_cluster_4",
+            "mood_mirex_cluster_5",
             # Add genre feature names
-            *[f'genre_rosamerica_{genre}' for genre in ['cla', 'dan', 'hip', 'jaz', 'pop', 'rhy', 'roc', 'spe']],
-            *[f'genre_user_{genre.strip()}' for genre in self.genre_vocabulary]
+            *[
+                f"genre_rosamerica_{genre}"
+                for genre in ["cla", "dan", "hip", "jaz", "pop", "rhy", "roc", "spe"]
+            ],
+            *[f"genre_user_{genre.strip()}" for genre in self.genre_vocabulary],
         ]
 
     def _train_regression_model(self, rated_tracks):
         """Train a regression model to learn feature weights from rated tracks."""
         import numpy as np
+
         features = []
         labels = []
         for track in rated_tracks:
@@ -2095,7 +2159,7 @@ class PlexSync(BeetsPlugin):
         if not features:
             return None, None
         features = np.array(features, dtype=float)
-        labels = np.array(labels[:len(features)], dtype=float)
+        labels = np.array(labels[: len(features)], dtype=float)
         scaler = StandardScaler()
         features_scaled = scaler.fit_transform(features)
         model = Ridge()
@@ -2204,12 +2268,12 @@ class PlexSync(BeetsPlugin):
         mean = sum(values) / len(values)
         squared_diff_sum = sum((x - mean) ** 2 for x in values)
         variance = squared_diff_sum / len(values)
-        return variance ** 0.5
+        return variance**0.5
 
     def _encode_genres(self, genres):
         """Encode genres using pre-trained embeddings or one-hot encoding."""
         # If using pre-trained embeddings (recommended)
-        if hasattr(self, 'genre_embeddings') and self.genre_embeddings is not None:
+        if hasattr(self, "genre_embeddings") and self.genre_embeddings is not None:
             try:
                 genre_vec = np.zeros(self.genre_embeddings.vector_size)
                 count = 0
@@ -2280,7 +2344,7 @@ class PlexSync(BeetsPlugin):
         feature_ratings = {}
         for entry in history:
             feature_val = entry.get(feature_type)
-            rating = entry.get('rating')
+            rating = entry.get("rating")
             if feature_val and rating:
                 if feature_val not in feature_ratings:
                     feature_ratings[feature_val] = []
