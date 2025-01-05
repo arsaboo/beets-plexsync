@@ -1878,10 +1878,10 @@ class PlexSync(BeetsPlugin):
 
     def _format_feature_weights(self, weights):
         """Format feature weights as a table for logging."""
-        table = "Feature\t\tWeight\n"
-        table += "-------\t\t------\n"
+        table = "Feature\t\t\tWeight\n"
+        table += "-------\t\t\t------\n"
         for feature, weight in weights.items():
-            table += f"{feature}\t\t{weight:.4f}\n"
+            table += f"{feature}\t\t\t{weight:.4f}\n"
         return table
 
     def _score_tracks(self, candidate_features, preferences, weights, candidates):
@@ -1987,8 +1987,15 @@ class PlexSync(BeetsPlugin):
 
         # Genre features (using rosamerica classification)
         if hasattr(track, 'genre_rosamerica'):
-            genres = str(track.genre_rosamerica).split(';')
-            features['genre_vector'] = self._encode_genres(genres)
+            genres_rosamerica = str(track.genre_rosamerica).split(';')
+            for genre in genres_rosamerica:
+                features[f'genre_rosamerica_{genre}'] = 1.0
+
+        # User-created genres (one-hot encoding)
+        if hasattr(track, 'genre'):
+            genres_user = str(track.genre).split(',')
+            for genre in genres_user:
+                features[f'genre_user_{genre.strip()}'] = 1.0
 
         # Voice/Instrumental classification (convert to binary)
         if hasattr(track, 'voice_instrumental'):
@@ -2026,7 +2033,10 @@ class PlexSync(BeetsPlugin):
             features.get('mood_mirex_cluster_2', 0.0),
             features.get('mood_mirex_cluster_3', 0.0),
             features.get('mood_mirex_cluster_4', 0.0),
-            features.get('mood_mirex_cluster_5', 0.0)
+            features.get('mood_mirex_cluster_5', 0.0),
+            # Add genre features
+            *[features.get(f'genre_rosamerica_{genre}', 0.0) for genre in ['cla', 'dan', 'hip', 'jaz', 'pop', 'rhy', 'roc', 'spe']],
+            *[features.get(f'genre_user_{genre.strip()}', 0.0) for genre in self.genre_vocabulary]
         ]
 
     def _calculate_feature_weights(self, rated_tracks):
