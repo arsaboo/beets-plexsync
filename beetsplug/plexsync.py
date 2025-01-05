@@ -1801,7 +1801,7 @@ class PlexSync(BeetsPlugin):
         # 4. Score all candidates
         scored_tracks = []
         for track in candidates:
-            score = self._calculate_track_score(track, preferences)
+            score = self._calculate_track_score(track, preferences, rated_tracks)
             scored_tracks.append((track, score))
             self._log.debug(
                 "Track scored {:.2f}: {} - {}",
@@ -1881,6 +1881,31 @@ class PlexSync(BeetsPlugin):
             playlist_name,
             len(selected_tracks)
         )
+
+    def _calculate_track_score(self, track, preferences, rated_tracks):
+        """Calculate similarity score using collaborative filtering and weighted learning."""
+        # Initialize feature vectors
+        track_features = self._extract_track_features(track)
+        if not track_features or not preferences.get("feature_vector"):
+            return 0.0
+
+        # Get learned weights from user preferences
+        weights = self._calculate_feature_weights(preferences, rated_tracks)
+
+        # Calculate weighted cosine similarity
+        similarity_score = self._weighted_cosine_similarity(
+            track_features,
+            preferences["feature_vector"],
+            weights
+        )
+
+        # Apply temporal decay to favor more recent preferences
+        if hasattr(track, "added"):
+            temporal_weight = self._calculate_temporal_weight(track.added)
+            similarity_score *= temporal_weight
+
+        # Normalize to 0-1 range
+        return max(0.0, min(1.0, similarity_score))
 
     def _build_user_preferences(self, rated_tracks):
         """Build user preference profile from rated tracks."""
@@ -2082,7 +2107,7 @@ class PlexSync(BeetsPlugin):
 
         return weights
 
-    def _calculate_track_score(self, track, preferences):
+    def _calculate_track_score(self, track, preferences, rated_tracks):
         """Calculate similarity score using collaborative filtering and weighted learning."""
         # Initialize feature vectors
         track_features = self._extract_track_features(track)
