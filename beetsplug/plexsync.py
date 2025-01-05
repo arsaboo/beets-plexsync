@@ -2158,14 +2158,18 @@ class PlexSync(BeetsPlugin):
     def _encode_genres(self, genres):
         """Encode genres using pre-trained embeddings or one-hot encoding."""
         # If using pre-trained embeddings (recommended)
-        if hasattr(self, 'genre_embeddings'):
-            genre_vec = np.zeros(self.genre_embeddings.vector_size)
-            count = 0
-            for genre in genres:
-                if genre in self.genre_embeddings:
-                    genre_vec += self.genre_embeddings[genre]
-                    count += 1
-            return genre_vec / count if count > 0 else genre_vec
+        if hasattr(self, 'genre_embeddings') and self.genre_embeddings is not None:
+            try:
+                genre_vec = np.zeros(self.genre_embeddings.vector_size)
+                count = 0
+                for genre in genres:
+                    if genre in self.genre_embeddings:
+                        genre_vec += self.genre_embeddings[genre]
+                        count += 1
+                return genre_vec / count if count > 0 else genre_vec
+            except (AttributeError, TypeError):
+                # Fall through to one-hot encoding if embeddings fail
+                pass
 
         # Fallback to one-hot encoding
         genre_vec = np.zeros(len(self.genre_vocabulary))
