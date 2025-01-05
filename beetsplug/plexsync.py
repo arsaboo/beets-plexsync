@@ -1994,11 +1994,10 @@ class PlexSync(BeetsPlugin):
             features['year'] = (year - min_year) / (max_year - min_year)
 
         # Ensure the returned list is numeric only, e.g.,:
-        # return [popularity, view_count, user_rating, ...]
+        # return [popularity, view_count, skip_count, ...]
         return [
             track.spotify_track_popularity if hasattr(track, 'spotify_track_popularity') else 0.0,
             track.plex_viewcount if hasattr(track, 'plex_viewcount') else 0.0,
-            track.plex_userrating if hasattr(track, 'plex_userrating') else 0.0,
             track.plex_skipcount if hasattr(track, 'plex_skipcount') else 0.0,
             features.get('bpm', 0.0),
             features.get('beats_count', 0.0),
@@ -2038,7 +2037,7 @@ class PlexSync(BeetsPlugin):
     def _get_feature_names(self):
         """Get the list of feature names in the order they are used in the model."""
         return [
-            'popularity', 'view_count', 'user_rating', 'skip_count',
+            'popularity', 'view_count', 'skip_count',
             'bpm', 'beats_count', 'average_loudness', 'danceability',
             'age', 'is_male', 'is_female', 'voice_instrumental',
             'mood_acoustic', 'mood_aggressive', 'mood_electronic',
