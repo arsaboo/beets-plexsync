@@ -1882,6 +1882,16 @@ class PlexSync(BeetsPlugin):
             len(selected_tracks)
         )
 
+    def _calculate_feature_weights(self, rated_tracks):
+        """Calculate feature importance weights using a regression model."""
+        # Train regression model to learn feature weights
+        weights = self._train_regression_model(rated_tracks)
+        if not weights:
+            self._log.warning("Failed to train regression model for feature weights")
+            return {}
+
+        return weights
+
     def _calculate_track_score(self, track, preferences, rated_tracks):
         """Calculate similarity score using collaborative filtering and weighted learning."""
         # Initialize feature vectors
