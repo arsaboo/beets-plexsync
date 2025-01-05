@@ -1915,6 +1915,18 @@ class PlexSync(BeetsPlugin):
 
         # Normalize preferences
         self._normalize_preferences(preferences)
+
+        # Create aggregated feature vector from sample track
+        if rated_tracks:
+            # Use first track as template and extract features
+            template_features = self._extract_track_features(rated_tracks[0])
+            if template_features:
+                preferences["feature_vector"] = template_features
+
+            # If template features not available, create empty feature vector
+            if "feature_vector" not in preferences:
+                preferences["feature_vector"] = {}
+
         return preferences
 
     def _normalize_preferences(self, preferences):
@@ -1954,7 +1966,7 @@ class PlexSync(BeetsPlugin):
         """Calculate similarity score using collaborative filtering and weighted learning."""
         # Initialize feature vectors
         track_features = self._extract_track_features(track)
-        if not track_features:
+        if not track_features or not preferences.get("feature_vector"):
             return 0.0
 
         # Get learned weights from user preferences
