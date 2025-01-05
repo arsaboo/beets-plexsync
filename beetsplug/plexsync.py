@@ -1506,8 +1506,6 @@ class PlexSync(BeetsPlugin):
         genre_counts = {}
         similar_tracks = set()
 
-        # Get tracks to exclude (played in last exclusion_days)
-        exclusion_date = datetime.now() - timedelta(days=exclusion_days)
         recently_played = set(
             track.ratingKey
             for track in self.music.search(
@@ -1993,6 +1991,7 @@ class PlexSync(BeetsPlugin):
 
         # User-created genres (one-hot encoding)
         if hasattr(track, 'genre'):
+            self._log.debug("User genres: {}", track.genre)
             genres_user = str(track.genre).split(',')
             for genre in genres_user:
                 features[f'genre_user_{genre.strip()}'] = 1.0
