@@ -1945,32 +1945,34 @@ class PlexSync(BeetsPlugin):
         features = {}
 
         # Audio features (normalize to 0-1 range based on a reasonable range of ages)
-        if hasattr(track, "year"):
-            year = int(getattr(track, "year", 0))
+        if hasattr(track, 'year'):
+            year = int(getattr(track, 'year', 0))
             current_year = datetime.now().year
             age = current_year - year
             max_age = current_year - 1900  # Assuming music from 1900 onwards
-            features["age"] = age / max_age
+            features['age'] = age / max_age
 
         # Audio features (normalize to 0-1 range)
         audio_features = {
-            "bpm": (0, 200),  # Most songs under 200 BPM
-            "beats_count": (0, 1000),  # Normalize beat count
-            "average_loudness": (-60, 0),  # Typical loudness range in dB
-            "danceability": (0, 1),  # Already normalized
+            'bpm': (0, 200),  # Most songs under 200 BPM
+            'beats_count': (0, 1000),  # Normalize beat count
+            'average_loudness': (-60, 0),  # Typical loudness range in dB
+            'danceability': (0, 1)  # Already normalized
         }
 
         for feature, (min_val, max_val) in audio_features.items():
             if hasattr(track, feature):
                 value = float(getattr(track, feature))
-                if feature == "average_loudness":
+                if feature == 'average_loudness':
                     # Normalize loudness from dB range to 0-1
                     features[feature] = (value - min_val) / (max_val - min_val)
                 else:
                     features[feature] = max(0.0, min(1.0, value / max_val))
 
         # Boolean features
-        binary_features = ["danceable", "is_voice", "is_instrumental"]
+        binary_features = [
+            'danceable', 'is_voice', 'is_instrumental'
+        ]
 
         for feature in binary_features:
             if hasattr(track, feature):
@@ -1978,13 +1980,8 @@ class PlexSync(BeetsPlugin):
 
         # Mood features (assumed to be already normalized 0-1)
         mood_features = [
-            "mood_acoustic",
-            "mood_aggressive",
-            "mood_electronic",
-            "mood_happy",
-            "mood_sad",
-            "mood_party",
-            "mood_relaxed",
+            'mood_acoustic', 'mood_aggressive', 'mood_electronic',
+            'mood_happy', 'mood_sad', 'mood_party', 'mood_relaxed'
         ]
 
         for feature in mood_features:
@@ -1993,11 +1990,9 @@ class PlexSync(BeetsPlugin):
 
         # MIREX mood clusters (one-hot encoding)
         mirex_clusters = [
-            "mood_mirex_cluster_1",
-            "mood_mirex_cluster_2",
-            "mood_mirex_cluster_3",
-            "mood_mirex_cluster_4",
-            "mood_mirex_cluster_5",
+            'mood_mirex_cluster_1', 'mood_mirex_cluster_2',
+            'mood_mirex_cluster_3', 'mood_mirex_cluster_4',
+            'mood_mirex_cluster_5'
         ]
 
         for cluster in mirex_clusters:
@@ -2005,81 +2000,67 @@ class PlexSync(BeetsPlugin):
                 features[cluster] = float(getattr(track, cluster))
 
         # Gender features
-        if hasattr(track, "is_male"):
-            features["is_male"] = float(track.is_male)
-        if hasattr(track, "is_female"):
-            features["is_female"] = float(track.is_female)
+        if hasattr(track, 'is_male'):
+            features['is_male'] = float(track.is_male)
+        if hasattr(track, 'is_female'):
+            features['is_female'] = float(track.is_female)
 
         # Genre features (using rosamerica classification)
-        if hasattr(track, "genre_rosamerica"):
-            genres_rosamerica = str(track.genre_rosamerica).split(";")
+        if hasattr(track, 'genre_rosamerica'):
+            genres_rosamerica = str(track.genre_rosamerica).split(';')
             for genre in genres_rosamerica:
-                features[f"genre_rosamerica_{genre}"] = 1.0
+                features[f'genre_rosamerica_{genre}'] = 1.0
 
         # User-created genres (one-hot encoding)
-        if hasattr(track, "genre"):
-            genres_user = str(track.genre).split(",")
+        if hasattr(track, 'genre'):
+            genres_user = str(track.genre).split(',')
+            self._log.debug("User genres: {}", genres_user)
             for genre in genres_user:
-                normalized_genre = genre.strip().lower().replace(" ", "_")
-                features[f"genre_user_{normalized_genre}"] = 1.0
+                normalized_genre = genre.strip().lower().replace(' ', '_')
+                features[f'genre_user_{normalized_genre}'] = 1.0
+                if normalized_genre not in self.genre_vocabulary:
+                    self.genre_vocabulary.append(normalized_genre)
 
         # Voice/Instrumental classification (convert to binary)
-        if hasattr(track, "voice_instrumental"):
+        if hasattr(track, 'voice_instrumental'):
             # Convert categorical to binary (1.0 for 'voice', 0.0 for 'instrumental')
-            features["voice_instrumental"] = (
-                1.0 if track.voice_instrumental == "voice" else 0.0
-            )
+            features['voice_instrumental'] = 1.0 if track.voice_instrumental == 'voice' else 0.0
 
         # Year feature (normalize to 0-1 range based on a reasonable range of years)
-        if hasattr(track, "year"):
-            year = int(getattr(track, "year", 0))
-            min_year, max_year = (
-                1900,
-                datetime.now().year,
-            )  # Assuming music from 1900 onwards
-            features["year"] = (year - min_year) / (max_year - min_year)
+        if hasattr(track, 'year'):
+            year = int(getattr(track, 'year', 0))
+            min_year, max_year = 1900, datetime.now().year  # Assuming music from 1900 onwards
+            features['year'] = (year - min_year) / (max_year - min_year)
 
         # Ensure the returned list is numeric only, e.g.,:
         # return [popularity, view_count, skip_count, ...]
         return [
-            (
-                track.spotify_track_popularity
-                if hasattr(track, "spotify_track_popularity")
-                else 0.0
-            ),
-            track.plex_viewcount if hasattr(track, "plex_viewcount") else 0.0,
-            track.plex_skipcount if hasattr(track, "plex_skipcount") else 0.0,
-            features.get("bpm", 0.0),
-            features.get("beats_count", 0.0),
-            features.get("average_loudness", 0.0),
-            features.get("danceability", 0.0),
-            features.get("age", 0.0),
-            features.get("is_male", 0.0),
-            features.get("is_female", 0.0),
-            features.get("voice_instrumental", 0.0),
-            features.get("mood_acoustic", 0.0),
-            features.get("mood_aggressive", 0.0),
-            features.get("mood_electronic", 0.0),
-            features.get("mood_happy", 0.0),
-            features.get("mood_sad", 0.0),
-            features.get("mood_party", 0.0),
-            features.get("mood_relaxed", 0.0),
-            features.get("mood_mirex_cluster_1", 0.0),
-            features.get("mood_mirex_cluster_2", 0.0),
-            features.get("mood_mirex_cluster_3", 0.0),
-            features.get("mood_mirex_cluster_4", 0.0),
-            features.get("mood_mirex_cluster_5", 0.0),
+            track.spotify_track_popularity if hasattr(track, 'spotify_track_popularity') else 0.0,
+            track.plex_viewcount if hasattr(track, 'plex_viewcount') else 0.0,
+            track.plex_skipcount if hasattr(track, 'plex_skipcount') else 0.0,
+            features.get('bpm', 0.0),
+            features.get('beats_count', 0.0),
+            features.get('average_loudness', 0.0),
+            features.get('danceability', 0.0),
+            features.get('age', 0.0),
+            features.get('is_male', 0.0),
+            features.get('is_female', 0.0),
+            features.get('voice_instrumental', 0.0),
+            features.get('mood_acoustic', 0.0),
+            features.get('mood_aggressive', 0.0),
+            features.get('mood_electronic', 0.0),
+            features.get('mood_happy', 0.0),
+            features.get('mood_sad', 0.0),
+            features.get('mood_party', 0.0),
+            features.get('mood_relaxed', 0.0),
+            features.get('mood_mirex_cluster_1', 0.0),
+            features.get('mood_mirex_cluster_2', 0.0),
+            features.get('mood_mirex_cluster_3', 0.0),
+            features.get('mood_mirex_cluster_4', 0.0),
+            features.get('mood_mirex_cluster_5', 0.0),
             # Add genre features
-            *[
-                features.get(f"genre_rosamerica_{genre}", 0.0)
-                for genre in ["cla", "dan", "hip", "jaz", "pop", "rhy", "roc", "spe"]
-            ],
-            *[
-                features.get(
-                    f'genre_user_{genre.strip().lower().replace(" ", "_")}', 0.0
-                )
-                for genre in self.genre_vocabulary
-            ],
+            *[features.get(f'genre_rosamerica_{genre}', 0.0) for genre in ['cla', 'dan', 'hip', 'jaz', 'pop', 'rhy', 'roc', 'spe']],
+            *[features.get(f'genre_user_{genre}', 0.0) for genre in self.genre_vocabulary]
         ]
 
     def _calculate_feature_weights(self, rated_tracks):
