@@ -1801,19 +1801,13 @@ class PlexSync(BeetsPlugin):
 
         self._log.debug("Found {} candidate tracks", len(candidates))
 
-        # 5. Score all candidates
-        scored_tracks = []
-        for track in candidates:
-            score = self._calculate_track_score(track, preferences, weights)
-            scored_tracks.append((track, score))
-            self._log.debug(
-                "Track scored {:.2f}: {} - {}",
-                score,
-                track.artist,
-                track.title
-            )
+        # 5. Extract features for all candidates
+        candidate_features = self._extract_features_for_tracks(candidates)
 
-        # 6. Sort by score and additional criteria
+        # 6. Score all candidates using vectorized operations
+        scored_tracks = self._score_tracks(candidate_features, preferences, weights, candidates)
+
+        # 7. Sort by score and additional criteria
         scored_tracks.sort(
             key=lambda x: (
                 x[1],  # Primary sort by score
@@ -1823,7 +1817,7 @@ class PlexSync(BeetsPlugin):
             reverse=True
         )
 
-        # 7. Select top tracks while ensuring artist diversity
+        # 8. Select top tracks while ensuring artist diversity
         selected_tracks = []
         artist_limit = max(3, max_tracks // 5)  # Allow up to 3 tracks per artist or 20% of max_tracks
         artist_count = {}
@@ -1868,7 +1862,7 @@ class PlexSync(BeetsPlugin):
             avg_score = sum(score for _, score in scored_tracks) / len(scored_tracks)
             self._log.info("Average track match score: {:.2f}", avg_score)
 
-        # 8. Update playlist
+        # 9. Update playlist
         try:
             self._plex_clear_playlist(playlist_name)
             self._log.info("Cleared existing Unrated Gems playlist")
@@ -1882,10 +1876,24 @@ class PlexSync(BeetsPlugin):
             len(selected_tracks)
         )
 
-    def _calculate_track_score(self, track, preferences, weights):
+    def _score_tracks(self, candidate_features, preferences, weights, candidates):
+        """Score all candidate tracks using vectorized operations."""
+        scored_tracks = []
+        for track, features in zip(candidates, candidate_features):
+            score = self._calculate_track_score(features, preferences, weights)
+            scored_tracks.append((track, score))
+        return scored_tracks
+
+    def _extract_features_for_tracks(self, tracks):
+        """Extract features for a list of tracks."""
+        features_list = []
+        for track in tracks:
+            features = self._extract_track_features(track)
+            features_list.append(features)
+        return features_list
+
+    def _calculate_track_score(self, track_features, preferences, weights):
         """Calculate similarity score using collaborative filtering and weighted learning."""
-        # Initialize feature vectors
-        track_features = self._extract_track_features(track)
         if not track_features or not preferences.get("feature_vector"):
             return 0.0
 
@@ -1897,59 +1905,12 @@ class PlexSync(BeetsPlugin):
         )
 
         # Apply temporal decay to favor more recent preferences
-        if hasattr(track, "added"):
-            temporal_weight = self._calculate_temporal_weight(track.added)
+        if hasattr(track_features, "added"):
+            temporal_weight = self._calculate_temporal_weight(track_features.added)
             similarity_score *= temporal_weight
 
         # Normalize to 0-1 range
         return max(0.0, min(1.0, similarity_score))
-
-    def _calculate_feature_weights(self, rated_tracks):
-        """Calculate feature importance weights using a regression model."""
-        # Train regression model to learn feature weights
-        model, scaler = self._train_regression_model(rated_tracks)
-        if not model:
-            self._log.warning("Failed to train regression model for feature weights")
-            return {}
-
-        # Extract weights from the trained model
-        weights = {f"feature_{i}": coef for i, coef in enumerate(model.coef_)}
-        return weights
-
-    def _train_regression_model(self, rated_tracks):
-        """Train a regression model to learn feature weights from rated tracks."""
-        import numpy as np
-        features = []
-        labels = []
-        for track in rated_tracks:
-            fv = self._extract_track_features(track)
-            # Skip if no features or if features are not a list
-            if not isinstance(fv, list):
-                continue
-            # Flatten nested lists and ensure numeric
-            flat = []
-            for v in fv:
-                if isinstance(v, (list, tuple)):
-                    flat.extend(float(x) if x is not None else 0.0 for x in v)
-                else:
-                    flat.append(float(v) if v is not None else 0.0)
-            # Track must remain consistent size
-            features.append(flat)
-            labels.append(float(getattr(track, "plex_userrating", 0)))
-        # Filter out any inconsistent sizes
-        if not features:
-            return None, None
-        dim = len(features[0])
-        features = [f for f in features if len(f) == dim]
-        if not features:
-            return None, None
-        features = np.array(features, dtype=float)
-        labels = np.array(labels[:len(features)], dtype=float)
-        scaler = StandardScaler()
-        features_scaled = scaler.fit_transform(features)
-        model = Ridge()
-        model.fit(features_scaled, labels)
-        return model, scaler
 
     def _extract_track_features(self, track):
         """Extract and normalize feature vector from track."""
@@ -2042,10 +2003,8 @@ class PlexSync(BeetsPlugin):
             # ...additional numeric features...
         ]
 
-    def _calculate_track_score(self, track, preferences, weights):
+    def _calculate_track_score(self, track_features, preferences, weights):
         """Calculate similarity score using collaborative filtering and weighted learning."""
-        # Initialize feature vectors
-        track_features = self._extract_track_features(track)
         if not track_features or not preferences.get("feature_vector"):
             return 0.0
 
@@ -2057,8 +2016,8 @@ class PlexSync(BeetsPlugin):
         )
 
         # Apply temporal decay to favor more recent preferences
-        if hasattr(track, "added"):
-            temporal_weight = self._calculate_temporal_weight(track.added)
+        if hasattr(track_features, "added"):
+            temporal_weight = self._calculate_temporal_weight(track_features.added)
             similarity_score *= temporal_weight
 
         # Normalize to 0-1 range
