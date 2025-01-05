@@ -2037,9 +2037,10 @@ class PlexSync(BeetsPlugin):
             genres = str(track.genre_rosamerica).split(';')
             features['genre_vector'] = self._encode_genres(genres)
 
-        # Voice/Instrumental classification
+        # Voice/Instrumental classification (convert to binary)
         if hasattr(track, 'voice_instrumental'):
-            features['voice_instrumental'] = float(track.voice_instrumental)
+            # Convert categorical to binary (1.0 for 'voice', 0.0 for 'instrumental')
+            features['voice_instrumental'] = 1.0 if track.voice_instrumental == 'voice' else 0.0
 
         return features
 
