@@ -2062,7 +2062,10 @@ class PlexSync(BeetsPlugin):
             'mood_happy', 'mood_sad', 'mood_party', 'mood_relaxed',
             'mood_mirex_cluster_1', 'mood_mirex_cluster_2',
             'mood_mirex_cluster_3', 'mood_mirex_cluster_4',
-            'mood_mirex_cluster_5'
+            'mood_mirex_cluster_5',
+            # Add genre feature names
+            *[f'genre_rosamerica_{genre}' for genre in ['cla', 'dan', 'hip', 'jaz', 'pop', 'rhy', 'roc', 'spe']],
+            *[f'genre_user_{genre.strip()}' for genre in self.genre_vocabulary]
         ]
 
     def _train_regression_model(self, rated_tracks):
