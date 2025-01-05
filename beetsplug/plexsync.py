@@ -1890,7 +1890,7 @@ class PlexSync(BeetsPlugin):
             return 0.0
 
         # Get learned weights from user preferences
-        weights = self._calculate_feature_weights(preferences, rated_tracks)
+        weights = self._calculate_feature_weights(rated_tracks)
 
         # Calculate weighted cosine similarity
         similarity_score = self._weighted_cosine_similarity(
@@ -1907,119 +1907,26 @@ class PlexSync(BeetsPlugin):
         # Normalize to 0-1 range
         return max(0.0, min(1.0, similarity_score))
 
-    def _build_user_preferences(self, rated_tracks):
-        """Build user preference profile from rated tracks."""
-        preferences = {
-            "genres": {},
-            "moods": {},
-            "artist_gender": {"male": 0, "female": 0},
-            "audio_features": {
-                "bpm": [],
-                "danceability": [],
-                "loudness": [],
-            },
-        }
-
-        for track in rated_tracks:
-            # Genre preferences
-            if hasattr(track, "genre"):
-                genres = track.genre.split(";")
-                for genre in genres:
-                    preferences["genres"][genre.strip()] = (
-                        preferences["genres"].get(genre.strip(), 0) + 1
-                    )
-
-            # Mood preferences
-            mood_attributes = [
-                "mood_acoustic",
-                "mood_aggressive",
-                "mood_electronic",
-                "mood_happy",
-                "mood_sad",
-                "mood_party",
-                "mood_relaxed",
-            ]
-            for attr in mood_attributes:
-                if hasattr(track, attr):
-                    preferences["moods"][attr] = preferences["moods"].get(attr, [])
-                    preferences["moods"][attr].append(float(getattr(track, attr, 0)))
-
-            # Artist gender preferences
-            if hasattr(track, "is_male") and track.is_male:
-                preferences["artist_gender"]["male"] += 1
-            if hasattr(track, "is_female") and track.is_female:
-                preferences["artist_gender"]["female"] += 1
-
-            # Audio features
-            if hasattr(track, "bpm"):
-                preferences["audio_features"]["bpm"].append(float(track.bpm))
-            if hasattr(track, "danceability"):
-                preferences["audio_features"]["danceability"].append(
-                    float(track.danceability)
-                )
-            if hasattr(track, "average_loudness"):
-                preferences["audio_features"]["loudness"].append(
-                    float(track.average_loudness)
-                )
-
-        # Normalize preferences
-        self._normalize_preferences(preferences)
-
-        # Create aggregated feature vector from sample track
-        if rated_tracks:
-            # Use first track as template and extract features
-            template_features = self._extract_track_features(rated_tracks[0])
-            if template_features:
-                preferences["feature_vector"] = template_features
-
-            # If template features not available, create empty feature vector
-            if "feature_vector" not in preferences:
-                preferences["feature_vector"] = {}
-
-        return preferences
-
-    def _normalize_preferences(self, preferences):
-        """Normalize preference values."""
-        # Normalize genres
-        total_genres = sum(preferences["genres"].values())
-        if total_genres > 0:
-            for genre in preferences["genres"]:
-                preferences["genres"][genre] /= total_genres
-
-        # Calculate averages for moods and audio features
-        for mood in preferences["moods"]:
-            if preferences["moods"][mood]:
-                preferences["moods"][mood] = sum(preferences["moods"][mood]) / len(
-                    preferences["moods"][mood]
-                )
-
-        for feature in preferences["audio_features"]:
-            if preferences["audio_features"][feature]:
-                preferences["audio_features"][feature] = {
-                    "mean": sum(preferences["audio_features"][feature])
-                    / len(preferences["audio_features"][feature]),
-                    "std": self._calculate_std(preferences["audio_features"][feature]),
-                }
-
-    def _calculate_std(self, values):
-        """Calculate standard deviation of a list of numbers."""
-        if not values:
-            return 0.0
-
-        mean = sum(values) / len(values)
-        squared_diff_sum = sum((x - mean) ** 2 for x in values)
-        variance = squared_diff_sum / len(values)
-        return variance ** 0.5
-
     def _train_regression_model(self, rated_tracks):
         """Train a regression model to learn feature weights from rated tracks."""
         features = []
         ratings = []
 
+        # Collect all possible feature names
+        all_feature_names = set()
         for track in rated_tracks:
             track_features = self._extract_track_features(track)
             if track_features:
-                features.append(list(track_features.values()))
+                all_feature_names.update(track_features.keys())
+
+        all_feature_names = sorted(all_feature_names)  # Sort to ensure consistent order
+
+        for track in rated_tracks:
+            track_features = self._extract_track_features(track)
+            if track_features:
+                # Create a feature vector with default values (e.g., 0) for missing features
+                feature_vector = [track_features.get(name, 0) for name in all_feature_names]
+                features.append(feature_vector)
                 ratings.append(track.plex_userrating)
 
         if not features or not ratings:
@@ -2035,102 +1942,10 @@ class PlexSync(BeetsPlugin):
         model.fit(features, ratings)
 
         # Extract learned weights
-        feature_names = list(track_features.keys())
-        weights = dict(zip(feature_names, model.coef_))
+        weights = dict(zip(all_feature_names, model.coef_))
 
         self._log.debug("Learned feature weights from regression model: {}", weights)
         return weights
-
-    def _calculate_feature_weights(self, preferences, rated_tracks):
-        """Calculate feature importance weights using a regression model."""
-        # Train regression model to learn feature weights
-        weights = self._train_regression_model(rated_tracks)
-        if not weights:
-            # Fallback to heuristic weights if regression model training fails
-            return self._calculate_heuristic_weights(preferences)
-
-        return weights
-
-    def _calculate_heuristic_weights(self, preferences):
-        """Calculate heuristic feature weights using user preference history."""
-        weights = {}
-
-        # Base category weights
-        base_weights = {
-            'audio': 0.25,
-            'mood': 0.30,
-            'genre': 0.25,
-            'metadata': 0.20,
-            'age': 0.10  # Adding age as a new category with a base weight
-        }
-
-        # Calculate sub-feature weights within each category
-        if preferences.get('moods'):
-            mood_weights = {}
-            total_mood = sum(abs(v) for v in preferences['moods'].values())
-            if total_mood > 0:
-                for mood, value in preferences['moods'].items():
-                    mood_weights[mood] = (abs(value) / total_mood) * base_weights['mood']
-                weights.update(mood_weights)
-
-        if preferences.get('audio_features'):
-            audio_weights = {}
-            for feature, data in preferences['audio_features'].items():
-                if isinstance(data, dict) and 'mean' in data:
-                    # Weight by inverse of standard deviation - more consistent preferences get higher weight
-                    std = data.get('std', 1.0)
-                    audio_weights[feature] = (1.0 / (1.0 + std)) * base_weights['audio']
-            weights.update(audio_weights)
-
-        # Genre weights are already normalized in preferences
-        if preferences.get('genres'):
-            for genre, weight in preferences['genres'].items():
-                weights[f'genre_{genre}'] = weight * base_weights['genre']
-
-        # Metadata features
-        if preferences.get('artist_gender'):
-            total_gender = sum(preferences['artist_gender'].values())
-            if total_gender > 0:
-                for gender, count in preferences['artist_gender'].items():
-                    weights[f'is_{gender}'] = (count / total_gender) * base_weights['metadata']
-
-        # Age feature weight
-        if 'age' in preferences:
-            weights['age'] = base_weights['age']
-
-        # Add logging for detailed weights
-        self._log.debug("Detailed feature weights:")
-        for category in ['mood', 'audio', 'genre', 'metadata', 'age']:
-            category_weights = {k: v for k, v in weights.items() if k.startswith(category)}
-            if category_weights:
-                self._log.debug("{} features: {}", category, category_weights)
-
-        return weights
-
-    def _calculate_track_score(self, track, preferences, rated_tracks):
-        """Calculate similarity score using collaborative filtering and weighted learning."""
-        # Initialize feature vectors
-        track_features = self._extract_track_features(track)
-        if not track_features or not preferences.get("feature_vector"):
-            return 0.0
-
-        # Get learned weights from user preferences
-        weights = self._calculate_feature_weights(preferences, rated_tracks)
-
-        # Calculate weighted cosine similarity
-        similarity_score = self._weighted_cosine_similarity(
-            track_features,
-            preferences["feature_vector"],
-            weights
-        )
-
-        # Apply temporal decay to favor more recent preferences
-        if hasattr(track, "added"):
-            temporal_weight = self._calculate_temporal_weight(track.added)
-            similarity_score *= temporal_weight
-
-        # Normalize to 0-1 range
-        return max(0.0, min(1.0, similarity_score))
 
     def _extract_track_features(self, track):
         """Extract and normalize feature vector from track."""
@@ -2214,72 +2029,6 @@ class PlexSync(BeetsPlugin):
             features['year'] = (year - min_year) / (max_year - min_year)
 
         return features
-
-    def _calculate_feature_weights(self, preferences, rated_tracks):
-        """Calculate feature importance weights using a regression model."""
-        # Train regression model to learn feature weights
-        weights = self._train_regression_model(rated_tracks)
-        if not weights:
-            # Fallback to heuristic weights if regression model training fails
-            return self._calculate_heuristic_weights(preferences)
-
-        return weights
-
-    def _calculate_heuristic_weights(self, preferences):
-        """Calculate heuristic feature weights using user preference history."""
-        weights = {}
-
-        # Base category weights
-        base_weights = {
-            'audio': 0.25,
-            'mood': 0.30,
-            'genre': 0.25,
-            'metadata': 0.20,
-            'age': 0.10  # Adding age as a new category with a base weight
-        }
-
-        # Calculate sub-feature weights within each category
-        if preferences.get('moods'):
-            mood_weights = {}
-            total_mood = sum(abs(v) for v in preferences['moods'].values())
-            if total_mood > 0:
-                for mood, value in preferences['moods'].items():
-                    mood_weights[mood] = (abs(value) / total_mood) * base_weights['mood']
-                weights.update(mood_weights)
-
-        if preferences.get('audio_features'):
-            audio_weights = {}
-            for feature, data in preferences['audio_features'].items():
-                if isinstance(data, dict) and 'mean' in data:
-                    # Weight by inverse of standard deviation - more consistent preferences get higher weight
-                    std = data.get('std', 1.0)
-                    audio_weights[feature] = (1.0 / (1.0 + std)) * base_weights['audio']
-            weights.update(audio_weights)
-
-        # Genre weights are already normalized in preferences
-        if preferences.get('genres'):
-            for genre, weight in preferences['genres'].items():
-                weights[f'genre_{genre}'] = weight * base_weights['genre']
-
-        # Metadata features
-        if preferences.get('artist_gender'):
-            total_gender = sum(preferences['artist_gender'].values())
-            if total_gender > 0:
-                for gender, count in preferences['artist_gender'].items():
-                    weights[f'is_{gender}'] = (count / total_gender) * base_weights['metadata']
-
-        # Age feature weight
-        if 'age' in preferences:
-            weights['age'] = base_weights['age']
-
-        # Add logging for detailed weights
-        self._log.debug("Detailed feature weights:")
-        for category in ['mood', 'audio', 'genre', 'metadata', 'age']:
-            category_weights = {k: v for k, v in weights.items() if k.startswith(category)}
-            if category_weights:
-                self._log.debug("{} features: {}", category, category_weights)
-
-        return weights
 
     def _weighted_cosine_similarity(self, vec1, vec2, weights):
         """Calculate weighted cosine similarity between two feature vectors."""
