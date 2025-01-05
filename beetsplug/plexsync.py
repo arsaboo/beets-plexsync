@@ -2440,3 +2440,50 @@ class PlexSync(BeetsPlugin):
         squared_diff_sum = sum((x - mean) ** 2 for x in values)
         variance = squared_diff_sum / len(values)
         return variance ** 0.5
+
+    def _calculate_feature_weights(self, rated_tracks):
+        """Calculate feature importance weights using a regression model."""
+        # Train regression model to learn feature weights
+        model, scaler = self._train_regression_model(rated_tracks)
+        if not model:
+            self._log.warning("Failed to train regression model for feature weights")
+            return {}
+
+        # Extract weights from the trained model
+        weights = {f"feature_{i}": coef for i, coef in enumerate(model.coef_)}
+        return weights
+
+    def _train_regression_model(self, rated_tracks):
+        """Train a regression model to learn feature weights from rated tracks."""
+        import numpy as np
+        features = []
+        labels = []
+        for track in rated_tracks:
+            fv = self._extract_track_features(track)
+            # Skip if no features or if features are not a list
+            if not isinstance(fv, list):
+                continue
+            # Flatten nested lists and ensure numeric
+            flat = []
+            for v in fv:
+                if isinstance(v, (list, tuple)):
+                    flat.extend(float(x) if x is not None else 0.0 for x in v)
+                else:
+                    flat.append(float(v) if v is not None else 0.0)
+            # Track must remain consistent size
+            features.append(flat)
+            labels.append(float(getattr(track, "plex_userrating", 0)))
+        # Filter out any inconsistent sizes
+        if not features:
+            return None, None
+        dim = len(features[0])
+        features = [f for f in features if len(f) == dim]
+        if not features:
+            return None, None
+        features = np.array(features, dtype=float)
+        labels = np.array(labels[:len(features)], dtype=float)
+        scaler = StandardScaler()
+        features_scaled = scaler.fit_transform(features)
+        model = Ridge()
+        model.fit(features_scaled, labels)
+        return model, scaler
