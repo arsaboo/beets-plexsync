@@ -37,6 +37,8 @@ from plexapi.server import PlexServer
 from pydantic import BaseModel, Field
 from requests.exceptions import ConnectionError, ContentDecodingError
 from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
+from sklearn.linear_model import Ridge
+from sklearn.preprocessing import StandardScaler
 
 
 class Song(BaseModel):
@@ -1846,7 +1848,7 @@ class PlexSync(BeetsPlugin):
 
         # Log user preference summary
         if len(scored_tracks) > 0:
-            weights = self._calculate_feature_weights(preferences)
+            weights = self._calculate_feature_weights(preferences, rated_tracks)
             top_genres = sorted(preferences["genres"].items(),
                               key=lambda x: x[1], reverse=True)[:5]
 
@@ -1984,6 +1986,102 @@ class PlexSync(BeetsPlugin):
         variance = squared_diff_sum / len(values)
         return variance ** 0.5
 
+    def _train_regression_model(self, rated_tracks):
+        """Train a regression model to learn feature weights from rated tracks."""
+        features = []
+        ratings = []
+
+        for track in rated_tracks:
+            track_features = self._extract_track_features(track)
+            if track_features:
+                features.append(list(track_features.values()))
+                ratings.append(track.plex_userrating)
+
+        if not features or not ratings:
+            self._log.warning("No features or ratings available for training")
+            return None
+
+        # Normalize features
+        scaler = StandardScaler()
+        features = scaler.fit_transform(features)
+
+        # Train regression model
+        model = Ridge(alpha=1.0)
+        model.fit(features, ratings)
+
+        # Extract learned weights
+        feature_names = list(track_features.keys())
+        weights = dict(zip(feature_names, model.coef_))
+
+        self._log.debug("Learned feature weights from regression model: {}", weights)
+        return weights
+
+    def _calculate_feature_weights(self, preferences, rated_tracks):
+        """Calculate feature importance weights using a regression model."""
+        # Train regression model to learn feature weights
+        weights = self._train_regression_model(rated_tracks)
+        if not weights:
+            # Fallback to heuristic weights if regression model training fails
+            return self._calculate_heuristic_weights(preferences)
+
+        return weights
+
+    def _calculate_heuristic_weights(self, preferences):
+        """Calculate heuristic feature weights using user preference history."""
+        weights = {}
+
+        # Base category weights
+        base_weights = {
+            'audio': 0.25,
+            'mood': 0.30,
+            'genre': 0.25,
+            'metadata': 0.20,
+            'age': 0.10  # Adding age as a new category with a base weight
+        }
+
+        # Calculate sub-feature weights within each category
+        if preferences.get('moods'):
+            mood_weights = {}
+            total_mood = sum(abs(v) for v in preferences['moods'].values())
+            if total_mood > 0:
+                for mood, value in preferences['moods'].items():
+                    mood_weights[mood] = (abs(value) / total_mood) * base_weights['mood']
+                weights.update(mood_weights)
+
+        if preferences.get('audio_features'):
+            audio_weights = {}
+            for feature, data in preferences['audio_features'].items():
+                if isinstance(data, dict) and 'mean' in data:
+                    # Weight by inverse of standard deviation - more consistent preferences get higher weight
+                    std = data.get('std', 1.0)
+                    audio_weights[feature] = (1.0 / (1.0 + std)) * base_weights['audio']
+            weights.update(audio_weights)
+
+        # Genre weights are already normalized in preferences
+        if preferences.get('genres'):
+            for genre, weight in preferences['genres'].items():
+                weights[f'genre_{genre}'] = weight * base_weights['genre']
+
+        # Metadata features
+        if preferences.get('artist_gender'):
+            total_gender = sum(preferences['artist_gender'].values())
+            if total_gender > 0:
+                for gender, count in preferences['artist_gender'].items():
+                    weights[f'is_{gender}'] = (count / total_gender) * base_weights['metadata']
+
+        # Age feature weight
+        if 'age' in preferences:
+            weights['age'] = base_weights['age']
+
+        # Add logging for detailed weights
+        self._log.debug("Detailed feature weights:")
+        for category in ['mood', 'audio', 'genre', 'metadata', 'age']:
+            category_weights = {k: v for k, v in weights.items() if k.startswith(category)}
+            if category_weights:
+                self._log.debug("{} features: {}", category, category_weights)
+
+        return weights
+
     def _calculate_track_score(self, track, preferences):
         """Calculate similarity score using collaborative filtering and weighted learning."""
         # Initialize feature vectors
@@ -1992,7 +2090,7 @@ class PlexSync(BeetsPlugin):
             return 0.0
 
         # Get learned weights from user preferences
-        weights = self._calculate_feature_weights(preferences)
+        weights = self._calculate_feature_weights(preferences, rated_tracks)
 
         # Calculate weighted cosine similarity
         similarity_score = self._weighted_cosine_similarity(
@@ -2092,8 +2190,18 @@ class PlexSync(BeetsPlugin):
 
         return features
 
-    def _calculate_feature_weights(self, preferences):
-        """Calculate feature importance weights using user preference history."""
+    def _calculate_feature_weights(self, preferences, rated_tracks):
+        """Calculate feature importance weights using a regression model."""
+        # Train regression model to learn feature weights
+        weights = self._train_regression_model(rated_tracks)
+        if not weights:
+            # Fallback to heuristic weights if regression model training fails
+            return self._calculate_heuristic_weights(preferences)
+
+        return weights
+
+    def _calculate_heuristic_weights(self, preferences):
+        """Calculate heuristic feature weights using user preference history."""
         weights = {}
 
         # Base category weights
