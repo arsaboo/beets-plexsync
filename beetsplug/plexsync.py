@@ -2035,10 +2035,13 @@ class PlexSync(BeetsPlugin):
 
         # Ensure the returned list is numeric only, e.g.,:
         # return [popularity, view_count, user_rating, ...]
-        return [track.popularity if hasattr(track, 'popularity') else 0.0,
-                track.viewCount if hasattr(track, 'viewCount') else 0.0,
-                # ...additional numeric features...
-               ]
+        return [
+            track.spotify_track_popularity if hasattr(track, 'spotify_track_popularity') else 0.0,
+            track.plex_viewcount if hasattr(track, 'plex_viewcount') else 0.0,
+            track.plex_userrating if hasattr(track, 'plex_userrating') else 0.0,
+            track.plex_skipcount if hasattr(track, 'plex_skipcount') else 0.0,
+            # ...additional numeric features...
+        ]
 
     def _weighted_cosine_similarity(self, vec1, vec2, weights):
         """Calculate weighted cosine similarity between two feature vectors."""
@@ -2356,10 +2359,13 @@ class PlexSync(BeetsPlugin):
 
         # Ensure the returned list is numeric only, e.g.,:
         # return [popularity, view_count, user_rating, ...]
-        return [track.popularity if hasattr(track, 'popularity') else 0.0,
-                track.viewCount if hasattr(track, 'viewCount') else 0.0,
-                # ...additional numeric features...
-               ]
+        return [
+            track.spotify_track_popularity if hasattr(track, 'spotify_track_popularity') else 0.0,
+            track.plex_viewcount if hasattr(track, 'plex_viewcount') else 0.0,
+            track.plex_userrating if hasattr(track, 'plex_userrating') else 0.0,
+            track.plex_skipcount if hasattr(track, 'plex_skipcount') else 0.0,
+            # ...additional numeric features...
+        ]
 
     def _weighted_cosine_similarity(self, vec1, vec2, weights):
         """Calculate weighted cosine similarity between two feature vectors."""
