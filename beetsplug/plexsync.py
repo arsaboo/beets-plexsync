@@ -1930,6 +1930,16 @@ class PlexSync(BeetsPlugin):
                     "std": self._calculate_std(preferences["audio_features"][feature]),
                 }
 
+    def _calculate_std(self, values):
+        """Calculate standard deviation of a list of numbers."""
+        if not values:
+            return 0.0
+
+        mean = sum(values) / len(values)
+        squared_diff_sum = sum((x - mean) ** 2 for x in values)
+        variance = squared_diff_sum / len(values)
+        return variance ** 0.5
+
     def _calculate_track_score(self, track, preferences):
         """Calculate similarity score using collaborative filtering and weighted learning."""
         # Initialize feature vectors
