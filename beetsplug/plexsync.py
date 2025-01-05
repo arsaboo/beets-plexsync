@@ -2210,3 +2210,73 @@ class PlexSync(BeetsPlugin):
                 idx = self.genre_vocabulary.index(genre)
                 genre_vec[idx] = 1
         return genre_vec
+
+    def _weighted_cosine_similarity(self, vec1, vec2, weights):
+        """Calculate weighted cosine similarity between two feature vectors."""
+        if not vec1 or not vec2:
+            return 0.0
+
+        numerator = 0.0
+        norm1 = 0.0
+        norm2 = 0.0
+
+        # Calculate weighted dot product and norms
+        for feature in vec1:
+            if feature in vec2 and feature in weights:
+                weight = weights.get(feature, 1.0)
+                numerator += weight * vec1[feature] * vec2[feature]
+                norm1 += weight * vec1[feature] * vec1[feature]
+                norm2 += weight * vec2[feature] * vec2[feature]
+
+        # Avoid division by zero
+        if norm1 == 0.0 or norm2 == 0.0:
+            return 0.0
+
+        return numerator / ((norm1 * norm2) ** 0.5)
+
+    def _calculate_temporal_weight(self, timestamp):
+        """Calculate temporal weight to favor more recent preferences."""
+        if not timestamp:
+            return 1.0
+
+        # Convert timestamp to datetime if needed
+        if isinstance(timestamp, (int, float)):
+            timestamp = datetime.fromtimestamp(timestamp)
+
+        # Calculate days since the track was added
+        days_old = (datetime.now() - timestamp).days
+
+        # Use a half-life decay function
+        half_life = 365  # Adjust this value to control decay rate
+        temporal_weight = 2 ** (-days_old / half_life)
+
+        return temporal_weight
+
+    def _calculate_consistency(self, history, feature_type):
+        """Calculate consistency score for a particular feature type."""
+        if not history:
+            return 1.0
+
+        # Group ratings by feature values
+        feature_ratings = {}
+        for entry in history:
+            feature_val = entry.get(feature_type)
+            rating = entry.get('rating')
+            if feature_val and rating:
+                if feature_val not in feature_ratings:
+                    feature_ratings[feature_val] = []
+                feature_ratings[feature_val].append(rating)
+
+        # Calculate rating variance for each feature value
+        variances = []
+        for ratings in feature_ratings.values():
+            if len(ratings) > 1:
+                mean = sum(ratings) / len(ratings)
+                variance = sum((r - mean) ** 2 for r in ratings) / len(ratings)
+                variances.append(variance)
+
+        # Return inverse of average variance (higher consistency = lower variance)
+        if variances:
+            avg_variance = sum(variances) / len(variances)
+            return 1.0 / (1.0 + avg_variance)
+        return 1.0
