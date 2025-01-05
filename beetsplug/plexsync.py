@@ -1878,10 +1878,10 @@ class PlexSync(BeetsPlugin):
 
     def _format_feature_weights(self, weights):
         """Format feature weights as a table for logging."""
-        table = "Feature\t\t\tWeight\n"
-        table += "-------\t\t\t------\n"
+        table = "{:<25} {:<10}\n".format("Feature", "Weight")
+        table += "{:<25} {:<10}\n".format("-------", "------")
         for feature, weight in weights.items():
-            table += f"{feature}\t\t\t{weight:.4f}\n"
+            table += "{:<25} {:<10.4f}\n".format(feature, weight)
         return table
 
     def _score_tracks(self, candidate_features, preferences, weights, candidates):
