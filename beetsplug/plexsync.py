@@ -1279,7 +1279,7 @@ class PlexSync(BeetsPlugin):
             }
 
             base_url = config["llm"]["base_url"].get()
-            if base_url:
+            if (base_url):
                 client_args["base_url"] = base_url
 
             self.llm_client = OpenAI(**client_args)
@@ -2013,6 +2013,14 @@ class PlexSync(BeetsPlugin):
         """Extract and normalize feature vector from track."""
         features = {}
 
+        # Audio features (normalize to 0-1 range based on a reasonable range of ages)
+        if hasattr(track, 'year'):
+            year = int(getattr(track, 'year', 0))
+            current_year = datetime.now().year
+            age = current_year - year
+            max_age = current_year - 1900  # Assuming music from 1900 onwards
+            features['age'] = age / max_age
+
         # Audio features (normalize to 0-1 range)
         audio_features = {
             'bpm': (0, 200),  # Most songs under 200 BPM
@@ -2076,47 +2084,67 @@ class PlexSync(BeetsPlugin):
             # Convert categorical to binary (1.0 for 'voice', 0.0 for 'instrumental')
             features['voice_instrumental'] = 1.0 if track.voice_instrumental == 'voice' else 0.0
 
+        # Year feature (normalize to 0-1 range based on a reasonable range of years)
+        if hasattr(track, 'year'):
+            year = int(getattr(track, 'year', 0))
+            min_year, max_year = 1900, datetime.now().year  # Assuming music from 1900 onwards
+            features['year'] = (year - min_year) / (max_year - min_year)
+
         return features
 
     def _calculate_feature_weights(self, preferences):
         """Calculate feature importance weights using user preference history."""
         weights = {}
 
-        # Updated base weights for our feature categories
+        # Base category weights
         base_weights = {
-            'audio': 0.25,      # Audio features (bpm, loudness, etc.)
-            'mood': 0.30,       # Mood and MIREX clusters
-            'genre': 0.25,      # Genre classifications
-            'metadata': 0.20    # Gender, voice/instrumental, etc.
+            'audio': 0.25,
+            'mood': 0.30,
+            'genre': 0.25,
+            'metadata': 0.20,
+            'age': 0.10  # Adding age as a new category with a base weight
         }
 
-        # Adjust weights based on user preference consistency
-        if preferences.get('rating_history'):
-            # Calculate preference consistency scores
-            audio_consistency = self._calculate_consistency(
-                preferences['rating_history'], 'audio'
-            )
-            mood_consistency = self._calculate_consistency(
-                preferences['rating_history'], 'mood'
-            )
-            genre_consistency = self._calculate_consistency(
-                preferences['rating_history'], 'genre'
-            )
-            metadata_consistency = self._calculate_consistency(
-                preferences['rating_history'], 'metadata'
-            )
+        # Calculate sub-feature weights within each category
+        if preferences.get('moods'):
+            mood_weights = {}
+            total_mood = sum(abs(v) for v in preferences['moods'].values())
+            if total_mood > 0:
+                for mood, value in preferences['moods'].items():
+                    mood_weights[mood] = (abs(value) / total_mood) * base_weights['mood']
+                weights.update(mood_weights)
 
-            # Normalize consistency scores
-            total_consistency = (audio_consistency + mood_consistency +
-                               genre_consistency + metadata_consistency)
+        if preferences.get('audio_features'):
+            audio_weights = {}
+            for feature, data in preferences['audio_features'].items():
+                if isinstance(data, dict) and 'mean' in data:
+                    # Weight by inverse of standard deviation - more consistent preferences get higher weight
+                    std = data.get('std', 1.0)
+                    audio_weights[feature] = (1.0 / (1.0 + std)) * base_weights['audio']
+            weights.update(audio_weights)
 
-            if total_consistency > 0:
-                weights['audio'] = base_weights['audio'] * (audio_consistency / total_consistency)
-                weights['mood'] = base_weights['mood'] * (mood_consistency / total_consistency)
-                weights['genre'] = base_weights['genre'] * (genre_consistency / total_consistency)
-                weights['metadata'] = base_weights['metadata'] * (metadata_consistency / total_consistency)
-        else:
-            weights = base_weights
+        # Genre weights are already normalized in preferences
+        if preferences.get('genres'):
+            for genre, weight in preferences['genres'].items():
+                weights[f'genre_{genre}'] = weight * base_weights['genre']
+
+        # Metadata features
+        if preferences.get('artist_gender'):
+            total_gender = sum(preferences['artist_gender'].values())
+            if total_gender > 0:
+                for gender, count in preferences['artist_gender'].items():
+                    weights[f'is_{gender}'] = (count / total_gender) * base_weights['metadata']
+
+        # Age feature weight
+        if 'age' in preferences:
+            weights['age'] = base_weights['age']
+
+        # Add logging for detailed weights
+        self._log.debug("Detailed feature weights:")
+        for category in ['mood', 'audio', 'genre', 'metadata', 'age']:
+            category_weights = {k: v for k, v in weights.items() if k.startswith(category)}
+            if category_weights:
+                self._log.debug("{} features: {}", category, category_weights)
 
         return weights
 
