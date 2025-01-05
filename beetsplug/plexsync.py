@@ -2038,6 +2038,8 @@ class PlexSync(BeetsPlugin):
             min_year, max_year = 1900, datetime.now().year  # Assuming music from 1900 onwards
             features['year'] = (year - min_year) / (max_year - min_year)
 
+        # Ensure the returned list is numeric only, e.g.,:
+        # return [popularity, view_count, user_rating, ...]
         return features
 
     def _weighted_cosine_similarity(self, vec1, vec2, weights):
@@ -2237,3 +2239,122 @@ class PlexSync(BeetsPlugin):
         squared_diff_sum = sum((x - mean) ** 2 for x in values)
         variance = squared_diff_sum / len(values)
         return variance ** 0.5
+
+    def _train_regression_model(self, rated_tracks):
+        """Train a regression model to learn feature weights from rated tracks."""
+        features = []
+        labels = []
+
+        # Collect all possible feature names
+        all_feature_names = set()
+        for track in rated_tracks:
+            track_features = self._extract_track_features(track)
+            if track_features:
+                all_feature_names.update(track_features.keys())
+
+        all_feature_names = sorted(all_feature_names)  # Sort to ensure consistent order
+
+        for track in rated_tracks:
+            track_features = self._extract_track_features(track)
+            if track_features:
+                # Create a feature vector with default values (e.g., 0) for missing features
+                feature_vector = [track_features.get(name, 0) for name in all_feature_names]
+                # Convert feature list to a flat numeric array
+                feature_vector = np.asarray(feature_vector, dtype=float).flatten()
+                features.append(feature_vector)
+                labels.append(float(getattr(track, "plex_userrating", 0)))
+
+        features = np.array(features, dtype=float)
+        labels = np.array(labels, dtype=float)
+        if len(features) == 0:
+            return None
+        scaler = StandardScaler()
+        features = scaler.fit_transform(features)
+        model = Ridge()
+        model.fit(features, labels)
+        return model
+
+    def _extract_track_features(self, track):
+        """Extract and normalize feature vector from track."""
+        features = {}
+
+        # Audio features (normalize to 0-1 range based on a reasonable range of ages)
+        if hasattr(track, 'year'):
+            year = int(getattr(track, 'year', 0))
+            current_year = datetime.now().year
+            age = current_year - year
+            max_age = current_year - 1900  # Assuming music from 1900 onwards
+            features['age'] = age / max_age
+
+        # Audio features (normalize to 0-1 range)
+        audio_features = {
+            'bpm': (0, 200),  # Most songs under 200 BPM
+            'beats_count': (0, 1000),  # Normalize beat count
+            'average_loudness': (-60, 0),  # Typical loudness range in dB
+            'danceability': (0, 1)  # Already normalized
+        }
+
+        for feature, (min_val, max_val) in audio_features.items():
+            if hasattr(track, feature):
+                value = float(getattr(track, feature))
+                if feature == 'average_loudness':
+                    # Normalize loudness from dB range to 0-1
+                    features[feature] = (value - min_val) / (max_val - min_val)
+                else:
+                    features[feature] = max(0.0, min(1.0, value / max_val))
+
+        # Boolean features
+        binary_features = [
+            'danceable', 'is_voice', 'is_instrumental'
+        ]
+
+        for feature in binary_features:
+            if hasattr(track, feature):
+                features[feature] = 1.0 if getattr(track, feature) else 0.0
+
+        # Mood features (assumed to be already normalized 0-1)
+        mood_features = [
+            'mood_acoustic', 'mood_aggressive', 'mood_electronic',
+            'mood_happy', 'mood_sad', 'mood_party', 'mood_relaxed'
+        ]
+
+        for feature in mood_features:
+            if hasattr(track, feature):
+                features[feature] = float(getattr(track, feature))
+
+        # MIREX mood clusters (one-hot encoding)
+        mirex_clusters = [
+            'mood_mirex_cluster_1', 'mood_mirex_cluster_2',
+            'mood_mirex_cluster_3', 'mood_mirex_cluster_4',
+            'mood_mirex_cluster_5'
+        ]
+
+        for cluster in mirex_clusters:
+            if hasattr(track, cluster):
+                features[cluster] = float(getattr(track, cluster))
+
+        # Gender features
+        if hasattr(track, 'is_male'):
+            features['is_male'] = float(track.is_male)
+        if hasattr(track, 'is_female'):
+            features['is_female'] = float(track.is_female)
+
+        # Genre features (using rosamerica classification)
+        if hasattr(track, 'genre_rosamerica'):
+            genres = str(track.genre_rosamerica).split(';')
+            features['genre_vector'] = self._encode_genres(genres)
+
+        # Voice/Instrumental classification (convert to binary)
+        if hasattr(track, 'voice_instrumental'):
+            # Convert categorical to binary (1.0 for 'voice', 0.0 for 'instrumental')
+            features['voice_instrumental'] = 1.0 if track.voice_instrumental == 'voice' else 0.0
+
+        # Year feature (normalize to 0-1 range based on a reasonable range of years)
+        if hasattr(track, 'year'):
+            year = int(getattr(track, 'year', 0))
+            min_year, max_year = 1900, datetime.now().year  # Assuming music from 1900 onwards
+            features['year'] = (year - min_year) / (max_year - min_year)
+
+        # Ensure the returned list is numeric only, e.g.,:
+        # return [popularity, view_count, user_rating, ...]
+        return features
