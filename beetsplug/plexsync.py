@@ -1849,7 +1849,7 @@ class PlexSync(BeetsPlugin):
                               key=lambda x: x[1], reverse=True)[:5]
 
             self._log.info("User Listening Profile Summary:")
-            self._log.info("Feature weights: {}", weights)
+            self._log.info("Feature weights:\n{}", self._format_feature_weights(weights))
             self._log.info("Top genres: {}", ", ".join(f"{g}({s:.2f})" for g, s in top_genres))
 
             if preferences.get("audio_features"):
@@ -1875,6 +1875,14 @@ class PlexSync(BeetsPlugin):
             playlist_name,
             len(selected_tracks)
         )
+
+    def _format_feature_weights(self, weights):
+        """Format feature weights as a table for logging."""
+        table = "Feature\t\tWeight\n"
+        table += "-------\t\t------\n"
+        for feature, weight in weights.items():
+            table += f"{feature}\t\t{weight:.4f}\n"
+        return table
 
     def _score_tracks(self, candidate_features, preferences, weights, candidates):
         """Score all candidate tracks using vectorized operations."""
