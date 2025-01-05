@@ -19,6 +19,7 @@ from typing import List
 
 import confuse
 import dateutil.parser
+import numpy as np  # Add numpy import
 import openai
 import requests
 import spotipy
@@ -78,6 +79,10 @@ class PlexSync(BeetsPlugin):
 
         self.config_dir = config.config_dir()
         self.llm_client = None
+
+        # Initialize empty genre vocabulary and embeddings
+        self.genre_vocabulary = []
+        self.genre_embeddings = None
 
         # Call the setup methods
         try:
@@ -145,15 +150,6 @@ class PlexSync(BeetsPlugin):
 
     def authenticate_spotify(self):
         ID = config["spotify"]["client_id"].get()
-        SECRET = config["spotify"]["client_secret"].get()
-        redirect_uri = "http://localhost/"
-        scope = (
-            "user-read-private user-read-email playlist-modify-public "
-            "playlist-modify-private playlist-read-private"
-        )
-
-        # Create a SpotifyOAuth object with your credentials and scope
-        self.auth_manager = SpotifyOAuth(
             client_id=ID,
             client_secret=SECRET,
             redirect_uri=redirect_uri,
