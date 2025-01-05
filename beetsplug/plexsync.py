@@ -1844,6 +1844,28 @@ class PlexSync(BeetsPlugin):
 
         self._log.info("Selected {} tracks for playlist", len(selected_tracks))
 
+        # Log user preference summary
+        if len(scored_tracks) > 0:
+            weights = self._calculate_feature_weights(preferences)
+            top_genres = sorted(preferences["genres"].items(),
+                              key=lambda x: x[1], reverse=True)[:5]
+
+            self._log.info("User Listening Profile Summary:")
+            self._log.info("Feature weights: Audio: {:.2f}, Mood: {:.2f}, Genre: {:.2f}, Metadata: {:.2f}",
+                          weights.get('audio', 0), weights.get('mood', 0),
+                          weights.get('genre', 0), weights.get('metadata', 0))
+            self._log.info("Top genres: {}", ", ".join(f"{g}({s:.2f})" for g, s in top_genres))
+
+            if preferences.get("audio_features"):
+                af = preferences["audio_features"]
+                self._log.info("Audio preferences: BPM mean: {:.1f}, Danceability: {:.2f}, Loudness: {:.1f}",
+                             af.get("bpm", {}).get("mean", 0),
+                             af.get("danceability", {}).get("mean", 0),
+                             af.get("loudness", {}).get("mean", 0))
+
+            avg_score = sum(score for _, score in scored_tracks) / len(scored_tracks)
+            self._log.info("Average track match score: {:.2f}", avg_score)
+
         # 7. Update playlist
         try:
             self._plex_clear_playlist(playlist_name)
