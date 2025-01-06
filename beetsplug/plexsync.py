@@ -2294,8 +2294,8 @@ class PlexSync(BeetsPlugin):
                 norm1 += weight * vec1[i] * vec1[i]
                 norm2 += weight * vec2[i] * vec2[i]
 
-        # Avoid division by zero
-        if norm1 == 0.0 or norm2 == 0.0:
+        # Avoid division by zero and ensure non-negative norms
+        if norm1 <= 0.0 or norm2 <= 0.0:
             return 0.0
 
         similarity = numerator / ((norm1 * norm2) ** 0.5)
