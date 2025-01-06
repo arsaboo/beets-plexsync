@@ -2287,8 +2287,9 @@ class PlexSync(BeetsPlugin):
 
         # Calculate weighted dot product and norms
         for i in range(len(vec1)):
-            if i < len(vec2) and i < len(weights):
-                weight = weights[i]
+            feature_name = self._get_feature_names()[i]
+            if feature_name in weights:
+                weight = weights[feature_name]
                 numerator += weight * vec1[i] * vec2[i]
                 norm1 += weight * vec1[i] * vec1[i]
                 norm2 += weight * vec2[i] * vec2[i]
