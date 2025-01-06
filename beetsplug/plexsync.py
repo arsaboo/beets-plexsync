@@ -2300,13 +2300,6 @@ class PlexSync(BeetsPlugin):
 
         similarity = numerator / ((norm1 * norm2) ** 0.5)
         similarity = max(-1.0, min(1.0, similarity))
-
-        # Debug log to verify weighted cosine similarity calculation
-        self._log.debug("Numerator: {}", numerator)
-        self._log.debug("Norm1: {}", norm1)
-        self._log.debug("Norm2: {}", norm2)
-        self._log.debug("Weighted cosine similarity: {}", similarity)
-
         return similarity
 
     def _calculate_temporal_weight(self, timestamp):
