@@ -1287,7 +1287,7 @@ class PlexSync(BeetsPlugin):
             }
 
             base_url = config["llm"]["base_url"].get()
-            if base_url:
+            if (base_url):
                 client_args["base_url"] = base_url
 
             self.llm_client = OpenAI(**client_args)
@@ -2299,9 +2299,7 @@ class PlexSync(BeetsPlugin):
             return 0.0
 
         similarity = numerator / ((norm1 * norm2) ** 0.5)
-
-        # Ensure similarity is within the valid range [-1, 1]
-        similarity = max(-1.0, min(1.0, similarity))
+        similarity = min(similarity, 1.0)
 
         # Debug log to verify weighted cosine similarity calculation
         self._log.debug("Numerator: {}", numerator)
