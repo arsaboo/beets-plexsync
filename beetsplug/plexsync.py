@@ -2075,6 +2075,10 @@ class PlexSync(BeetsPlugin):
         # Extract weights from the trained model
         feature_names = self._get_feature_names()
         weights = {feature_names[i]: coef for i, coef in enumerate(model.coef_)}
+
+        # Debug log to verify user genres are included
+        self._log.debug("Feature weights calculated: {}", weights)
+
         return weights
 
     def _get_feature_names(self):
