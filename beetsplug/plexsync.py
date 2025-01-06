@@ -2286,12 +2286,12 @@ class PlexSync(BeetsPlugin):
         norm2 = 0.0
 
         # Calculate weighted dot product and norms
-        for feature in vec1:
-            if feature in vec2 and feature in weights:
-                weight = weights.get(feature, 1.0)
-                numerator += weight * vec1[feature] * vec2[feature]
-                norm1 += weight * vec1[feature] * vec1[feature]
-                norm2 += weight * vec2[feature] * vec2[feature]
+        for i in range(len(vec1)):
+            if i < len(vec2) and i < len(weights):
+                weight = weights[i]
+                numerator += weight * vec1[i] * vec2[i]
+                norm1 += weight * vec1[i] * vec1[i]
+                norm2 += weight * vec2[i] * vec2[i]
 
         # Avoid division by zero
         if norm1 == 0.0 or norm2 == 0.0:
