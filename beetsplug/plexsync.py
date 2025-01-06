@@ -2133,6 +2133,10 @@ class PlexSync(BeetsPlugin):
             # Track must remain consistent size
             features.append(flat)
             labels.append(float(getattr(track, "plex_userrating", 0)))
+
+        # Debug log to verify feature vectors
+        self._log.debug("Feature vectors for training: {}", features)
+
         # Filter out any inconsistent sizes
         if not features:
             return None, None
