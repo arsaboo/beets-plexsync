@@ -1938,7 +1938,15 @@ class PlexSync(BeetsPlugin):
             similarity_score *= temporal_weight
 
         # Normalize to 0-1 range
-        return max(0.0, min(1.0, similarity_score))
+        normalized_score = max(0.0, min(1.0, similarity_score))
+
+        # Debug log to verify track scores
+        self._log.debug("Track features: {}", track_features)
+        self._log.debug("Preferences feature vector: {}", preferences["feature_vector"])
+        self._log.debug("Calculated similarity score: {}", similarity_score)
+        self._log.debug("Normalized track score: {}", normalized_score)
+
+        return normalized_score
 
     def _extract_track_features(self, track):
         """Extract and normalize feature vector from track."""
@@ -2076,9 +2084,6 @@ class PlexSync(BeetsPlugin):
         feature_names = self._get_feature_names()
         weights = {feature_names[i]: coef for i, coef in enumerate(model.coef_)}
 
-        # Debug log to verify user genres are included
-        self._log.debug("Feature weights calculated: {}", weights)
-
         return weights
 
     def _get_feature_names(self):
@@ -2133,9 +2138,6 @@ class PlexSync(BeetsPlugin):
             # Track must remain consistent size
             features.append(flat)
             labels.append(float(getattr(track, "plex_userrating", 0)))
-
-        # Debug log to verify feature vectors
-        self._log.debug("Feature vectors for training: {}", features)
 
         # Filter out any inconsistent sizes
         if not features:
