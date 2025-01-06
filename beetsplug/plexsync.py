@@ -2299,7 +2299,7 @@ class PlexSync(BeetsPlugin):
             return 0.0
 
         similarity = numerator / ((norm1 * norm2) ** 0.5)
-        similarity = min(similarity, 1.0)
+        similarity = max(-1.0, min(1.0, similarity))
 
         # Debug log to verify weighted cosine similarity calculation
         self._log.debug("Numerator: {}", numerator)
