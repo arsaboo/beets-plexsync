@@ -1940,12 +1940,6 @@ class PlexSync(BeetsPlugin):
         # Normalize to 0-1 range
         normalized_score = max(0.0, min(1.0, similarity_score))
 
-        # Debug log to verify track scores
-        self._log.debug("Track features: {}", track_features)
-        self._log.debug("Preferences feature vector: {}", preferences["feature_vector"])
-        self._log.debug("Calculated similarity score: {}", similarity_score)
-        self._log.debug("Normalized track score: {}", normalized_score)
-
         return normalized_score
 
     def _extract_track_features(self, track):
