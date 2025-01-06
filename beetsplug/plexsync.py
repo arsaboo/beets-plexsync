@@ -2303,7 +2303,15 @@ class PlexSync(BeetsPlugin):
         if norm1 == 0.0 or norm2 == 0.0:
             return 0.0
 
-        return numerator / ((norm1 * norm2) ** 0.5)
+        similarity = numerator / ((norm1 * norm2) ** 0.5)
+
+        # Debug log to verify weighted cosine similarity calculation
+        self._log.debug("Numerator: {}", numerator)
+        self._log.debug("Norm1: {}", norm1)
+        self._log.debug("Norm2: {}", norm2)
+        self._log.debug("Weighted cosine similarity: {}", similarity)
+
+        return similarity
 
     def _calculate_temporal_weight(self, timestamp):
         """Calculate temporal weight to favor more recent preferences."""
