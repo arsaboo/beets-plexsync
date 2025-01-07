@@ -1663,7 +1663,7 @@ class PlexSync(BeetsPlugin):
             score = track_scores[selected_indices[i]][1]
             self._log.debug(
                 "Selected: {} - {} (Score: {:.2f}, Rating: {}, Plays: {})",
-                track.artist,
+                track.album,
                 track.title,
                 score,
                 getattr(track, 'plex_userrating', 0),
