@@ -1714,12 +1714,9 @@ class PlexSync(BeetsPlugin):
 
         self._log.info("Found {} tracks matching criteria", len(matched_tracks))
 
-        # Replace the sorting and selection block with new weighted selection
-        import random
-
-        # Calculate how many tracks of each type we want
-        rated_tracks_count = int(max_tracks * discovery_ratio)
-        discovery_tracks_count = max_tracks - rated_tracks_count
+        # Calculate how many tracks of each type we want based on ratio
+        rated_tracks_count = min(int(max_tracks * (discovery_ratio / 100)), max_tracks)
+        discovery_tracks_count = min(max_tracks - rated_tracks_count, max_tracks)
 
         # Split tracks into rated and unrated
         rated_tracks = []
@@ -1731,19 +1728,26 @@ class PlexSync(BeetsPlugin):
             elif rating == 0:  # Only truly unrated tracks
                 unrated_tracks.append(track)
 
-        # Select tracks using weighted probability
+        # Select tracks using weighted probability, ensuring we don't exceed max_tracks
         selected_rated = self.select_tracks_weighted(rated_tracks, rated_tracks_count)
         selected_unrated = self.select_tracks_weighted(unrated_tracks, discovery_tracks_count)
 
         # If we don't have enough unrated tracks, fill with rated ones
         if len(selected_unrated) < discovery_tracks_count:
-            additional_count = discovery_tracks_count - len(selected_unrated)
+            additional_count = min(
+                discovery_tracks_count - len(selected_unrated),
+                max_tracks - len(selected_rated) - len(selected_unrated)
+            )
             remaining_rated = [t for t in rated_tracks if t not in selected_rated]
             additional_rated = self.select_tracks_weighted(remaining_rated, additional_count)
             selected_rated.extend(additional_rated)
 
-        # Combine and shuffle
+        # Combine and shuffle, ensuring total doesn't exceed max_tracks
         selected_tracks = selected_rated + selected_unrated
+        if len(selected_tracks) > max_tracks:
+            selected_tracks = selected_tracks[:max_tracks]
+
+        import random
         random.shuffle(selected_tracks)
 
         if not selected_tracks:
@@ -1807,10 +1811,11 @@ class PlexSync(BeetsPlugin):
                     if beets_item:
                         forgotten_tracks.append(beets_item)
                         self._log.debug(
-                            "Found forgotten gem: {} - {} (Plays: {})",
-                            beets_item.artist,
+                            "Found forgotten gem: {} - {} (Plays: {} Plex Rating: {})",
+                            beets_item.album,
                             beets_item.title,
-                            track.viewCount,
+                            beets_item.plex_viewcount,
+                            getattr(beets_item, "plex_userrating", 'NA'),
                         )
             except Exception as e:
                 self._log.debug("Error processing track {}: {}", track.title, e)
