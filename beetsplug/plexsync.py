@@ -1267,7 +1267,7 @@ class PlexSync(BeetsPlugin):
             }
 
             base_url = config["llm"]["base_url"].get()
-            if base_url:
+            if (base_url):
                 client_args["base_url"] = base_url
 
             self.llm_client = OpenAI(**client_args)
@@ -1672,6 +1672,20 @@ class PlexSync(BeetsPlugin):
 
         return selected_tracks
 
+    def calculate_playlist_proportions(self, max_tracks, discovery_ratio):
+        """Calculate number of rated vs unrated tracks based on discovery ratio.
+
+        Args:
+            max_tracks: Total number of tracks desired
+            discovery_ratio: Percentage of unrated/discovery tracks desired (0-100)
+
+        Returns:
+            tuple: (unrated_tracks_count, rated_tracks_count)
+        """
+        unrated_tracks_count = min(int(max_tracks * (discovery_ratio / 100)), max_tracks)
+        rated_tracks_count = max_tracks - unrated_tracks_count
+        return unrated_tracks_count, rated_tracks_count
+
     def generate_daily_discovery(self, lib, dd_config, plex_lookup):
         """Generate a Daily Discovery playlist with plex_smartplaylists command."""
         playlist_name = dd_config.get("name", "Daily Discovery")
@@ -1714,9 +1728,10 @@ class PlexSync(BeetsPlugin):
 
         self._log.info("Found {} tracks matching criteria", len(matched_tracks))
 
-        # Calculate how many tracks of each type we want based on ratio
-        rated_tracks_count = min(int(max_tracks * (discovery_ratio / 100)), max_tracks)
-        discovery_tracks_count = min(max_tracks - rated_tracks_count, max_tracks)
+        # Calculate proportions
+        unrated_tracks_count, rated_tracks_count = self.calculate_playlist_proportions(
+            max_tracks, discovery_ratio
+        )
 
         # Split tracks into rated and unrated
         rated_tracks = []
@@ -1730,12 +1745,12 @@ class PlexSync(BeetsPlugin):
 
         # Select tracks using weighted probability, ensuring we don't exceed max_tracks
         selected_rated = self.select_tracks_weighted(rated_tracks, rated_tracks_count)
-        selected_unrated = self.select_tracks_weighted(unrated_tracks, discovery_tracks_count)
+        selected_unrated = self.select_tracks_weighted(unrated_tracks, unrated_tracks_count)
 
         # If we don't have enough unrated tracks, fill with rated ones
-        if len(selected_unrated) < discovery_tracks_count:
+        if len(selected_unrated) < unrated_tracks_count:
             additional_count = min(
-                discovery_tracks_count - len(selected_unrated),
+                unrated_tracks_count - len(selected_unrated),
                 max_tracks - len(selected_rated) - len(selected_unrated)
             )
             remaining_rated = [t for t in rated_tracks if t not in selected_rated]
@@ -1791,6 +1806,7 @@ class PlexSync(BeetsPlugin):
         max_tracks = self.get_config_value(ug_config, defaults_cfg, "max_tracks", 20)
         max_plays = self.get_config_value(ug_config, defaults_cfg, "max_plays", 2)
         min_rating = self.get_config_value(ug_config, defaults_cfg, "min_rating", 4)
+        discovery_ratio = self.get_config_value(ug_config, defaults_cfg, "discovery_ratio", 30)  # Default 30%
 
         # Build filters for unplayed/barely played tracks
         filters = {
@@ -1835,10 +1851,10 @@ class PlexSync(BeetsPlugin):
             popularity_threshold = 70
             self._log.debug("Using fallback popularity threshold: {}")
 
-        # Calculate number of tracks for each category
-        discovery_ratio = self.get_config_value(ug_config, defaults_cfg, "discovery_ratio", 30)  # Default 30%
-        unrated_tracks_count = min(int(max_tracks * ((100 - discovery_ratio) / 100)), max_tracks)
-        rated_tracks_count = max_tracks - unrated_tracks_count
+        # Calculate proportions
+        unrated_tracks_count, rated_tracks_count = self.calculate_playlist_proportions(
+            max_tracks, discovery_ratio
+        )
 
         # Filter unrated tracks by popularity threshold
         popular_unrated = [

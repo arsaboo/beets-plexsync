@@ -92,7 +92,7 @@ This plugin allows you to sync your Plex library with beets, create playlists ba
      - Limits the playlist size (configurable via `max_tracks`, default 20)
      - Controls maximum play count (configurable via `max_plays`, default 2)
      - Minimum rating for rated tracks to be included (configurable via `min_rating`, default 4)
-     - Percentage of playlist to fill with unrated but popular tracks (configurable via `discovery_ratio`, default 25)
+     - Percentage of playlist to fill with unrated but popular tracks (configurable via `discovery_ratio`, default 30)
 
 ## Configuration
 
@@ -154,18 +154,22 @@ plexsync:
       - id: daily_discovery
         name: "Daily Discovery"
         max_tracks: 20      # Maximum number of tracks for Daily Discovery playlist
-        exclusion_days: 30  # Number of days to exclude recently played tracks from recommendations
-        history_days: 15    # Number of days to use to learn user listening habits
-        discovery_ratio: 70 # Percentage of highly rated tracks in Daily Discovery playlist (0-100)
+        exclusion_days: 30  # Number of days to exclude recently played tracks
+        history_days: 15    # Number of days to use to learn listening habits
+        discovery_ratio: 30 # Percentage of unrated tracks (0-100)
+                            # Higher values = more discovery
+                            # Example: 30 = 30% unrated + 70% rated tracks
+                            #          70 = 70% unrated + 30% rated tracks
+
       - id: forgotten_gems
         name: "Forgotten Gems"
-        max_tracks: 50      # Maximum number of tracks for Forgotten Gems playlist
+        max_tracks: 50      # Maximum number of tracks for playlist
         max_plays: 2        # Maximum number of plays for tracks to be included
-        min_rating: 4       # Minimum rating for rated tracks to be included
-        discovery_ratio: 70 # Percentage of rated tracks in playlist (0-100)
-                          # Example: 70 = 70% rated + 30% unrated popular tracks
-                          #          30 = 30% rated + 70% unrated popular tracks
-```
+        min_rating: 4       # Minimum rating for rated tracks
+        discovery_ratio: 30 # Percentage of unrated tracks (0-100)
+                            # Higher values = more discovery
+                            # Example: 30 = 30% unrated + 70% rated tracks
+                            #          70 = 70% unrated + 30% rated tracks
 
 [collage]: collage.png
 [queries_]: https://beets.readthedocs.io/en/latest/reference/query.html?highlight=queries
@@ -175,4 +179,3 @@ plexsync:
 [beets]: https://github.com/beetbox/beets
 [Spotify]: https://beets.readthedocs.io/en/stable/plugins/spotify.html
 [listenbrainz_plugin_]: https://github.com/arsaboo/beets-listenbrainz
-````
