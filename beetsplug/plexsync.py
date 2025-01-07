@@ -9,11 +9,12 @@ Put something like the following in your config.yaml to configure:
 
 import asyncio
 import difflib
+import json
 import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List
 
 import confuse
@@ -32,10 +33,9 @@ from jiosaavn import JioSaavn
 from openai import OpenAI
 from plexapi import exceptions
 from plexapi.server import PlexServer
-from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
-from requests.exceptions import ContentDecodingError, ConnectionError
 from pydantic import BaseModel, Field
-import json
+from requests.exceptions import ConnectionError, ContentDecodingError
+from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
 
 
 class Song(BaseModel):
@@ -99,7 +99,14 @@ class PlexSync(BeetsPlugin):
         )
 
         config["plexsync"].add(
-            {"tokenfile": "spotify_plexsync.json", "manual_search": False}
+            {
+                "tokenfile": "spotify_plexsync.json",
+                "manual_search": False,
+                "max_tracks": 20,  # Maximum number of tracks for Daily Discovery
+                "exclusion_days": 30,  # Days to exclude recently played tracks
+                "history_days": 15,  # Days to look back for base tracks
+                "discovery_ratio": 70,  # Percentage of highly rated tracks (0-100)
+            }
         )
         self.plexsync_token = config["plexsync"]["tokenfile"].get(
             confuse.Filename(in_app_dir=True)
@@ -463,6 +470,36 @@ class PlexSync(BeetsPlugin):
 
         plex2spotify_cmd.func = func_plex2spotify
 
+        # Replace the "dailydiscovery" command with "plex_smartplaylists" command:
+        plex_smartplaylists_cmd = ui.Subcommand(
+            "plex_smartplaylists",
+            help="Generate system-defined or custom smart playlists",
+        )
+
+        def func_plex_smartplaylists(lib, opts, args):
+            # Retrieve playlists from config
+            playlists_config = config["plexsync"]["playlists"]["items"].get(list)
+            if not playlists_config:
+                self._log.warning(
+                    "No playlists defined in config['plexsync']['playlists']['items']. Skipping."
+                )
+                return
+
+            # Build lookup dictionary once
+            self._log.info("Building Plex lookup dictionary...")
+            plex_lookup = self.build_plex_lookup(lib)
+            self._log.debug("Found {} tracks in lookup dictionary", len(plex_lookup))
+
+            for p in playlists_config:
+                playlist_id = p.get("id")
+                if playlist_id == "daily_discovery":
+                    self.generate_daily_discovery(lib, p, plex_lookup)
+                elif playlist_id == "forgotten_gems":
+                    self.generate_forgotten_gems(lib, p, plex_lookup)
+
+        plex_smartplaylists_cmd.func = func_plex_smartplaylists
+
+        # Finally, register the new command instead of the old daily_discovery_cmd
         return [
             plexupdate_cmd,
             sync_cmd,
@@ -476,6 +513,7 @@ class PlexSync(BeetsPlugin):
             searchimport_cmd,
             plexplaylist2collection_cmd,
             plex2spotify_cmd,
+            plex_smartplaylists_cmd,
         ]
 
     def parse_title(self, title_orig):
@@ -484,7 +522,7 @@ class PlexSync(BeetsPlugin):
             album = re.sub(r'^[^"]+"|(?<!^)"[^"]+"|"[^"]+$', "", title_orig)
         elif '[From "' in title_orig:
             title = re.sub(r"\[From.*\]", "", title_orig)
-            album = re.sub(r'^[^"]+"|(?<!^)"[^"]+"|"[^"]+$', "", title_orig)
+            album = re.sub(r'^[^"]+"|(?<!^)"[^"]+$', "", title_orig)
         else:
             title = title_orig
             album = ""
@@ -497,9 +535,9 @@ class PlexSync(BeetsPlugin):
             .strip()
         )
         if '(From "' in album_orig:
-            album = re.sub(r'^[^"]+"|(?<!^)"[^"]+"|"[^"]+$', "", album_orig)
+            album = re.sub(r'^[^"]+"|(?<!^)"[^"]+$', "", album_orig)
         elif '[From "' in album_orig:
-            album = re.sub(r'^[^"]+"|(?<!^)"[^"]+"|"[^"]+$', "", album_orig)
+            album = re.sub(r'^[^"]+"|(?<!^)"[^"]+$', "", album_orig)
         else:
             album = album_orig
         return album
@@ -1052,6 +1090,7 @@ class PlexSync(BeetsPlugin):
             PIL.Image: The generated collage image
         """
         from io import BytesIO
+
         from PIL import Image
 
         thumbnail_size = 300  # Size of each album art
@@ -1415,3 +1454,296 @@ class PlexSync(BeetsPlugin):
             )
         else:
             self._log.debug("No tracks to add to playlist")
+
+    def get_config_value(self, item_cfg, defaults_cfg, key, code_default):
+        if key in item_cfg:
+            val = item_cfg[key]
+            return val.get() if hasattr(val, "get") else val
+        elif key in defaults_cfg:
+            val = defaults_cfg[key]
+            return val.get() if hasattr(val, "get") else val
+        else:
+            return code_default
+
+    def get_preferred_attributes(self):
+        """Determine preferred genres and similar tracks based on user listening habits."""
+        # Get history period from config
+        if (
+            "playlists" in config["plexsync"]
+            and "defaults" in config["plexsync"]["playlists"]
+        ):
+            defaults_cfg = config["plexsync"]["playlists"]["defaults"].get({})
+        else:
+            defaults_cfg = {}
+
+        history_days = self.get_config_value(
+            config["plexsync"], defaults_cfg, "history_days", 15
+        )
+        exclusion_days = self.get_config_value(
+            config["plexsync"], defaults_cfg, "exclusion_days", 30
+        )
+
+        # Fetch tracks played in the configured period
+        tracks = self.music.search(
+            filters={"track.lastViewedAt>>": f"{history_days}d"}, libtype="track"
+        )
+
+        # Track genre counts and similar tracks
+        genre_counts = {}
+        similar_tracks = set()
+
+        # Get tracks to exclude (played in last exclusion_days)
+        exclusion_date = datetime.now() - timedelta(days=exclusion_days)
+        recently_played = set(
+            track.ratingKey
+            for track in self.music.search(
+                filters={"track.lastViewedAt>>": f"{exclusion_days}d"}, libtype="track"
+            )
+        )
+
+        for track in tracks:
+            # Count genres
+            track_genres = set()
+            for genre in track.genres:
+                if genre:
+                    genre_str = str(genre.tag).lower()
+                    genre_counts[genre_str] = genre_counts.get(genre_str, 0) + 1
+                    track_genres.add(genre_str)
+
+            # Get sonically similar tracks
+            try:
+                sonic_matches = track.sonicallySimilar()
+                # Filter sonic matches
+                for match in sonic_matches:
+                    # Check rating - include unrated (-1) and highly rated (>=4) tracks
+                    rating = getattr(
+                        match, "userRating", -1
+                    )  # Default to -1 if attribute doesn't exist
+                    if (
+                        match.ratingKey not in recently_played  # Not recently played
+                        and any(
+                            g.tag.lower() in track_genres for g in match.genres
+                        )  # Genre match
+                        and (rating is None or rating == -1 or rating >= 4)
+                    ):  # Rating criteria including None
+                        similar_tracks.add(match)
+            except Exception as e:
+                self._log.debug(
+                    "Error getting similar tracks for {}: {}", track.title, e
+                )
+
+        # Sort genres by count
+        sorted_genres = sorted(genre_counts, key=genre_counts.get, reverse=True)[:5]
+        self._log.debug("Top genres: {}", sorted_genres)
+        self._log.debug("Found {} similar tracks after filtering", len(similar_tracks))
+
+        return sorted_genres, list(similar_tracks)
+
+    def build_plex_lookup(self, lib):
+        """Build a lookup dictionary mapping Plex rating keys to beets items.
+
+        Args:
+            lib: The beets library instance
+
+        Returns:
+            dict: A dictionary mapping Plex rating keys to their corresponding beets items
+        """
+        self._log.debug("Building lookup dictionary for Plex rating keys")
+        plex_lookup = {}
+        for item in lib.items():
+            if hasattr(item, "plex_ratingkey"):
+                plex_lookup[item.plex_ratingkey] = item
+        return plex_lookup
+
+    def generate_daily_discovery(self, lib, dd_config, plex_lookup):
+        """Generate a Daily Discovery playlist with plex_smartplaylists command."""
+        playlist_name = dd_config.get("name", "Daily Discovery")
+        self._log.info("Generating {} playlist", playlist_name)
+
+        # Setup and configuration
+        preferred_genres, similar_tracks = self.get_preferred_attributes()
+        self._log.debug(f"Using preferred genres: {preferred_genres}")
+        self._log.debug(f"Processing {len(similar_tracks)} pre-filtered similar tracks")
+
+        if (
+            "playlists" in config["plexsync"]
+            and "defaults" in config["plexsync"]["playlists"]
+        ):
+            defaults_cfg = config["plexsync"]["playlists"]["defaults"].get({})
+        else:
+            defaults_cfg = {}
+
+        max_tracks = self.get_config_value(dd_config, defaults_cfg, "max_tracks", 20)
+        discovery_ratio = self.get_config_value(
+            dd_config, defaults_cfg, "discovery_ratio", 70
+        )
+
+        # Use lookup dictionary instead of individual queries
+        matched_tracks = []
+        for plex_track in similar_tracks:
+            try:
+                beets_item = plex_lookup.get(plex_track.ratingKey)
+                if beets_item and float(getattr(beets_item, "plex_userrating", 0)) > 3:
+                    matched_tracks.append(beets_item)
+                    self._log.debug(
+                        "Matched: {} - {} (Rating: {})",
+                        beets_item.artist,
+                        beets_item.title,
+                        getattr(beets_item, "plex_userrating", 0),
+                    )
+            except Exception as e:
+                self._log.debug("Error processing track {}: {}", plex_track.title, e)
+                continue
+
+        self._log.info("Found {} tracks matching criteria", len(matched_tracks))
+
+        # Replace the sorting and selection block with:
+        import random
+
+        # Get the discovery ratio from config (default 70%)
+        discovery_ratio = max(0, min(100, discovery_ratio)) / 100.0
+
+        # Calculate how many tracks of each type we want
+        rated_tracks_count = int(max_tracks * discovery_ratio)
+        discovery_tracks_count = max_tracks - rated_tracks_count
+
+        # Split tracks into rated and unrated
+        rated_tracks = []
+        unrated_tracks = []
+        for track in matched_tracks:
+            rating = float(getattr(track, "plex_userrating", 0))
+            if rating > 3:
+                rated_tracks.append(track)
+            elif rating == 0:  # Only truly unrated tracks
+                unrated_tracks.append(track)
+
+        # Sort rated tracks by rating and popularity
+        rated_tracks = sorted(
+            rated_tracks,
+            key=lambda x: (
+                float(getattr(x, "plex_userrating", 0)),
+                int(getattr(x, "spotify_track_popularity", 0)),
+            ),
+            reverse=True,
+        )
+
+        # Sort unrated tracks by popularity
+        unrated_tracks = sorted(
+            unrated_tracks,
+            key=lambda x: int(getattr(x, "spotify_track_popularity", 0)),
+            reverse=True,
+        )
+
+        # Select tracks
+        selected_rated = rated_tracks[:rated_tracks_count]
+        selected_unrated = unrated_tracks[:discovery_tracks_count]
+
+        # If we don't have enough unrated tracks, fill with rated ones
+        if len(selected_unrated) < discovery_tracks_count:
+            additional_rated = rated_tracks[
+                rated_tracks_count : rated_tracks_count
+                + (discovery_tracks_count - len(selected_unrated))
+            ]
+            selected_rated.extend(additional_rated)
+
+        # Combine and shuffle
+        selected_tracks = selected_rated + selected_unrated
+        random.shuffle(selected_tracks)
+
+        if not selected_tracks:
+            self._log.warning("No tracks matched criteria for Daily Discovery playlist")
+            return
+
+        # Clear existing playlist only right before adding new tracks
+        try:
+            self._plex_clear_playlist(playlist_name)
+            self._log.info("Cleared existing Daily Discovery playlist")
+        except exceptions.NotFound:
+            self._log.debug("No existing Daily Discovery playlist found")
+
+        # Create playlist
+        self._plex_add_playlist_item(selected_tracks, playlist_name)
+
+        self._log.info(
+            "Successfully updated {} playlist with {} tracks",
+            playlist_name,
+            len(selected_tracks),
+        )
+
+    def generate_forgotten_gems(self, lib, ug_config, plex_lookup):
+        """Generate a Forgotten Gems playlist with tracks matching user taste but low play count."""
+        playlist_name = ug_config.get("name", "Forgotten Gems")
+        self._log.info("Generating {} playlist", playlist_name)
+
+        # Get preferred genres from user's listening history
+        preferred_genres, _ = self.get_preferred_attributes()
+        self._log.debug(f"Using preferred genres: {preferred_genres}")
+
+        # Get configuration
+        if (
+            "playlists" in config["plexsync"]
+            and "defaults" in config["plexsync"]["playlists"]
+        ):
+            defaults_cfg = config["plexsync"]["playlists"]["defaults"].get({})
+        else:
+            defaults_cfg = {}
+
+        max_tracks = self.get_config_value(ug_config, defaults_cfg, "max_tracks", 20)
+        max_plays = self.get_config_value(ug_config, defaults_cfg, "max_plays", 2)
+
+        # Build filters for unplayed/barely played tracks
+        filters = {
+            "track.viewCount<<=": max_plays,  # Tracks played max_plays times or less
+            "track.userRating!=": 1,  # Exclude 1-star rated tracks
+            "track.userRating!=": 2,  # Exclude 2-star rated tracks
+        }
+
+        # Find tracks with matching genres but low play count
+        forgotten_tracks = []
+        tracks = self.music.searchTracks(**filters)
+
+        for track in tracks:
+            try:
+                # Check if track genres match user preferences
+                track_genres = {str(g.tag).lower() for g in track.genres}
+                if any(genre in track_genres for genre in preferred_genres):
+                    beets_item = plex_lookup.get(track.ratingKey)
+                    if beets_item:
+                        forgotten_tracks.append(beets_item)
+                        self._log.debug(
+                            "Found forgotten gem: {} - {} (Plays: {})",
+                            beets_item.artist,
+                            beets_item.title,
+                            track.viewCount,
+                        )
+            except Exception as e:
+                self._log.debug("Error processing track {}: {}", track.title, e)
+                continue
+
+        # Sort by popularity if available
+        forgotten_tracks.sort(
+            key=lambda x: int(getattr(x, "spotify_track_popularity", 0)), reverse=True
+        )
+
+        # Select tracks
+        selected_tracks = forgotten_tracks[:max_tracks]
+
+        if not selected_tracks:
+            self._log.warning("No tracks matched criteria for Forgotten Gems playlist")
+            return
+
+        # Clear existing playlist
+        try:
+            self._plex_clear_playlist(playlist_name)
+            self._log.info("Cleared existing Forgotten Gems playlist")
+        except exceptions.NotFound:
+            self._log.debug("No existing Forgotten Gems playlist found")
+
+        # Create playlist
+        self._plex_add_playlist_item(selected_tracks, playlist_name)
+
+        self._log.info(
+            "Successfully updated {} playlist with {} tracks",
+            playlist_name,
+            len(selected_tracks),
+        )

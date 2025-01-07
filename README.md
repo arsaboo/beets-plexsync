@@ -9,8 +9,7 @@ Install the plugin using `pip`:
 pip install git+https://github.com/arsaboo/beets-plexsync.git
 ```
 
-Then, [configure](#configuration) the plugin in your
-[`config.yaml`][config] file.
+Then, [configure](#configuration) the plugin in your [`config.yaml`][config] file.
 
 To upgrade, use the command:
 ```shell
@@ -68,6 +67,23 @@ This plugin allows you to sync your Plex library with beets, create playlists ba
 
 - **Album Collage**: `beet plexcollage` creates a collage of most played albums. Use the `-i` flag to specify the number of days and `-g` flag to specify the grid size.
 
+- **Smart Playlists**: Use `beet plex_smartplaylists` to generate or manage custom playlists in Plex. The plugin currently supports two smart playlists:
+
+  1. **Daily Discovery**:
+     - Uses tracks you've played in the last 15 days as a base to learn about listening habits (configurable via `history_days`)
+     - Excludes tracks played in the last 30 days (configurable via `exclusion_days`)
+     - Prioritizes popular tracks (rated 4 or more; configurable via `discovery_ratio`)
+     - Matches genres with your recent listening history
+     - Uses Plex's [Sonic Analysis](https://support.plex.tv/articles/sonic-analysis-music/) to find sonically similar tracks
+     - Limits the playlist size (configurable via `max_tracks`, default 20)
+
+  2. **Forgotten Gems**:
+     - Creates a playlist of tracks matching your genre preferences but haven't been played much
+     - Uses your recent listening history to determine preferred genres
+     - Only includes tracks played fewer than `max_plays` times (default: 2)
+     - Sorts by track popularity to surface the most promising tracks first
+     - Limits the playlist size (configurable via `max_tracks`, default 20)
+
 ## Configuration
 
 * The `beet plexsonic` command allows you to create AI-based playlists using an OpenAI-compatible language model. To use this feature, you will need to configure the AI model with an API key. Once you have obtained an API key, you can configure `beets` to use it by adding the following to your `config.yaml` file:
@@ -121,6 +137,22 @@ Plex matching may be less than perfect and it can miss tracks if the tags don't 
 ```yaml
 plexsync:
   manual_search: yes
+  playlists:
+    defaults:
+      max_tracks: 20
+    items:
+      - id: daily_discovery
+        name: "Daily Discovery"
+        max_tracks: 20      # Maximum number of tracks for Daily Discovery playlist
+        exclusion_days: 30  # Number of days to exclude recently played tracks from recommendations
+        history_days: 15    # Number of days to use to learn user listening habits
+        discovery_ratio: 70 # Percentage of highly rated tracks in Daily Discovery playlist (0-100); Lower values result in more discovery (unrated) tracks
+                            # Example: 70 = 70% highly rated + 30% discovery tracks
+                            #          30 = 30% highly rated + 70% discovery tracks
+      - id: forgotten_gems
+        name: "Forgotten Gems"
+        max_tracks: 20      # Maximum number of tracks for Forgotten Gems playlist
+        max_plays: 2        # Maximum number of plays for tracks to be included in Forgotten Gems playlist
 ```
 
 [collage]: collage.png
