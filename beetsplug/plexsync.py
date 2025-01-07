@@ -1726,7 +1726,7 @@ class PlexSync(BeetsPlugin):
                 self._log.debug("Error processing track {}: {}", plex_track.title, e)
                 continue
 
-        self._log.info("Found {} tracks matching criteria", len(matched_tracks))
+        self._log.debug("Found {} tracks matching criteria", len(matched_tracks))
 
         # Calculate proportions
         unrated_tracks_count, rated_tracks_count = self.calculate_playlist_proportions(
@@ -1764,6 +1764,13 @@ class PlexSync(BeetsPlugin):
 
         import random
         random.shuffle(selected_tracks)
+
+        # Add debug logging for selected track counts
+        self._log.info(
+            "Selected {} rated tracks and {} unrated tracks",
+            len(selected_rated),
+            len(selected_unrated)
+        )
 
         if not selected_tracks:
             self._log.warning("No tracks matched criteria for Daily Discovery playlist")
