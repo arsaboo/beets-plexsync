@@ -1716,12 +1716,6 @@ class PlexSync(BeetsPlugin):
                 beets_item = plex_lookup.get(plex_track.ratingKey)
                 if beets_item and float(getattr(beets_item, "plex_userrating", 0)) > 3:
                     matched_tracks.append(beets_item)
-                    self._log.debug(
-                        "Matched: {} - {} (Rating: {})",
-                        beets_item.artist,
-                        beets_item.title,
-                        getattr(beets_item, "plex_userrating", 0),
-                    )
             except Exception as e:
                 self._log.debug("Error processing track {}: {}", plex_track.title, e)
                 continue
