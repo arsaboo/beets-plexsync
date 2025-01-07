@@ -1823,9 +1823,12 @@ class PlexSync(BeetsPlugin):
                 self._log.debug("Error processing track {}: {}", track.title, e)
                 continue
 
-        # Sort by popularity if available
+        # Sort first by plex_userrating (higher first), then by spotify popularity
         forgotten_tracks.sort(
-            key=lambda x: int(getattr(x, "spotify_track_popularity", 0)), reverse=True
+            key=lambda x: (
+                -float(getattr(x, "plex_userrating", 0)),  # Negative to sort highest first
+                -int(getattr(x, "spotify_track_popularity", 0))  # Negative to sort highest first
+            )
         )
 
         # Select tracks
