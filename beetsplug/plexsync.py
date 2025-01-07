@@ -1790,12 +1790,11 @@ class PlexSync(BeetsPlugin):
 
         max_tracks = self.get_config_value(ug_config, defaults_cfg, "max_tracks", 20)
         max_plays = self.get_config_value(ug_config, defaults_cfg, "max_plays", 2)
+        min_rating = self.get_config_value(ug_config, defaults_cfg, "min_rating", 4)
 
         # Build filters for unplayed/barely played tracks
         filters = {
             "track.viewCount<<=": max_plays,  # Tracks played max_plays times or less
-            "track.userRating!=": 1,  # Exclude 1-star rated tracks
-            "track.userRating!=": 2,  # Exclude 2-star rated tracks
         }
 
         # Find tracks with matching genres but low play count
@@ -1809,14 +1808,17 @@ class PlexSync(BeetsPlugin):
                 if any(genre in track_genres for genre in preferred_genres):
                     beets_item = plex_lookup.get(track.ratingKey)
                     if beets_item:
-                        forgotten_tracks.append(beets_item)
-                        self._log.debug(
-                            "Found forgotten gem: {} - {} (Plays: {} Plex Rating: {})",
-                            beets_item.album,
-                            beets_item.title,
-                            beets_item.plex_viewcount,
-                            getattr(beets_item, "plex_userrating", 'NA'),
-                        )
+                        # Include tracks that are either unrated (0) or rated at/above minimum
+                        rating = float(getattr(beets_item, "plex_userrating", 0))
+                        if rating == 0 or rating >= min_rating:
+                            forgotten_tracks.append(beets_item)
+                            self._log.debug(
+                                "Found forgotten gem: {} - {} (Plays: {} Plex Rating: {})",
+                                beets_item.album,
+                                beets_item.title,
+                                beets_item.plex_viewcount,
+                                rating,
+                            )
             except Exception as e:
                 self._log.debug("Error processing track {}: {}", track.title, e)
                 continue
