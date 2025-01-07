@@ -1555,6 +1555,123 @@ class PlexSync(BeetsPlugin):
                 plex_lookup[item.plex_ratingkey] = item
         return plex_lookup
 
+    def calculate_rating_score(self, rating):
+        """Calculate score based on rating (60% weight)."""
+        if not rating or rating <= 0:
+            return 0
+        score_map = {
+            10: 100,
+            9: 80,
+            8: 60,
+            7: 40,
+            6: 20
+        }
+        return score_map.get(int(rating), 0) * 0.6
+
+    def calculate_last_played_score(self, last_played):
+        """Calculate score based on last played date (20% weight)."""
+        if not last_played:
+            return 100 * 0.2  # Never played gets max score
+
+        days_since_played = (datetime.now() - datetime.fromtimestamp(last_played)).days
+
+        if days_since_played > 180:  # 6 months
+            return 80 * 0.2
+        elif days_since_played > 90:  # 3 months
+            return 60 * 0.2
+        elif days_since_played > 30:  # 1 month
+            return 40 * 0.2
+        else:
+            return 20 * 0.2
+
+    def calculate_play_count_score(self, play_count):
+        """Calculate score based on play count (20% weight)."""
+        if not play_count or play_count < 0:
+            play_count = 0
+
+        if play_count <= 2:
+            return 100 * 0.2
+        elif play_count <= 5:
+            return 80 * 0.2
+        elif play_count <= 10:
+            return 60 * 0.2
+        elif play_count <= 20:
+            return 40 * 0.2
+        else:
+            return 20 * 0.2
+
+    def calculate_track_score(self, track, base_time=None):
+        """Calculate comprehensive score for a track."""
+        import random
+        import numpy as np
+
+        if base_time is None:
+            base_time = datetime.now()
+
+        # Calculate base component scores
+        rating_score = self.calculate_rating_score(float(getattr(track, 'plex_userrating', 0)))
+        last_played_score = self.calculate_last_played_score(getattr(track, 'plex_lastviewedat', None))
+        play_count_score = self.calculate_play_count_score(getattr(track, 'plex_viewcount', 0))
+
+        # Calculate base score
+        base_score = rating_score + last_played_score + play_count_score
+
+        # Add boost for recently added tracks
+        if hasattr(track, 'added'):
+            days_since_added = (base_time - datetime.fromtimestamp(track.added)).days
+            if days_since_added <= 30:  # Added within last month
+                base_score += 15
+
+        # Add random factor (-10 to +10)
+        random_factor = random.uniform(-10, 10)
+
+        # Add gaussian noise (mean=0, std=5)
+        gaussian_noise = np.random.normal(0, 5)
+
+        # Calculate final score
+        final_score = base_score + random_factor + gaussian_noise
+
+        return max(0, min(100, final_score))  # Clamp between 0 and 100
+
+    def select_tracks_weighted(self, tracks, num_tracks):
+        """Select tracks using weighted probability based on scores."""
+        import numpy as np
+
+        if not tracks:
+            return []
+
+        # Calculate scores for all tracks
+        base_time = datetime.now()
+        track_scores = [(track, self.calculate_track_score(track, base_time)) for track in tracks]
+
+        # Convert scores to probabilities using softmax
+        scores = np.array([score for _, score in track_scores])
+        probabilities = np.exp(scores / 10) / sum(np.exp(scores / 10))  # Temperature=10 to control randomness
+
+        # Select tracks based on probabilities
+        selected_indices = np.random.choice(
+            len(tracks),
+            size=min(num_tracks, len(tracks)),
+            replace=False,
+            p=probabilities
+        )
+
+        selected_tracks = [tracks[i] for i in selected_indices]
+
+        # Log selection details for debugging
+        for i, track in enumerate(selected_tracks):
+            score = track_scores[selected_indices[i]][1]
+            self._log.debug(
+                "Selected: {} - {} (Score: {:.2f}, Rating: {}, Plays: {})",
+                track.artist,
+                track.title,
+                score,
+                getattr(track, 'plex_userrating', 0),
+                getattr(track, 'plex_viewcount', 0)
+            )
+
+        return selected_tracks
+
     def generate_daily_discovery(self, lib, dd_config, plex_lookup):
         """Generate a Daily Discovery playlist with plex_smartplaylists command."""
         playlist_name = dd_config.get("name", "Daily Discovery")
@@ -1597,11 +1714,8 @@ class PlexSync(BeetsPlugin):
 
         self._log.info("Found {} tracks matching criteria", len(matched_tracks))
 
-        # Replace the sorting and selection block with:
+        # Replace the sorting and selection block with new weighted selection
         import random
-
-        # Get the discovery ratio from config (default 70%)
-        discovery_ratio = max(0, min(100, discovery_ratio)) / 100.0
 
         # Calculate how many tracks of each type we want
         rated_tracks_count = int(max_tracks * discovery_ratio)
@@ -1611,39 +1725,21 @@ class PlexSync(BeetsPlugin):
         rated_tracks = []
         unrated_tracks = []
         for track in matched_tracks:
-            rating = float(getattr(track, "plex_userrating", 0))
-            if rating > 3:
+            rating = float(getattr(track, 'plex_userrating', 0))
+            if rating >= 6:  # Include all tracks rated 6 or higher
                 rated_tracks.append(track)
             elif rating == 0:  # Only truly unrated tracks
                 unrated_tracks.append(track)
 
-        # Sort rated tracks by rating and popularity
-        rated_tracks = sorted(
-            rated_tracks,
-            key=lambda x: (
-                float(getattr(x, "plex_userrating", 0)),
-                int(getattr(x, "spotify_track_popularity", 0)),
-            ),
-            reverse=True,
-        )
-
-        # Sort unrated tracks by popularity
-        unrated_tracks = sorted(
-            unrated_tracks,
-            key=lambda x: int(getattr(x, "spotify_track_popularity", 0)),
-            reverse=True,
-        )
-
-        # Select tracks
-        selected_rated = rated_tracks[:rated_tracks_count]
-        selected_unrated = unrated_tracks[:discovery_tracks_count]
+        # Select tracks using weighted probability
+        selected_rated = self.select_tracks_weighted(rated_tracks, rated_tracks_count)
+        selected_unrated = self.select_tracks_weighted(unrated_tracks, discovery_tracks_count)
 
         # If we don't have enough unrated tracks, fill with rated ones
         if len(selected_unrated) < discovery_tracks_count:
-            additional_rated = rated_tracks[
-                rated_tracks_count : rated_tracks_count
-                + (discovery_tracks_count - len(selected_unrated))
-            ]
+            additional_count = discovery_tracks_count - len(selected_unrated)
+            remaining_rated = [t for t in rated_tracks if t not in selected_rated]
+            additional_rated = self.select_tracks_weighted(remaining_rated, additional_count)
             selected_rated.extend(additional_rated)
 
         # Combine and shuffle

@@ -72,10 +72,16 @@ This plugin allows you to sync your Plex library with beets, create playlists ba
   1. **Daily Discovery**:
      - Uses tracks you've played in the last 15 days as a base to learn about listening habits (configurable via `history_days`)
      - Excludes tracks played in the last 30 days (configurable via `exclusion_days`)
-     - Prioritizes popular tracks (rated 4 or more; configurable via `discovery_ratio`)
+     - Uses an intelligent scoring system that considers:
+       - Track rating (primary factor)
+       - Last played date
+       - Play count
+       - Recently added bonus
+     - Introduces controlled randomization to ensure variety
      - Matches genres with your recent listening history
      - Uses Plex's [Sonic Analysis](https://support.plex.tv/articles/sonic-analysis-music/) to find sonically similar tracks
      - Limits the playlist size (configurable via `max_tracks`, default 20)
+     - Controls discovery vs. familiar ratio (configurable via `discovery_ratio`, default 70%)
 
   2. **Forgotten Gems**:
      - Creates a playlist of tracks matching your genre preferences but haven't been played much
