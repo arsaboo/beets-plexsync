@@ -1835,32 +1835,44 @@ class PlexSync(BeetsPlugin):
             popularity_threshold = 70
             self._log.debug("Using fallback popularity threshold: {}")
 
+        # Calculate number of tracks for each category
+        discovery_ratio = self.get_config_value(ug_config, defaults_cfg, "discovery_ratio", 30)  # Default 30%
+        unrated_tracks_count = min(int(max_tracks * ((100 - discovery_ratio) / 100)), max_tracks)
+        rated_tracks_count = max_tracks - unrated_tracks_count
+
         # Filter unrated tracks by popularity threshold
         popular_unrated = [
             track for track in unrated_tracks
             if int(getattr(track, "spotify_track_popularity", 0)) >= popularity_threshold
         ]
 
-        # Combine and sort tracks
-        def get_sort_key(track):
-            rating = float(getattr(track, "plex_userrating", 0))
-            popularity = int(getattr(track, "spotify_track_popularity", 0))
+        # Sort rated and unrated tracks separately by their respective criteria
+        rated_tracks.sort(
+            key=lambda x: (
+                -float(getattr(x, "plex_userrating", 0)),
+                -int(getattr(x, "spotify_track_popularity", 0))
+            )
+        )
+        popular_unrated.sort(
+            key=lambda x: -int(getattr(x, "spotify_track_popularity", 0))
+        )
 
-            if rating == 0:  # Unrated tracks
-                return (2, popularity) if popularity >= popularity_threshold else (0, popularity)
-            else:  # Rated tracks
-                return (1, rating, popularity)
+        # Select tracks maintaining the ratio
+        selected_rated = rated_tracks[:rated_tracks_count]
+        selected_unrated = popular_unrated[:unrated_tracks_count]
 
-        # Combine all tracks and sort
-        forgotten_tracks = rated_tracks + popular_unrated
-        forgotten_tracks.sort(key=get_sort_key, reverse=True)
+        # Combine tracks
+        selected_tracks = selected_rated + selected_unrated
 
-        # Log some statistics
-        self._log.debug("Found {} rated and {} popular unrated tracks",
-                       len(rated_tracks), len(popular_unrated))
+        # Shuffle the final selection
+        import random
+        random.shuffle(selected_tracks)
 
-        # Select tracks
-        selected_tracks = forgotten_tracks[:max_tracks]
+        self._log.debug(
+            "Selected {} rated tracks and {} unrated popular tracks",
+            len(selected_rated),
+            len(selected_unrated)
+        )
 
         if not selected_tracks:
             self._log.warning("No tracks matched criteria for Forgotten Gems playlist")

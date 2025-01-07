@@ -91,6 +91,8 @@ This plugin allows you to sync your Plex library with beets, create playlists ba
      - Automatically adjusts selection criteria based on your library's characteristics
      - Limits the playlist size (configurable via `max_tracks`, default 20)
      - Controls maximum play count (configurable via `max_plays`, default 2)
+     - Minimum rating for rated tracks to be included (configurable via `min_rating`, default 4)
+     - Percentage of playlist to fill with unrated but popular tracks (configurable via `discovery_ratio`, default 25)
 
 ## Configuration
 
@@ -154,13 +156,15 @@ plexsync:
         max_tracks: 20      # Maximum number of tracks for Daily Discovery playlist
         exclusion_days: 30  # Number of days to exclude recently played tracks from recommendations
         history_days: 15    # Number of days to use to learn user listening habits
-        discovery_ratio: 70 # Percentage of highly rated tracks in Daily Discovery playlist (0-100); Lower values result in more discovery (unrated) tracks
-                            # Example: 70 = 70% highly rated + 30% discovery tracks
-                            #          30 = 30% highly rated + 70% discovery tracks
+        discovery_ratio: 70 # Percentage of highly rated tracks in Daily Discovery playlist (0-100)
       - id: forgotten_gems
         name: "Forgotten Gems"
-        max_tracks: 20      # Maximum number of tracks for Forgotten Gems playlist
-        max_plays: 2        # Maximum number of plays for tracks to be included in Forgotten Gems playlist
+        max_tracks: 50      # Maximum number of tracks for Forgotten Gems playlist
+        max_plays: 2        # Maximum number of plays for tracks to be included
+        min_rating: 4       # Minimum rating for rated tracks to be included
+        discovery_ratio: 70 # Percentage of rated tracks in playlist (0-100)
+                          # Example: 70 = 70% rated + 30% unrated popular tracks
+                          #          30 = 30% rated + 70% unrated popular tracks
 ```
 
 [collage]: collage.png
@@ -171,3 +175,4 @@ plexsync:
 [beets]: https://github.com/beetbox/beets
 [Spotify]: https://beets.readthedocs.io/en/stable/plugins/spotify.html
 [listenbrainz_plugin_]: https://github.com/arsaboo/beets-listenbrainz
+````
