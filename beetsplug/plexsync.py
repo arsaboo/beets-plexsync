@@ -105,7 +105,7 @@ class PlexSync(BeetsPlugin):
                 "max_tracks": 20,  # Maximum number of tracks for Daily Discovery
                 "exclusion_days": 30,  # Days to exclude recently played tracks
                 "history_days": 15,  # Days to look back for base tracks
-                "discovery_ratio": 70,  # Percentage of highly rated tracks (0-100)
+                "discovery_ratio": 30,  # Percentage of discovery tracks (0-100)
             }
         )
         self.plexsync_token = config["plexsync"]["tokenfile"].get(
@@ -1613,28 +1613,30 @@ class PlexSync(BeetsPlugin):
         if base_time is None:
             base_time = datetime.now()
 
-        # Calculate base component scores
-        rating_score = self.calculate_rating_score(float(getattr(track, 'plex_userrating', 0)))
-        last_played_score = self.calculate_last_played_score(getattr(track, 'plex_lastviewedat', None))
-        play_count_score = self.calculate_play_count_score(getattr(track, 'plex_viewcount', 0))
+        # Rating score (60% weight)
+        rating = float(getattr(track, 'plex_userrating', 0))
+        rating_score = (rating / 10) * 60 if rating > 0 else 0
+
+        # Recency score (20% weight)
+        last_played = getattr(track, 'plex_lastviewedat', None)
+        if not last_played:
+            recency_score = 20  # Never played gets full recency score
+        else:
+            days_since_played = (base_time - datetime.fromtimestamp(last_played)).days
+            recency_score = max(0, 20 - (days_since_played / 30) * 20)  # Decay over 30 days
+
+        # Popularity score (20% weight)
+        popularity = int(getattr(track, 'spotify_track_popularity', 0))
+        popularity_score = (popularity / 100) * 20
 
         # Calculate base score
-        base_score = rating_score + last_played_score + play_count_score
+        base_score = rating_score + recency_score + popularity_score
 
-        # Add boost for recently added tracks
-        if hasattr(track, 'added'):
-            days_since_added = (base_time - datetime.fromtimestamp(track.added)).days
-            if days_since_added <= 30:  # Added within last month
-                base_score += 15
-
-        # Add random factor (-10 to +10)
-        random_factor = random.uniform(-10, 10)
-
-        # Add gaussian noise (mean=0, std=5)
-        gaussian_noise = np.random.normal(0, 5)
+        # Add gaussian noise (mean=0, std=2.5) for variety
+        gaussian_noise = np.random.normal(0, 2.5)
 
         # Calculate final score
-        final_score = base_score + random_factor + gaussian_noise
+        final_score = base_score + gaussian_noise
 
         return max(0, min(100, final_score))  # Clamp between 0 and 100
 
@@ -1692,7 +1694,7 @@ class PlexSync(BeetsPlugin):
         return unrated_tracks_count, rated_tracks_count
 
     def generate_daily_discovery(self, lib, dd_config, plex_lookup, preferred_genres, similar_tracks):
-        """Generate a Daily Discovery playlist with plex_smartplaylists command."""
+        """Generate Daily Discovery playlist with improved track selection."""
         playlist_name = dd_config.get("name", "Daily Discovery")
         self._log.info("Generating {} playlist", playlist_name)
 
@@ -1709,7 +1711,7 @@ class PlexSync(BeetsPlugin):
 
         max_tracks = self.get_config_value(dd_config, defaults_cfg, "max_tracks", 20)
         discovery_ratio = self.get_config_value(
-            dd_config, defaults_cfg, "discovery_ratio", 70
+            dd_config, defaults_cfg, "discovery_ratio", 30
         )
 
         # Use lookup dictionary instead of individual queries
@@ -1790,7 +1792,7 @@ class PlexSync(BeetsPlugin):
         )
 
     def generate_forgotten_gems(self, lib, ug_config, plex_lookup, preferred_genres, similar_tracks):
-        """Generate a Forgotten Gems playlist with tracks matching user taste but low play count."""
+        """Generate a Forgotten Gems playlist with improved discovery."""
         playlist_name = ug_config.get("name", "Forgotten Gems")
         self._log.info("Generating {} playlist", playlist_name)
 
