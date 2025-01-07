@@ -494,8 +494,8 @@ class PlexSync(BeetsPlugin):
                 playlist_id = p.get("id")
                 if playlist_id == "daily_discovery":
                     self.generate_daily_discovery(lib, p, plex_lookup)
-                elif playlist_id == "unheard_gems":
-                    self.generate_unheard_gems(lib, p, plex_lookup)
+                elif playlist_id == "forgotten_gems":
+                    self.generate_forgotten_gems(lib, p, plex_lookup)
 
         plex_smartplaylists_cmd.func = func_plex_smartplaylists
 
@@ -1670,9 +1670,9 @@ class PlexSync(BeetsPlugin):
             len(selected_tracks),
         )
 
-    def generate_unheard_gems(self, lib, ug_config, plex_lookup):
-        """Generate an Unheard Gems playlist with tracks matching user taste but low play count."""
-        playlist_name = ug_config.get("name", "Unheard Gems")
+    def generate_forgotten_gems(self, lib, ug_config, plex_lookup):
+        """Generate a Forgotten Gems playlist with tracks matching user taste but low play count."""
+        playlist_name = ug_config.get("name", "Forgotten Gems")
         self._log.info("Generating {} playlist", playlist_name)
 
         # Get preferred genres from user's listening history
@@ -1699,7 +1699,7 @@ class PlexSync(BeetsPlugin):
         }
 
         # Find tracks with matching genres but low play count
-        unheard_tracks = []
+        forgotten_tracks = []
         tracks = self.music.searchTracks(**filters)
 
         for track in tracks:
@@ -1709,9 +1709,9 @@ class PlexSync(BeetsPlugin):
                 if any(genre in track_genres for genre in preferred_genres):
                     beets_item = plex_lookup.get(track.ratingKey)
                     if beets_item:
-                        unheard_tracks.append(beets_item)
+                        forgotten_tracks.append(beets_item)
                         self._log.debug(
-                            "Found unheard gem: {} - {} (Plays: {})",
+                            "Found forgotten gem: {} - {} (Plays: {})",
                             beets_item.artist,
                             beets_item.title,
                             track.viewCount,
@@ -1721,23 +1721,23 @@ class PlexSync(BeetsPlugin):
                 continue
 
         # Sort by popularity if available
-        unheard_tracks.sort(
+        forgotten_tracks.sort(
             key=lambda x: int(getattr(x, "spotify_track_popularity", 0)), reverse=True
         )
 
         # Select tracks
-        selected_tracks = unheard_tracks[:max_tracks]
+        selected_tracks = forgotten_tracks[:max_tracks]
 
         if not selected_tracks:
-            self._log.warning("No tracks matched criteria for Unheard Gems playlist")
+            self._log.warning("No tracks matched criteria for Forgotten Gems playlist")
             return
 
         # Clear existing playlist
         try:
             self._plex_clear_playlist(playlist_name)
-            self._log.info("Cleared existing Unheard Gems playlist")
+            self._log.info("Cleared existing Forgotten Gems playlist")
         except exceptions.NotFound:
-            self._log.debug("No existing Unheard Gems playlist found")
+            self._log.debug("No existing Forgotten Gems playlist found")
 
         # Create playlist
         self._plex_add_playlist_item(selected_tracks, playlist_name)

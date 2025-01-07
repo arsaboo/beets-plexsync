@@ -77,7 +77,7 @@ This plugin allows you to sync your Plex library with beets, create playlists ba
      - Uses Plex's [Sonic Analysis](https://support.plex.tv/articles/sonic-analysis-music/) to find sonically similar tracks
      - Limits the playlist size (configurable via `max_tracks`, default 20)
 
-  2. **Unheard Gems**:
+  2. **Forgotten Gems**:
      - Creates a playlist of tracks matching your genre preferences but haven't been played much
      - Uses your recent listening history to determine preferred genres
      - Only includes tracks played fewer than `max_plays` times (default: 2)
@@ -149,10 +149,10 @@ plexsync:
         discovery_ratio: 70 # Percentage of highly rated tracks in Daily Discovery playlist (0-100); Lower values result in more discovery (unrated) tracks
                             # Example: 70 = 70% highly rated + 30% discovery tracks
                             #          30 = 30% highly rated + 70% discovery tracks
-      - id: unheard_gems
-        name: "Unheard Gems"
-        max_tracks: 20      # Maximum number of tracks for Unheard Gems playlist
-        max_plays: 2        # Maximum number of plays for tracks to be included in Unheard Gems playlist
+      - id: forgotten_gems
+        name: "Forgotten Gems"
+        max_tracks: 20      # Maximum number of tracks for Forgotten Gems playlist
+        max_plays: 2        # Maximum number of plays for tracks to be included in Forgotten Gems playlist
 ```
 
 [collage]: collage.png
