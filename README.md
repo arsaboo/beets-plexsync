@@ -84,11 +84,13 @@ This plugin allows you to sync your Plex library with beets, create playlists ba
      - Controls discovery vs. familiar ratio (configurable via `discovery_ratio`, default 70%)
 
   2. **Forgotten Gems**:
-     - Creates a playlist of tracks matching your genre preferences but haven't been played much
-     - Uses your recent listening history to determine preferred genres
-     - Only includes tracks played fewer than `max_plays` times (default: 2)
-     - Sorts by track popularity to surface the most promising tracks first
+     - Creates a playlist of tracks that deserve more attention
+     - Uses your highly-rated tracks to establish a quality baseline
+     - Prioritizes unrated tracks with popularity comparable to your favorites
+     - Only includes tracks matching your genre preferences
+     - Automatically adjusts selection criteria based on your library's characteristics
      - Limits the playlist size (configurable via `max_tracks`, default 20)
+     - Controls maximum play count (configurable via `max_plays`, default 2)
 
 ## Configuration
 

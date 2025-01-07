@@ -1801,35 +1801,63 @@ class PlexSync(BeetsPlugin):
         forgotten_tracks = []
         tracks = self.music.searchTracks(**filters)
 
+        # Separate tracks into rated and unrated
+        rated_tracks = []
+        unrated_tracks = []
         for track in tracks:
             try:
-                # Check if track genres match user preferences
                 track_genres = {str(g.tag).lower() for g in track.genres}
                 if any(genre in track_genres for genre in preferred_genres):
                     beets_item = plex_lookup.get(track.ratingKey)
                     if beets_item:
-                        # Include tracks that are either unrated (0) or rated at/above minimum
                         rating = float(getattr(beets_item, "plex_userrating", 0))
-                        if rating == 0 or rating >= min_rating:
-                            forgotten_tracks.append(beets_item)
-                            self._log.debug(
-                                "Found forgotten gem: {} - {} (Plays: {} Plex Rating: {})",
-                                beets_item.album,
-                                beets_item.title,
-                                beets_item.plex_viewcount,
-                                rating,
-                            )
+                        if rating >= min_rating:
+                            rated_tracks.append(beets_item)
+                        elif rating == 0:  # Unrated tracks
+                            unrated_tracks.append(beets_item)
             except Exception as e:
                 self._log.debug("Error processing track {}: {}", track.title, e)
                 continue
 
-        # Sort first by plex_userrating (higher first), then by spotify popularity
-        forgotten_tracks.sort(
-            key=lambda x: (
-                -float(getattr(x, "plex_userrating", 0)),  # Negative to sort highest first
-                -int(getattr(x, "spotify_track_popularity", 0))  # Negative to sort highest first
-            )
-        )
+        # Calculate popularity threshold from well-rated tracks
+        rated_popularities = [
+            int(getattr(x, "spotify_track_popularity", 0))
+            for x in rated_tracks
+            if float(getattr(x, "plex_userrating", 0)) >= 7
+        ]
+
+        if rated_popularities:
+            # Use median popularity of highly rated tracks as threshold
+            popularity_threshold = sorted(rated_popularities)[len(rated_popularities)//2]
+            self._log.debug("Popularity threshold from rated tracks: {}", popularity_threshold)
+        else:
+            # Fallback to an absolute threshold if no rated tracks
+            popularity_threshold = 70
+            self._log.debug("Using fallback popularity threshold: {}")
+
+        # Filter unrated tracks by popularity threshold
+        popular_unrated = [
+            track for track in unrated_tracks
+            if int(getattr(track, "spotify_track_popularity", 0)) >= popularity_threshold
+        ]
+
+        # Combine and sort tracks
+        def get_sort_key(track):
+            rating = float(getattr(track, "plex_userrating", 0))
+            popularity = int(getattr(track, "spotify_track_popularity", 0))
+
+            if rating == 0:  # Unrated tracks
+                return (2, popularity) if popularity >= popularity_threshold else (0, popularity)
+            else:  # Rated tracks
+                return (1, rating, popularity)
+
+        # Combine all tracks and sort
+        forgotten_tracks = rated_tracks + popular_unrated
+        forgotten_tracks.sort(key=get_sort_key, reverse=True)
+
+        # Log some statistics
+        self._log.debug("Found {} rated and {} popular unrated tracks",
+                       len(rated_tracks), len(popular_unrated))
 
         # Select tracks
         selected_tracks = forgotten_tracks[:max_tracks]
