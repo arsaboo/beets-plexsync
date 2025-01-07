@@ -490,12 +490,17 @@ class PlexSync(BeetsPlugin):
             plex_lookup = self.build_plex_lookup(lib)
             self._log.debug("Found {} tracks in lookup dictionary", len(plex_lookup))
 
+            # Calculate preferred genres and similar tracks once
+            preferred_genres, similar_tracks = self.get_preferred_attributes()
+            self._log.debug(f"Using preferred genres: {preferred_genres}")
+            self._log.debug(f"Processing {len(similar_tracks)} pre-filtered similar tracks")
+
             for p in playlists_config:
                 playlist_id = p.get("id")
                 if playlist_id == "daily_discovery":
-                    self.generate_daily_discovery(lib, p, plex_lookup)
+                    self.generate_daily_discovery(lib, p, plex_lookup, preferred_genres, similar_tracks)
                 elif playlist_id == "forgotten_gems":
-                    self.generate_forgotten_gems(lib, p, plex_lookup)
+                    self.generate_forgotten_gems(lib, p, plex_lookup, preferred_genres, similar_tracks)
 
         plex_smartplaylists_cmd.func = func_plex_smartplaylists
 
@@ -1686,13 +1691,11 @@ class PlexSync(BeetsPlugin):
         rated_tracks_count = max_tracks - unrated_tracks_count
         return unrated_tracks_count, rated_tracks_count
 
-    def generate_daily_discovery(self, lib, dd_config, plex_lookup):
+    def generate_daily_discovery(self, lib, dd_config, plex_lookup, preferred_genres, similar_tracks):
         """Generate a Daily Discovery playlist with plex_smartplaylists command."""
         playlist_name = dd_config.get("name", "Daily Discovery")
         self._log.info("Generating {} playlist", playlist_name)
 
-        # Setup and configuration
-        preferred_genres, similar_tracks = self.get_preferred_attributes()
         self._log.debug(f"Using preferred genres: {preferred_genres}")
         self._log.debug(f"Processing {len(similar_tracks)} pre-filtered similar tracks")
 
@@ -1786,13 +1789,11 @@ class PlexSync(BeetsPlugin):
             len(selected_tracks),
         )
 
-    def generate_forgotten_gems(self, lib, ug_config, plex_lookup):
+    def generate_forgotten_gems(self, lib, ug_config, plex_lookup, preferred_genres, similar_tracks):
         """Generate a Forgotten Gems playlist with tracks matching user taste but low play count."""
         playlist_name = ug_config.get("name", "Forgotten Gems")
         self._log.info("Generating {} playlist", playlist_name)
 
-        # Get preferred genres from user's listening history
-        preferred_genres, _ = self.get_preferred_attributes()
         self._log.debug(f"Using preferred genres: {preferred_genres}")
 
         # Get configuration
