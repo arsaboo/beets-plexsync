@@ -496,11 +496,17 @@ class PlexSync(BeetsPlugin):
             self._log.debug(f"Processing {len(similar_tracks)} pre-filtered similar tracks")
 
             for p in playlists_config:
+                playlist_type = p.get("type", "smart")
                 playlist_id = p.get("id")
-                if playlist_id == "daily_discovery":
+
+                if playlist_type == "imported":
+                    self.generate_imported_playlist(lib, p)
+                elif playlist_id == "daily_discovery":
                     self.generate_daily_discovery(lib, p, plex_lookup, preferred_genres, similar_tracks)
                 elif playlist_id == "forgotten_gems":
                     self.generate_forgotten_gems(lib, p, plex_lookup, preferred_genres, similar_tracks)
+                else:
+                    self._log.warning("Unknown playlist type or id: {} - {}", playlist_type, playlist_id)
 
         plex_smartplaylists_cmd.func = func_plex_smartplaylists
 
@@ -1911,3 +1917,106 @@ class PlexSync(BeetsPlugin):
             playlist_name,
             len(selected_tracks),
         )
+
+    def generate_imported_playlist(self, lib, playlist_config):
+        """Generate a playlist by importing from external sources."""
+        playlist_name = playlist_config.get("name", "Imported Playlist")
+        sources = playlist_config.get("sources", [])
+        max_tracks = playlist_config.get("max_tracks", None)
+
+        if not sources:
+            self._log.warning("No sources defined for imported playlist {}", playlist_name)
+            return
+
+        self._log.info("Generating imported playlist {} from {} sources", playlist_name, len(sources))
+
+        # Import tracks from all sources
+        all_tracks = []
+        for source in sources:
+            try:
+                self._log.info("Importing from source: {}", source)
+                if "spotify" in source:
+                    tracks = self.import_spotify_playlist(self.get_playlist_id(source))
+                elif "jiosaavn" in source:
+                    tracks = self.import_jiosaavn_playlist(source)
+                elif "apple" in source:
+                    tracks = self.import_apple_playlist(source)
+                elif "gaana" in source:
+                    tracks = self.import_gaana_playlist(source)
+                elif "youtube" in source:
+                    tracks = self.import_yt_playlist(source)
+                elif "tidal" in source:
+                    tracks = self.import_tidal_playlist(source)
+                else:
+                    self._log.warning("Unsupported source: {}", source)
+                    continue
+
+                if tracks:
+                    all_tracks.extend(tracks)
+            except Exception as e:
+                self._log.error("Error importing from {}: {}", source, e)
+                continue
+
+        if not all_tracks:
+            self._log.warning("No tracks found from any source for playlist {}", playlist_name)
+            return
+
+        # Process tracks through Plex and filter out low-rated ones
+        matched_songs = []
+        for track in all_tracks:
+            found = self.search_plex_song(track)
+            if found:
+                beets_item = lib.items(f'plex_ratingkey:{found.ratingKey}').get()
+                if beets_item:
+                    rating = float(getattr(beets_item, 'plex_userrating', 0))
+                    if rating == 0 or rating > 2:  # Include unrated or rating > 2
+                        song_dict = {
+                            "title": found.title,
+                            "album": found.parentTitle,
+                            "plex_ratingkey": found.ratingKey,
+                        }
+                        matched_songs.append(self.dotdict(song_dict))
+                    else:
+                        self._log.debug(
+                            "Skipping low-rated track: {} - {} (rating: {})",
+                            found.title,
+                            found.parentTitle,
+                            rating
+                        )
+            else:
+                self._log.debug("Track not found in Plex: {}", track)
+
+
+        # Deduplicate based on plex_ratingkey
+        seen = set()
+        unique_matched = []
+        for song in matched_songs:
+            if song.plex_ratingkey not in seen:
+                seen.add(song.plex_ratingkey)
+                unique_matched.append(song)
+
+        # Apply track limit if specified
+        if max_tracks:
+            unique_matched = unique_matched[:max_tracks]
+
+        self._log.info(
+            "Found {} unique tracks after filtering",
+            len(unique_matched)
+        )
+
+        # Create or update playlist
+        try:
+            self._plex_clear_playlist(playlist_name)
+            self._log.info("Cleared existing playlist {}", playlist_name)
+        except exceptions.NotFound:
+            self._log.debug("No existing playlist {} found", playlist_name)
+
+        if unique_matched:
+            self._plex_add_playlist_item(unique_matched, playlist_name)
+            self._log.info(
+                "Successfully created playlist {} with {} tracks",
+                playlist_name,
+                len(unique_matched)
+            )
+        else:
+            self._log.warning("No tracks remaining after filtering for {}", playlist_name)
