@@ -1978,23 +1978,21 @@ class PlexSync(BeetsPlugin):
         for track in all_tracks:
             found = self.search_plex_song(track)
             if found:
-                beets_item = lib.items(f'plex_ratingkey:{found.ratingKey}').get()
-                if beets_item:
-                    rating = float(getattr(beets_item, 'plex_userrating', 0))
-                    if rating == 0 or rating > 2:  # Include unrated or rating > 2
-                        song_dict = {
-                            "title": found.title,
-                            "album": found.parentTitle,
-                            "plex_ratingkey": found.ratingKey,
-                        }
-                        matched_songs.append(self.dotdict(song_dict))
-                    else:
-                        self._log.debug(
-                            "Skipping low-rated track: {} - {} (rating: {})",
-                            found.title,
-                            found.parentTitle,
-                            rating
-                        )
+                rating = float(getattr(found, 'userrating', 0))
+                if rating == 0 or rating > 2:  # Include unrated or rating > 2
+                    song_dict = {
+                        "title": found.title,
+                        "album": found.parentTitle,
+                        "plex_ratingkey": found.ratingKey,
+                    }
+                    matched_songs.append(self.dotdict(song_dict))
+                else:
+                    self._log.debug(
+                        "Skipping low-rated track: {} - {} (rating: {})",
+                        found.title,
+                        found.parentTitle,
+                        rating
+                    )
             else:
                 self._log.debug("Track not found in Plex: {}", track)
 
