@@ -485,15 +485,23 @@ class PlexSync(BeetsPlugin):
                 )
                 return
 
-            # Build lookup dictionary once
-            self._log.info("Building Plex lookup dictionary...")
-            plex_lookup = self.build_plex_lookup(lib)
-            self._log.debug("Found {} tracks in lookup dictionary", len(plex_lookup))
+            # Check if we have any smart playlists that need the lookup
+            has_smart_playlists = any(
+                p.get("id") in ["daily_discovery", "forgotten_gems"]
+                for p in playlists_config
+            )
 
-            # Calculate preferred genres and similar tracks once
-            preferred_genres, similar_tracks = self.get_preferred_attributes()
-            self._log.debug(f"Using preferred genres: {preferred_genres}")
-            self._log.debug(f"Processing {len(similar_tracks)} pre-filtered similar tracks")
+            # Only build lookup if we have smart playlists
+            plex_lookup = None
+            if has_smart_playlists:
+                self._log.info("Building Plex lookup dictionary for smart playlists...")
+                plex_lookup = self.build_plex_lookup(lib)
+                self._log.debug("Found {} tracks in lookup dictionary", len(plex_lookup))
+
+                # Calculate preferred genres and similar tracks only for smart playlists
+                preferred_genres, similar_tracks = self.get_preferred_attributes()
+                self._log.debug(f"Using preferred genres: {preferred_genres}")
+                self._log.debug(f"Processing {len(similar_tracks)} pre-filtered similar tracks")
 
             for p in playlists_config:
                 playlist_type = p.get("type", "smart")
@@ -501,10 +509,14 @@ class PlexSync(BeetsPlugin):
 
                 if playlist_type == "imported":
                     self.generate_imported_playlist(lib, p)
-                elif playlist_id == "daily_discovery":
-                    self.generate_daily_discovery(lib, p, plex_lookup, preferred_genres, similar_tracks)
-                elif playlist_id == "forgotten_gems":
-                    self.generate_forgotten_gems(lib, p, plex_lookup, preferred_genres, similar_tracks)
+                elif playlist_id in ["daily_discovery", "forgotten_gems"]:
+                    if plex_lookup is None:
+                        self._log.error(f"Cannot generate {playlist_id} playlist without Plex lookup")
+                        continue
+                    if playlist_id == "daily_discovery":
+                        self.generate_daily_discovery(lib, p, plex_lookup, preferred_genres, similar_tracks)
+                    else:  # forgotten_gems
+                        self.generate_forgotten_gems(lib, p, plex_lookup, preferred_genres, similar_tracks)
                 else:
                     self._log.warning("Unknown playlist type or id: {} - {}", playlist_type, playlist_id)
 
