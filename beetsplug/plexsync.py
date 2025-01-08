@@ -1936,6 +1936,22 @@ class PlexSync(BeetsPlugin):
         sources = playlist_config.get("sources", [])
         max_tracks = playlist_config.get("max_tracks", None)
 
+        # Get config options with defaults
+        if (
+            "playlists" in config["plexsync"]
+            and "defaults" in config["plexsync"]["playlists"]
+        ):
+            defaults_cfg = config["plexsync"]["playlists"]["defaults"].get({})
+        else:
+            defaults_cfg = {}
+
+        manual_search = self.get_config_value(
+            playlist_config, defaults_cfg, "manual_search", False
+        )
+        clear_playlist = self.get_config_value(
+            playlist_config, defaults_cfg, "clear_playlist", False
+        )
+
         if not sources:
             self._log.warning("No sources defined for imported playlist {}", playlist_name)
             return
@@ -1976,7 +1992,7 @@ class PlexSync(BeetsPlugin):
         # Process tracks through Plex and filter out low-rated ones
         matched_songs = []
         for track in all_tracks:
-            found = self.search_plex_song(track)
+            found = self.search_plex_song(track, manual_search)
             if found:
                 rating = float(getattr(found, 'userrating', 0))
                 if rating == 0 or rating > 2:  # Include unrated or rating > 2
@@ -2014,12 +2030,13 @@ class PlexSync(BeetsPlugin):
             len(unique_matched)
         )
 
-        # Create or update playlist
-        try:
-            self._plex_clear_playlist(playlist_name)
-            self._log.info("Cleared existing playlist {}", playlist_name)
-        except exceptions.NotFound:
-            self._log.debug("No existing playlist {} found", playlist_name)
+        # Create or update playlist based on clear_playlist setting
+        if clear_playlist:
+            try:
+                self._plex_clear_playlist(playlist_name)
+                self._log.info("Cleared existing playlist {}", playlist_name)
+            except exceptions.NotFound:
+                self._log.debug("No existing playlist {} found", playlist_name)
 
         if unique_matched:
             self._plex_add_playlist_item(unique_matched, playlist_name)
