@@ -1497,8 +1497,6 @@ class PlexSync(BeetsPlugin):
         genre_counts = {}
         similar_tracks = set()
 
-        # Get tracks to exclude (played in last exclusion_days)
-        exclusion_date = datetime.now() - timedelta(days=exclusion_days)
         recently_played = set(
             track.ratingKey
             for track in self.music.search(
