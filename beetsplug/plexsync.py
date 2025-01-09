@@ -866,7 +866,7 @@ class PlexSync(BeetsPlugin):
                     self._log.debug("Please sync Plex library again")
                     continue
 
-    def search_plex_song(self, song, manual_search=False):
+    def search_plex_song(self, song, manual_search=None):
         """Fetch the Plex track key."""
 
         if 'From "' in song["title"] or '[From "' in song["title"]:
@@ -890,6 +890,8 @@ class PlexSync(BeetsPlugin):
             )
             return None
         artist = song["artist"].split(",")[0]
+        if manual_search is None:
+            manual_search = config["plexsync"]["manual_search"].get(bool)
         if len(tracks) == 1:
             return tracks[0]
         elif len(tracks) > 1:
@@ -976,14 +978,14 @@ class PlexSync(BeetsPlugin):
             self._log.info("Importing weekly jams playlist")
             weekly_jams = lb.get_weekly_jams()
             self._log.info("Importing {} songs from Weekly Jams", len(weekly_jams))
-            self.add_songs_to_plex("Weekly Jams", weekly_jams)
+            self.add_songs_to_plex("Weekly Jams", weekly_jams, config["plexsync"]["manual_search"].get(bool))
 
             self._log.info("Importing weekly exploration playlist")
             weekly_exploration = lb.get_weekly_exploration()
             self._log.info(
                 "Importing {} songs from Weekly Exploration", len(weekly_exploration)
             )
-            self.add_songs_to_plex("Weekly Exploration", weekly_exploration)
+            self.add_songs_to_plex("Weekly Exploration", weekly_exploration, config["plexsync"]["manual_search"].get(bool))
         else:
             if playlist_url is None or (
                 "http://" not in playlist_url and "https://" not in playlist_url
@@ -1005,14 +1007,14 @@ class PlexSync(BeetsPlugin):
                 songs = []
                 self._log.error("Playlist URL not supported")
             self._log.info("Importing {} songs from {}", len(songs), playlist_url)
-            self.add_songs_to_plex(playlist, songs)
+            self.add_songs_to_plex(playlist, songs, config["plexsync"]["manual_search"].get(bool))
 
-    def add_songs_to_plex(self, playlist, songs):
+    def add_songs_to_plex(self, playlist, songs, manual_search):
         song_list = []
         if songs:
             for song in songs:
-                if self.search_plex_song(song) is not None:
-                    found = self.search_plex_song(song)
+                if self.search_plex_song(song, manual_search) is not None:
+                    found = self.search_plex_song(song, manual_search)
                     song_dict = {
                         "title": found.title,
                         "album": found.parentTitle,
@@ -1946,7 +1948,7 @@ class PlexSync(BeetsPlugin):
             defaults_cfg = {}
 
         manual_search = self.get_config_value(
-            playlist_config, defaults_cfg, "manual_search", False
+            playlist_config, defaults_cfg, "manual_search", config["plexsync"]["manual_search"].get(bool)
         )
         clear_playlist = self.get_config_value(
             playlist_config, defaults_cfg, "clear_playlist", False
