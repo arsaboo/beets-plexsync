@@ -67,7 +67,7 @@ This plugin allows you to sync your Plex library with beets, create playlists ba
 
 - **Album Collage**: `beet plexcollage` creates a collage of most played albums. Use the `-i` flag to specify the number of days and `-g` flag to specify the grid size.
 
-- **Smart Playlists**: Use `beet plex_smartplaylists` to generate or manage custom playlists in Plex. The plugin currently supports two smart playlists:
+- **Smart Playlists**: Use `beet plex_smartplaylists` to generate or manage custom playlists in Plex. The plugin currently supports three types of playlists:
 
   1. **Daily Discovery**:
      - Uses tracks you've played in the last 15 days as a base to learn about listening habits (configurable via `history_days`)
@@ -93,6 +93,14 @@ This plugin allows you to sync your Plex library with beets, create playlists ba
      - Controls maximum play count (configurable via `max_plays`, default 2)
      - Minimum rating for rated tracks to be included (configurable via `min_rating`, default 4)
      - Percentage of playlist to fill with unrated but popular tracks (configurable via `discovery_ratio`, default 30)
+
+  3. **Imported Playlists**:
+     - Import playlists from external services (Spotify, Apple Music, YouTube, etc.)
+     - Configure multiple source URLs per playlist
+     - Control playlist behavior with options:
+       - `manual_search`: Enable/disable manual matching for unmatched tracks
+       - `clear_playlist`: Clear existing playlist before adding new tracks
+       - `max_tracks`: Limit the number of tracks in the playlist
 
 ## Configuration
 
@@ -123,11 +131,11 @@ This plugin allows you to sync your Plex library with beets, create playlists ba
 
   For example, to import the Global Top-100 Apple Music playlist, use the command `beet plexplaylistimport -m Top-100 -u https://music.apple.com/us/playlist/top-100-global/pl.d25f5d1181894928af76c85c967f8f31`. Similarly, to import the Hot-hits USA playlist from Spotify, use the command `beet plexplaylistimport -m HotHitsUSA -u https://open.spotify.com/playlist/37i9dQZF1DX0kbJZpiYdZl`
 
+  You can also use this function to import the weekly jams and weekly exploration playlists from ListenBrainz into Plex. You will need to install and configure the [Listenbrainz plugin][listenbrainz_plugin_]. To import the ListenBrainz playlists, use the command `beet plexplaylistimport --listenbrainz`.
+
 * `beet plexsearchimport`: allows you to import playlists based on Youtube search (results are returned in descending order of the number of views). Use the `-m` flag to specify the playlist name to be created in Plex, supply the search query with the `-s` flag, and use the `-l` flag to limit the number of search results.
 
   For example, to import the top-20 songs by Taylor Swift, use the command `beet plexsearchimport -s "Taylor Swift" -l 20 -m "Taylor"`.
-
-  You can also use this function to import the weekly jams and weekly exploration playlists from ListenBrainz into Plex. You will need to install and configure the [Listenbrainz plugin][listenbrainz_plugin_]. To import the ListenBrainz playlists, use the command `beet plexplaylistimport --listenbrainz`.
 
 * `beet plexplaylistclear`: allows you to clear a Plex playlist. Use the `-m` flag to specify the playlist name to be cleared in Plex.
 
@@ -170,6 +178,14 @@ plexsync:
                             # Higher values = more discovery
                             # Example: 30 = 30% unrated + 70% rated tracks
                             #          70 = 70% unrated + 30% rated tracks
+      - id: bollywood_hits
+        name: "Bollywood Hits"
+        type: imported
+        sources: # full playlist urls from the supported services.
+          - https://music.youtube.com/playlist?list=RDCLAK5uy_kjNBBWqyQ_Cy14B0P4xrcKgd39CRjXXKk
+        max_tracks: 100     # Optional limit
+        manual_search: no
+        clear_playlist: no
 
 [collage]: collage.png
 [queries_]: https://beets.readthedocs.io/en/latest/reference/query.html?highlight=queries
