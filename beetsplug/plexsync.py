@@ -868,7 +868,11 @@ class PlexSync(BeetsPlugin):
 
     def search_plex_song(self, song, manual_search=None):
         """Fetch the Plex track key."""
+        # Get base manual_search setting if not provided
+        if manual_search is None:
+            manual_search = config["plexsync"]["manual_search"].get(bool)
 
+        # Clean up title and album
         if 'From "' in song["title"] or '[From "' in song["title"]:
             song["title"], song["album"] = self.parse_title(song["title"])
         try:
