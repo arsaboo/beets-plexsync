@@ -919,7 +919,7 @@ class PlexSync(BeetsPlugin):
                 if artist in plex_artist:
                     return track
         else:
-            if config["plexsync"]["manual_search"] and not manual_search:
+            if manual_search:
                 self._log.info(
                     "Track {} - {} - {} not found in Plex",
                     song["album"],
@@ -2011,7 +2011,6 @@ class PlexSync(BeetsPlugin):
                     )
             else:
                 self._log.debug("Track not found in Plex: {}", track)
-
 
         # Deduplicate based on plex_ratingkey
         seen = set()
