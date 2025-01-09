@@ -646,8 +646,8 @@ class PlexSync(BeetsPlugin):
 
             # Debug logging for troubleshooting
             self._log.debug(
-                "Match scores for {}: Title={:.2f}, Album={:.2f}, Artist={:.2f}, Combined={:.2f}",
-                track.title, title_score, album_score, artist_score, combined_score
+                "Match scores for {} - {} - {}: Title={:.2f}, Album={:.2f}, Artist={:.2f}, Combined={:.2f}",
+                track.parentTitle, track.title, track.artist, title_score, album_score, artist_score, combined_score
             )
 
         # Sort matches by combined score in descending order
