@@ -614,29 +614,21 @@ class PlexSync(BeetsPlugin):
         return difflib.SequenceMatcher(None, str1.lower(), str2.lower()).ratio()
 
     def find_closest_match(self, title, lst):
-        """Find closest match using title, album, and artist information.
-
-        Args:
-            title (dict): Dictionary containing 'title', 'album', and 'artist'
-            lst (list): List of Plex track objects to search through
-
-        Returns:
-            list: Sorted list of matches based on combined score
-        """
-        # Initialize an empty list to store the matches and their scores
         matches = []
-
-        # Loop through each track in the list
         for track in lst:
-            # Calculate individual scores
+            # Calculate title and album scores
             title_score = self.get_fuzzy_score(title.get('title', ''), track.title)
             album_score = self.get_fuzzy_score(title.get('album', ''), track.parentTitle)
 
-            # Get artist comparison - compare all artists combinations
-            track_artists = [artist.strip() for artist in getattr(track, 'originalTitle', '').split(',') if artist.strip()]
-            source_artists = [artist.strip() for artist in title.get('artist', '').split(',') if artist.strip()]
+            # Safely get artists with None handling
+            track_artist_str = getattr(track, 'originalTitle', None) or ''
+            source_artist_str = title.get('artist', '')
 
-            # Compare all combinations and get max score
+            # Split artists safely
+            track_artists = [a.strip() for a in track_artist_str.split(',') if a.strip()] if track_artist_str else []
+            source_artists = [a.strip() for a in source_artist_str.split(',') if a.strip()] if source_artist_str else []
+
+            # Compare artists
             artist_score = 0
             if track_artists and source_artists:
                 scores = [
@@ -646,24 +638,18 @@ class PlexSync(BeetsPlugin):
                 ]
                 artist_score = max(scores) if scores else 0
 
-            # Calculate weighted combined score
-            # Title: 50%, Album: 30%, Artist: 20%
+            # Calculate weighted score
             combined_score = (title_score * 0.5) + (album_score * 0.3) + (artist_score * 0.2)
-
-            # Store track and score
             matches.append((track, combined_score))
 
-            # Debug logging for troubleshooting
+            # Debug logging
             self._log.debug(
                 "Match scores for {} - {}: Title={:.2f}, Album={:.2f}, Artist={:.2f}, Combined={:.2f}",
                 track.parentTitle, track.title, title_score, album_score, artist_score, combined_score
             )
 
-        # Sort matches by combined score in descending order
         matches.sort(key=lambda x: x[1], reverse=True)
-
-        # Return only the tracks, maintaining the sorted order
-        return [m[0] for m in matches]
+        return matches
 
     def import_apple_playlist(self, url):
         import json
