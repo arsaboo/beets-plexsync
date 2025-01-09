@@ -632,10 +632,19 @@ class PlexSync(BeetsPlugin):
             title_score = self.get_fuzzy_score(title.get('title', ''), track.title)
             album_score = self.get_fuzzy_score(title.get('album', ''), track.parentTitle)
 
-            # Get artist comparison - compare with first artist if multiple
-            track_artist = getattr(track, 'originalTitle', '')
-            source_artist = title.get('artist', '').split(',')[0].strip()
-            artist_score = self.get_fuzzy_score(source_artist, track_artist)
+            # Get artist comparison - compare all artists combinations
+            track_artists = [artist.strip() for artist in getattr(track, 'originalTitle', '').split(',') if artist.strip()]
+            source_artists = [artist.strip() for artist in title.get('artist', '').split(',') if artist.strip()]
+
+            # Compare all combinations and get max score
+            artist_score = 0
+            if track_artists and source_artists:
+                scores = [
+                    self.get_fuzzy_score(s_artist, t_artist)
+                    for s_artist in source_artists
+                    for t_artist in track_artists
+                ]
+                artist_score = max(scores) if scores else 0
 
             # Calculate weighted combined score
             # Title: 50%, Album: 30%, Artist: 20%
@@ -646,8 +655,8 @@ class PlexSync(BeetsPlugin):
 
             # Debug logging for troubleshooting
             self._log.debug(
-                "Match scores for {} - {} - {}: Title={:.2f}, Album={:.2f}, Artist={:.2f}, Combined={:.2f}",
-                track.parentTitle, track.title, track_artist, title_score, album_score, artist_score, combined_score
+                "Match scores for {} - {}: Title={:.2f}, Album={:.2f}, Artist={:.2f}, Combined={:.2f}",
+                track.parentTitle, track.title, title_score, album_score, artist_score, combined_score
             )
 
         # Sort matches by combined score in descending order
