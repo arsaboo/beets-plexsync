@@ -931,7 +931,7 @@ class PlexSync(BeetsPlugin):
                     f'\nChoose candidates for {song["album"]} '
                     f'- {song["title"]} - {song["artist"]}:'
                 )
-                for i, track in enumerate(sorted_tracks, start=1):
+                for i, (track, score) in enumerate(sorted_tracks, start=1):
                     print_(
                         f"{i}. {track.parentTitle} - {track.title} - "
                         f"{track.artist().title}"
@@ -941,8 +941,8 @@ class PlexSync(BeetsPlugin):
                 )
                 if sel in ("b", "B", "s", "S"):
                     return None
-                return sorted_tracks[sel - 1] if sel > 0 else None
-            for track in sorted_tracks:
+                return sorted_tracks[sel - 1][0] if sel > 0 else None
+            for track, score in sorted_tracks:
                 if track.originalTitle is not None:
                     plex_artist = track.originalTitle
                 else:
