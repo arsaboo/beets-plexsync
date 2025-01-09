@@ -633,7 +633,7 @@ class PlexSync(BeetsPlugin):
             album_score = self.get_fuzzy_score(title.get('album', ''), track.parentTitle)
 
             # Get artist comparison - compare with first artist if multiple
-            track_artist = track.artist().title if hasattr(track, 'artist') else ''
+            track_artist = getattr(track, 'originalTitle', '')
             source_artist = title.get('artist', '').split(',')[0].strip()
             artist_score = self.get_fuzzy_score(source_artist, track_artist)
 
