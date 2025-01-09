@@ -607,23 +607,53 @@ class PlexSync(BeetsPlugin):
             song_list.append(song_dict)
         return song_list
 
-    # Define a function that takes a title string and a list of tuples as input
+    def get_fuzzy_score(self, str1, str2):
+        """Calculate fuzzy match score between two strings."""
+        if not str1 or not str2:
+            return 0
+        return difflib.SequenceMatcher(None, str1.lower(), str2.lower()).ratio()
+
     def find_closest_match(self, title, lst):
+        """Find closest match using title, album, and artist information.
+
+        Args:
+            title (dict): Dictionary containing 'title', 'album', and 'artist'
+            lst (list): List of Plex track objects to search through
+
+        Returns:
+            list: Sorted list of matches based on combined score
+        """
         # Initialize an empty list to store the matches and their scores
         matches = []
-        # Loop through each tuple in the list
-        for t in lst:
-            # Use the SequenceMatcher class to compare the title with the
-            # first element of the tuple
-            # The ratio method returns a score between 0 and 1 indicating how
-            # similar the two strings are based on the Levenshtein distance
-            score = difflib.SequenceMatcher(None, title, t.title).ratio()
-            # Append the tuple and the score to the matches list
-            matches.append((t, score))
-        # Sort the matches list by the score in descending order
+
+        # Loop through each track in the list
+        for track in lst:
+            # Calculate individual scores
+            title_score = self.get_fuzzy_score(title.get('title', ''), track.title)
+            album_score = self.get_fuzzy_score(title.get('album', ''), track.parentTitle)
+
+            # Get artist comparison - compare with first artist if multiple
+            track_artist = track.artist().title if hasattr(track, 'artist') else ''
+            source_artist = title.get('artist', '').split(',')[0].strip()
+            artist_score = self.get_fuzzy_score(source_artist, track_artist)
+
+            # Calculate weighted combined score
+            # Title: 50%, Album: 30%, Artist: 20%
+            combined_score = (title_score * 0.5) + (album_score * 0.3) + (artist_score * 0.2)
+
+            # Store track and score
+            matches.append((track, combined_score))
+
+            # Debug logging for troubleshooting
+            self._log.debug(
+                "Match scores for {}: Title={:.2f}, Album={:.2f}, Artist={:.2f}, Combined={:.2f}",
+                track.title, title_score, album_score, artist_score, combined_score
+            )
+
+        # Sort matches by combined score in descending order
         matches.sort(key=lambda x: x[1], reverse=True)
-        # Return only the first element of each tuple in the matches
-        # list as a new list
+
+        # Return only the tracks, maintaining the sorted order
         return [m[0] for m in matches]
 
     def import_apple_playlist(self, url):
@@ -899,11 +929,11 @@ class PlexSync(BeetsPlugin):
         if len(tracks) == 1:
             return tracks[0]
         elif len(tracks) > 1:
-            sorted_tracks = self.find_closest_match(song["title"], tracks)
+            sorted_tracks = self.find_closest_match(song, tracks)  # Simply pass the song dict
             self._log.debug("Found {} tracks for {}", len(sorted_tracks), song["title"])
             if manual_search and len(sorted_tracks) > 0:
                 print_(
-                    f'Choose candidates for {song["album"]} '
+                    f'\nChoose candidates for {song["album"]} '
                     f'- {song["title"]} - {song["artist"]}:'
                 )
                 for i, track in enumerate(sorted_tracks, start=1):
