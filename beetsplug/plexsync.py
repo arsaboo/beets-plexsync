@@ -1014,11 +1014,18 @@ class PlexSync(BeetsPlugin):
             self.add_songs_to_plex(playlist, songs, config["plexsync"]["manual_search"].get(bool))
 
     def add_songs_to_plex(self, playlist, songs, manual_search):
+        """Add songs to a Plex playlist.
+
+        Args:
+            playlist: Name of the playlist
+            songs: List of songs to add
+            manual_search: Whether to enable manual search for matches
+        """
         song_list = []
         if songs:
             for song in songs:
-                if self.search_plex_song(song, manual_search) is not None:
-                    found = self.search_plex_song(song, manual_search)
+                found = self.search_plex_song(song, manual_search)
+                if found is not None:
                     song_dict = {
                         "title": found.title,
                         "album": found.parentTitle,
