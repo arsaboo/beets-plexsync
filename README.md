@@ -41,6 +41,7 @@ Use `beet plex_smartplaylists` to generate or manage custom playlists in Plex. T
        - `manual_search`: Enable/disable manual matching for unmatched tracks
        - `clear_playlist`: Clear existing playlist before adding new tracks
        - `max_tracks`: Limit the number of tracks in the playlist
+
 ### Library Sync
 - **Plex Library Sync**: `beet plexsync [-f]` imports all the data from your Plex library inside beets. Use the `-f` flag to force update the entire library with fresh information from Plex.
 - **Recent Sync**: `beet plexsyncrecent` updates the information for tracks listened in the last 7 days.
