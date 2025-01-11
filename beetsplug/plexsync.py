@@ -1974,6 +1974,15 @@ class PlexSync(BeetsPlugin):
         sources = playlist_config.get("sources", [])
         max_tracks = playlist_config.get("max_tracks", None)
 
+        # Create log file path in beets config directory
+        log_file = os.path.join(self.config_dir, f"{playlist_name.lower().replace(' ', '_')}_import.log")
+
+        # Clear/create the log file
+        with open(log_file, 'w', encoding='utf-8') as f:
+            f.write(f"Import log for playlist: {playlist_name}\n")
+            f.write(f"Import started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write("-" * 80 + "\n\n")
+
         # Get config options with defaults
         if (
             "playlists" in config["plexsync"]
@@ -1998,6 +2007,8 @@ class PlexSync(BeetsPlugin):
 
         # Import tracks from all sources
         all_tracks = []
+        not_found_count = 0
+
         for source in sources:
             try:
                 self._log.info("Importing from source: {}", source)
@@ -2021,6 +2032,8 @@ class PlexSync(BeetsPlugin):
                     all_tracks.extend(tracks)
             except Exception as e:
                 self._log.error("Error importing from {}: {}", source, e)
+                with open(log_file, 'a', encoding='utf-8') as f:
+                    f.write(f"Error importing from source {source}: {str(e)}\n")
                 continue
 
         if not all_tracks:
@@ -2029,6 +2042,10 @@ class PlexSync(BeetsPlugin):
 
         # Process tracks through Plex and filter out low-rated ones
         matched_songs = []
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write("\nTracks not found in Plex library:\n")
+            f.write("-" * 80 + "\n")
+
         for track in all_tracks:
             found = self.search_plex_song(track, manual_search)
             if found:
@@ -2041,14 +2058,21 @@ class PlexSync(BeetsPlugin):
                     }
                     matched_songs.append(self.dotdict(song_dict))
                 else:
-                    self._log.debug(
-                        "Skipping low-rated track: {} - {} (rating: {})",
-                        found.title,
-                        found.parentTitle,
-                        rating
-                    )
+                    with open(log_file, 'a', encoding='utf-8') as f:
+                        f.write(f"Low rated ({rating}): {track.get('artist', 'Unknown')} - {track.get('album', 'Unknown')} - {track.get('title', 'Unknown')}\n")
             else:
-                self._log.debug("Track not found in Plex: {}", track)
+                not_found_count += 1
+                with open(log_file, 'a', encoding='utf-8') as f:
+                    f.write(f"Not found: {track.get('artist', 'Unknown')} - {track.get('album', 'Unknown')} - {track.get('title', 'Unknown')}\n")
+
+        # Write summary at the end of log file
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"\nImport Summary:\n")
+            f.write("-" * 80 + "\n")
+            f.write(f"Total tracks from sources: {len(all_tracks)}\n")
+            f.write(f"Tracks not found in Plex: {not_found_count}\n")
+            f.write(f"Tracks matched and added: {len(matched_songs)}\n")
+            f.write(f"\nImport completed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
 
         # Deduplicate based on plex_ratingkey
         seen = set()
@@ -2063,8 +2087,9 @@ class PlexSync(BeetsPlugin):
             unique_matched = unique_matched[:max_tracks]
 
         self._log.info(
-            "Found {} unique tracks after filtering",
-            len(unique_matched)
+            "Found {} unique tracks after filtering (see {} for details)",
+            len(unique_matched),
+            log_file
         )
 
         # Create or update playlist based on clear_playlist setting

@@ -195,7 +195,7 @@ plexsync:
       - id: daily_discovery
         name: "Daily Discovery"
         max_tracks: 20      # Maximum number of tracks for Daily Discovery playlist
-        exclusion_days: 30  # Number of days to exclude recently played tracks
+        exclusion_days: 30  # Number of days to exclude recently played tracks. Tracks played in the last 30 days will not be included in the playlist.
         history_days: 15    # Number of days to use to learn listening habits
         discovery_ratio: 70 # Percentage of unrated tracks (0-100)
                             # Higher values = more discovery
