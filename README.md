@@ -1,6 +1,102 @@
 # beets-plexsync
 A plugin for [beets][beets] to sync with your Plex server.
 
+## Key Features
+
+### AI-Generated Playlists
+- **AI-Generated Playlists**: Use `beet plexsonic -p "YOUR_PROMPT"` to create a playlist based on YOUR_PROMPT. Modify the playlist name using `-m` flag, change the number of tracks requested with `-n` flag, and clear the playlist before adding new songs with `-c` flag.
+
+### Smart Playlists
+Use `beet plex_smartplaylists` to generate or manage custom playlists in Plex. The plugin currently supports three types of playlists:
+
+  1. **Daily Discovery**:
+     - Uses tracks you've played in the last 15 days as a base to learn about listening habits (configurable via `history_days`)
+     - Excludes tracks played in the last 30 days (configurable via `exclusion_days`)
+     - Uses an intelligent scoring system that considers:
+       - Track rating (primary factor)
+       - Last played date
+       - Play count
+       - Recently added bonus
+     - Introduces controlled randomization to ensure variety
+     - Matches genres with your recent listening history
+     - Uses Plex's [Sonic Analysis](https://support.plex.tv/articles/sonic-analysis-music/) to find sonically similar tracks
+     - Limits the playlist size (configurable via `max_tracks`, default 20)
+     - Controls discovery vs. familiar ratio (configurable via `discovery_ratio`, default 70%)
+
+  2. **Forgotten Gems**:
+     - Creates a playlist of tracks that deserve more attention
+     - Uses your highly-rated tracks to establish a quality baseline
+     - Prioritizes unrated tracks with popularity comparable to your favorites
+     - Only includes tracks matching your genre preferences
+     - Automatically adjusts selection criteria based on your library's characteristics
+     - Limits the playlist size (configurable via `max_tracks`, default 20)
+     - Controls maximum play count (configurable via `max_plays`, default 2)
+     - Minimum rating for rated tracks to be included (configurable via `min_rating`, default 4)
+     - Percentage of playlist to fill with unrated but popular tracks (configurable via `discovery_ratio`, default 30)
+
+  3. **Imported Playlists**:
+     - Import playlists from external services (Spotify, Apple Music, YouTube, etc.)
+     - Configure multiple source URLs per playlist
+     - Control playlist behavior with options:
+       - `manual_search`: Enable/disable manual matching for unmatched tracks
+       - `clear_playlist`: Clear existing playlist before adding new tracks
+       - `max_tracks`: Limit the number of tracks in the playlist
+
+### Library Sync
+- **Plex Library Sync**: `beet plexsync [-f]` imports all the data from your Plex library inside beets. Use the `-f` flag to force update the entire library with fresh information from Plex.
+- **Recent Sync**: `beet plexsyncrecent` updates the information for tracks listened in the last 7 days.
+
+### Playlist Manipulation
+- **Playlist Manipulation**: `plexplaylistadd` and `plexplaylistremove` add or remove tracks from Plex playlists. Use the `-m` flag to provide the playlist name.
+- **Playlist Clear**: `beet plexplaylistclear` clears a Plex playlist. Use the `-m` flag to specify the playlist name.
+
+### Playlist Import
+- **Playlist Import**: `beet plexplaylistimport` imports individual playlists from Spotify, Apple Music, Gaana.com, JioSaavn, Youtube, and Tidal. Use the `-m` flag to specify the playlist name and the `-u` flag to supply the full playlist url.
+- **Youtube Search Import**: `beet plexsearchimport` imports playlists based on Youtube search. Use the `-m` flag to specify the playlist name, the `-s` flag for the search query, and the `-l` flag to limit the number of search results.
+
+### Additional Tools
+- **Plex to Spotify**: `beet plex2spotify` copies a Plex playlist to Spotify. Use the `-m` flag to specify the playlist name.
+- **Playlist to Collection**: `beet plexplaylist2collection` converts a Plex playlist to a collection. Use the `-m` flag to specify the playlist name.
+- **Album Collage**: `beet plexcollage` creates a collage of most played albums. Use the `-i` flag to specify the number of days and `-g` flag to specify the grid size.
+- **Smart Playlists**: Use `beet plex_smartplaylists` to generate or manage custom playlists in Plex. The plugin currently supports three types of playlists:
+
+  1. **Daily Discovery**:
+     - Uses tracks you've played in the last 15 days as a base to learn about listening habits (configurable via `history_days`)
+     - Excludes tracks played in the last 30 days (configurable via `exclusion_days`)
+     - Uses an intelligent scoring system that considers:
+       - Track rating (primary factor)
+       - Last played date
+       - Play count
+       - Recently added bonus
+     - Introduces controlled randomization to ensure variety
+     - Matches genres with your recent listening history
+     - Uses Plex's [Sonic Analysis](https://support.plex.tv/articles/sonic-analysis-music/) to find sonically similar tracks
+     - Limits the playlist size (configurable via `max_tracks`, default 20)
+     - Controls discovery vs. familiar ratio (configurable via `discovery_ratio`, default 70%)
+
+  2. **Forgotten Gems**:
+     - Creates a playlist of tracks that deserve more attention
+     - Uses your highly-rated tracks to establish a quality baseline
+     - Prioritizes unrated tracks with popularity comparable to your favorites
+     - Only includes tracks matching your genre preferences
+     - Automatically adjusts selection criteria based on your library's characteristics
+     - Limits the playlist size (configurable via `max_tracks`, default 20)
+     - Controls maximum play count (configurable via `max_plays`, default 2)
+     - Minimum rating for rated tracks to be included (configurable via `min_rating`, default 4)
+     - Percentage of playlist to fill with unrated but popular tracks (configurable via `discovery_ratio`, default 30)
+
+  3. **Imported Playlists**:
+     - Import playlists from external services (Spotify, Apple Music, YouTube, etc.)
+     - Configure multiple source URLs per playlist
+     - Control playlist behavior with options:
+       - `manual_search`: Enable/disable manual matching for unmatched tracks
+       - `clear_playlist`: Clear existing playlist before adding new tracks
+       - `max_tracks`: Limit the number of tracks in the playlist
+
+## Introduction
+
+This plugin allows you to sync your Plex library with beets, create playlists based on AI-generated prompts, import playlists from other online services, and more.
+
 ## Installation
 
 Install the plugin using `pip`:
@@ -41,61 +137,6 @@ spotify:
   client_secret: CLIENT_SECRET
 ```
 
-## Introduction
-
-This plugin allows you to sync your Plex library with beets, create playlists based on AI-generated prompts, import playlists from other online services, and more.
-
-## Key Features
-
-- **AI-Generated Playlists**: Use `beet plexsonic -p "YOUR_PROMPT"` to create a playlist based on YOUR_PROMPT. Modify the playlist name using `-m` flag, change the number of tracks requested with `-n` flag, and clear the playlist before adding new songs with `-c` flag.
-
-- **Plex Library Sync**: `beet plexsync [-f]` imports all the data from your Plex library inside beets. Use the `-f` flag to force update the entire library with fresh information from Plex.
-
-- **Recent Sync**: `beet plexsyncrecent` updates the information for tracks listened in the last 7 days.
-
-- **Playlist Manipulation**: `plexplaylistadd` and `plexplaylistremove` add or remove tracks from Plex playlists. Use the `-m` flag to provide the playlist name.
-
-- **Playlist Import**: `beet plexplaylistimport` imports playlists from Spotify, Apple Music, Gaana.com, JioSaavn, Youtube, and Tidal. Use the `-m` flag to specify the playlist name and the `-u` flag to supply the full playlist url.
-
-- **Youtube Search Import**: `beet plexsearchimport` imports playlists based on Youtube search. Use the `-m` flag to specify the playlist name, the `-s` flag for the search query, and the `-l` flag to limit the number of search results.
-
-- **Playlist Clear**: `beet plexplaylistclear` clears a Plex playlist. Use the `-m` flag to specify the playlist name.
-
-- **Plex to Spotify**: `beet plex2spotify` copies a Plex playlist to Spotify. Use the `-m` flag to specify the playlist name.
-
-- **Playlist to Collection**: `beet plexplaylist2collection` converts a Plex playlist to a collection. Use the `-m` flag to specify the playlist name.
-
-- **Album Collage**: `beet plexcollage` creates a collage of most played albums. Use the `-i` flag to specify the number of days and `-g` flag to specify the grid size.
-
-- **Smart Playlists**: Use `beet plex_smartplaylists` to generate or manage custom playlists in Plex. The plugin currently supports two smart playlists:
-
-  1. **Daily Discovery**:
-     - Uses tracks you've played in the last 15 days as a base to learn about listening habits (configurable via `history_days`)
-     - Excludes tracks played in the last 30 days (configurable via `exclusion_days`)
-     - Uses an intelligent scoring system that considers:
-       - Track rating (primary factor)
-       - Last played date
-       - Play count
-       - Recently added bonus
-     - Introduces controlled randomization to ensure variety
-     - Matches genres with your recent listening history
-     - Uses Plex's [Sonic Analysis](https://support.plex.tv/articles/sonic-analysis-music/) to find sonically similar tracks
-     - Limits the playlist size (configurable via `max_tracks`, default 20)
-     - Controls discovery vs. familiar ratio (configurable via `discovery_ratio`, default 70%)
-
-  2. **Forgotten Gems**:
-     - Creates a playlist of tracks that deserve more attention
-     - Uses your highly-rated tracks to establish a quality baseline
-     - Prioritizes unrated tracks with popularity comparable to your favorites
-     - Only includes tracks matching your genre preferences
-     - Automatically adjusts selection criteria based on your library's characteristics
-     - Limits the playlist size (configurable via `max_tracks`, default 20)
-     - Controls maximum play count (configurable via `max_plays`, default 2)
-     - Minimum rating for rated tracks to be included (configurable via `min_rating`, default 4)
-     - Percentage of playlist to fill with unrated but popular tracks (configurable via `discovery_ratio`, default 30)
-
-## Configuration
-
 * The `beet plexsonic` command allows you to create AI-based playlists using an OpenAI-compatible language model. To use this feature, you will need to configure the AI model with an API key. Once you have obtained an API key, you can configure `beets` to use it by adding the following to your `config.yaml` file:
 
   ```yaml
@@ -115,19 +156,19 @@ This plugin allows you to sync your Plex library with beets, create playlists ba
 
 * `plexplaylistadd` and `plexplaylistremove` to add or remove tracks from Plex playlists. These commands should be used in conjunction with beets [queries][queries_] to provide the desired items. Use the `-m` flag to provide the playlist name to be used.
 
-   ** To add all country music tracks with `plex_userrating` greater than 5 in a playlist `Country`, you can use the command `beet plexplaylistadd -m Country genre:"Country" plex_userrating:5..`
+   * To add all country music tracks with `plex_userrating` greater than 5 in a playlist `Country`, you can use the command `beet plexplaylistadd -m Country genre:"Country" plex_userrating:5..`
 
-   ** To remove all tracks that are rated less than 5 from the `Country` playlist, use the command `beet plexplaylistremove -m Country plex_userrating:..5`
+   * To remove all tracks that are rated less than 5 from the `Country` playlist, use the command `beet plexplaylistremove -m Country plex_userrating:..5`
 
 * `beet plexplaylistimport`: allows you to import playlists from other online services. Spotify, Apple Music, Gaana.com, JioSaavn, Youtube, and Tidal are currently supported. Use the `-m` flag to specify the playlist name to be created in Plex and supply the full playlist url with the `-u` flag.
 
   For example, to import the Global Top-100 Apple Music playlist, use the command `beet plexplaylistimport -m Top-100 -u https://music.apple.com/us/playlist/top-100-global/pl.d25f5d1181894928af76c85c967f8f31`. Similarly, to import the Hot-hits USA playlist from Spotify, use the command `beet plexplaylistimport -m HotHitsUSA -u https://open.spotify.com/playlist/37i9dQZF1DX0kbJZpiYdZl`
 
+  You can also use this function to import the weekly jams and weekly exploration playlists from ListenBrainz into Plex. You will need to install and configure the [Listenbrainz plugin][listenbrainz_plugin_]. To import the ListenBrainz playlists, use the command `beet plexplaylistimport --listenbrainz`.
+
 * `beet plexsearchimport`: allows you to import playlists based on Youtube search (results are returned in descending order of the number of views). Use the `-m` flag to specify the playlist name to be created in Plex, supply the search query with the `-s` flag, and use the `-l` flag to limit the number of search results.
 
   For example, to import the top-20 songs by Taylor Swift, use the command `beet plexsearchimport -s "Taylor Swift" -l 20 -m "Taylor"`.
-
-  You can also use this function to import the weekly jams and weekly exploration playlists from ListenBrainz into Plex. You will need to install and configure the [Listenbrainz plugin][listenbrainz_plugin_]. To import the ListenBrainz playlists, use the command `beet plexplaylistimport --listenbrainz`.
 
 * `beet plexplaylistclear`: allows you to clear a Plex playlist. Use the `-m` flag to specify the playlist name to be cleared in Plex.
 
@@ -170,6 +211,14 @@ plexsync:
                             # Higher values = more discovery
                             # Example: 30 = 30% unrated + 70% rated tracks
                             #          70 = 70% unrated + 30% rated tracks
+      - id: bollywood_hits
+        name: "Bollywood Hits"
+        type: imported
+        sources: # full playlist urls from the supported services.
+          - https://music.youtube.com/playlist?list=RDCLAK5uy_kjNBBWqyQ_Cy14B0P4xrcKgd39CRjXXKk
+        max_tracks: 100     # Optional limit
+        manual_search: no
+        clear_playlist: no
 
 [collage]: collage.png
 [queries_]: https://beets.readthedocs.io/en/latest/reference/query.html?highlight=queries

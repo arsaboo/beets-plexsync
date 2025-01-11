@@ -485,22 +485,40 @@ class PlexSync(BeetsPlugin):
                 )
                 return
 
-            # Build lookup dictionary once
-            self._log.info("Building Plex lookup dictionary...")
-            plex_lookup = self.build_plex_lookup(lib)
-            self._log.debug("Found {} tracks in lookup dictionary", len(plex_lookup))
+            # Check if we have any smart playlists that need the lookup
+            has_smart_playlists = any(
+                p.get("id") in ["daily_discovery", "forgotten_gems"]
+                for p in playlists_config
+            )
 
-            # Calculate preferred genres and similar tracks once
-            preferred_genres, similar_tracks = self.get_preferred_attributes()
-            self._log.debug(f"Using preferred genres: {preferred_genres}")
-            self._log.debug(f"Processing {len(similar_tracks)} pre-filtered similar tracks")
+            # Only build lookup if we have smart playlists
+            plex_lookup = None
+            if has_smart_playlists:
+                self._log.info("Building Plex lookup dictionary for smart playlists...")
+                plex_lookup = self.build_plex_lookup(lib)
+                self._log.debug("Found {} tracks in lookup dictionary", len(plex_lookup))
+
+                # Calculate preferred genres and similar tracks only for smart playlists
+                preferred_genres, similar_tracks = self.get_preferred_attributes()
+                self._log.debug(f"Using preferred genres: {preferred_genres}")
+                self._log.debug(f"Processing {len(similar_tracks)} pre-filtered similar tracks")
 
             for p in playlists_config:
+                playlist_type = p.get("type", "smart")
                 playlist_id = p.get("id")
-                if playlist_id == "daily_discovery":
-                    self.generate_daily_discovery(lib, p, plex_lookup, preferred_genres, similar_tracks)
-                elif playlist_id == "forgotten_gems":
-                    self.generate_forgotten_gems(lib, p, plex_lookup, preferred_genres, similar_tracks)
+
+                if playlist_type == "imported":
+                    self.generate_imported_playlist(lib, p)
+                elif playlist_id in ["daily_discovery", "forgotten_gems"]:
+                    if plex_lookup is None:
+                        self._log.error(f"Cannot generate {playlist_id} playlist without Plex lookup")
+                        continue
+                    if playlist_id == "daily_discovery":
+                        self.generate_daily_discovery(lib, p, plex_lookup, preferred_genres, similar_tracks)
+                    else:  # forgotten_gems
+                        self.generate_forgotten_gems(lib, p, plex_lookup, preferred_genres, similar_tracks)
+                else:
+                    self._log.warning("Unknown playlist type or id: {} - {}", playlist_type, playlist_id)
 
         plex_smartplaylists_cmd.func = func_plex_smartplaylists
 
@@ -589,24 +607,49 @@ class PlexSync(BeetsPlugin):
             song_list.append(song_dict)
         return song_list
 
-    # Define a function that takes a title string and a list of tuples as input
+    def get_fuzzy_score(self, str1, str2):
+        """Calculate fuzzy match score between two strings."""
+        if not str1 or not str2:
+            return 0
+        return difflib.SequenceMatcher(None, str1.lower(), str2.lower()).ratio()
+
     def find_closest_match(self, title, lst):
-        # Initialize an empty list to store the matches and their scores
         matches = []
-        # Loop through each tuple in the list
-        for t in lst:
-            # Use the SequenceMatcher class to compare the title with the
-            # first element of the tuple
-            # The ratio method returns a score between 0 and 1 indicating how
-            # similar the two strings are based on the Levenshtein distance
-            score = difflib.SequenceMatcher(None, title, t.title).ratio()
-            # Append the tuple and the score to the matches list
-            matches.append((t, score))
-        # Sort the matches list by the score in descending order
+        for track in lst:
+            # Calculate title and album scores
+            title_score = self.get_fuzzy_score(title.get('title', ''), track.title)
+            album_score = self.get_fuzzy_score(title.get('album', ''), track.parentTitle)
+
+            # Safely get artists with None handling
+            track_artist_str = getattr(track, 'originalTitle', None) or ''
+            source_artist_str = title.get('artist', '')
+
+            # Split artists safely
+            track_artists = [a.strip() for a in track_artist_str.split(',') if a.strip()] if track_artist_str else []
+            source_artists = [a.strip() for a in source_artist_str.split(',') if a.strip()] if source_artist_str else []
+
+            # Compare artists
+            artist_score = 0
+            if track_artists and source_artists:
+                scores = [
+                    self.get_fuzzy_score(s_artist, t_artist)
+                    for s_artist in source_artists
+                    for t_artist in track_artists
+                ]
+                artist_score = max(scores) if scores else 0
+
+            # Calculate weighted score
+            combined_score = (title_score * 0.5) + (album_score * 0.3) + (artist_score * 0.2)
+            matches.append((track, combined_score))
+
+            # Debug logging
+            self._log.debug(
+                "Match scores for {} - {}: Title={:.2f}, Album={:.2f}, Artist={:.2f}, Combined={:.2f}",
+                track.parentTitle, track.title, title_score, album_score, artist_score, combined_score
+            )
+
         matches.sort(key=lambda x: x[1], reverse=True)
-        # Return only the first element of each tuple in the matches
-        # list as a new list
-        return [m[0] for m in matches]
+        return matches
 
     def import_apple_playlist(self, url):
         import json
@@ -848,9 +891,13 @@ class PlexSync(BeetsPlugin):
                     self._log.debug("Please sync Plex library again")
                     continue
 
-    def search_plex_song(self, song, manual_search=False):
+    def search_plex_song(self, song, manual_search=None):
         """Fetch the Plex track key."""
+        # Get base manual_search setting if not provided
+        if manual_search is None:
+            manual_search = config["plexsync"]["manual_search"].get(bool)
 
+        # Clean up title and album
         if 'From "' in song["title"] or '[From "' in song["title"]:
             song["title"], song["album"] = self.parse_title(song["title"])
         try:
@@ -872,17 +919,19 @@ class PlexSync(BeetsPlugin):
             )
             return None
         artist = song["artist"].split(",")[0]
+        if manual_search is None:
+            manual_search = config["plexsync"]["manual_search"].get(bool)
         if len(tracks) == 1:
             return tracks[0]
         elif len(tracks) > 1:
-            sorted_tracks = self.find_closest_match(song["title"], tracks)
+            sorted_tracks = self.find_closest_match(song, tracks)  # Simply pass the song dict
             self._log.debug("Found {} tracks for {}", len(sorted_tracks), song["title"])
             if manual_search and len(sorted_tracks) > 0:
                 print_(
-                    f'Choose candidates for {song["album"]} '
+                    f'\nChoose candidates for {song["album"]} '
                     f'- {song["title"]} - {song["artist"]}:'
                 )
-                for i, track in enumerate(sorted_tracks, start=1):
+                for i, (track, score) in enumerate(sorted_tracks, start=1):
                     print_(
                         f"{i}. {track.parentTitle} - {track.title} - "
                         f"{track.artist().title}"
@@ -892,8 +941,8 @@ class PlexSync(BeetsPlugin):
                 )
                 if sel in ("b", "B", "s", "S"):
                     return None
-                return sorted_tracks[sel - 1] if sel > 0 else None
-            for track in sorted_tracks:
+                return sorted_tracks[sel - 1][0] if sel > 0 else None
+            for track, score in sorted_tracks:
                 if track.originalTitle is not None:
                     plex_artist = track.originalTitle
                 else:
@@ -901,7 +950,7 @@ class PlexSync(BeetsPlugin):
                 if artist in plex_artist:
                     return track
         else:
-            if config["plexsync"]["manual_search"] and not manual_search:
+            if manual_search:
                 self._log.info(
                     "Track {} - {} - {} not found in Plex",
                     song["album"],
@@ -958,14 +1007,14 @@ class PlexSync(BeetsPlugin):
             self._log.info("Importing weekly jams playlist")
             weekly_jams = lb.get_weekly_jams()
             self._log.info("Importing {} songs from Weekly Jams", len(weekly_jams))
-            self.add_songs_to_plex("Weekly Jams", weekly_jams)
+            self.add_songs_to_plex("Weekly Jams", weekly_jams, config["plexsync"]["manual_search"].get(bool))
 
             self._log.info("Importing weekly exploration playlist")
             weekly_exploration = lb.get_weekly_exploration()
             self._log.info(
                 "Importing {} songs from Weekly Exploration", len(weekly_exploration)
             )
-            self.add_songs_to_plex("Weekly Exploration", weekly_exploration)
+            self.add_songs_to_plex("Weekly Exploration", weekly_exploration, config["plexsync"]["manual_search"].get(bool))
         else:
             if playlist_url is None or (
                 "http://" not in playlist_url and "https://" not in playlist_url
@@ -987,14 +1036,21 @@ class PlexSync(BeetsPlugin):
                 songs = []
                 self._log.error("Playlist URL not supported")
             self._log.info("Importing {} songs from {}", len(songs), playlist_url)
-            self.add_songs_to_plex(playlist, songs)
+            self.add_songs_to_plex(playlist, songs, config["plexsync"]["manual_search"].get(bool))
 
-    def add_songs_to_plex(self, playlist, songs):
+    def add_songs_to_plex(self, playlist, songs, manual_search):
+        """Add songs to a Plex playlist.
+
+        Args:
+            playlist: Name of the playlist
+            songs: List of songs to add
+            manual_search: Whether to enable manual search for matches
+        """
         song_list = []
         if songs:
             for song in songs:
-                if self.search_plex_song(song) is not None:
-                    found = self.search_plex_song(song)
+                found = self.search_plex_song(song, manual_search)
+                if found is not None:
                     song_dict = {
                         "title": found.title,
                         "album": found.parentTitle,
@@ -1911,3 +1967,120 @@ class PlexSync(BeetsPlugin):
             playlist_name,
             len(selected_tracks),
         )
+
+    def generate_imported_playlist(self, lib, playlist_config):
+        """Generate a playlist by importing from external sources."""
+        playlist_name = playlist_config.get("name", "Imported Playlist")
+        sources = playlist_config.get("sources", [])
+        max_tracks = playlist_config.get("max_tracks", None)
+
+        # Get config options with defaults
+        if (
+            "playlists" in config["plexsync"]
+            and "defaults" in config["plexsync"]["playlists"]
+        ):
+            defaults_cfg = config["plexsync"]["playlists"]["defaults"].get({})
+        else:
+            defaults_cfg = {}
+
+        manual_search = self.get_config_value(
+            playlist_config, defaults_cfg, "manual_search", config["plexsync"]["manual_search"].get(bool)
+        )
+        clear_playlist = self.get_config_value(
+            playlist_config, defaults_cfg, "clear_playlist", False
+        )
+
+        if not sources:
+            self._log.warning("No sources defined for imported playlist {}", playlist_name)
+            return
+
+        self._log.info("Generating imported playlist {} from {} sources", playlist_name, len(sources))
+
+        # Import tracks from all sources
+        all_tracks = []
+        for source in sources:
+            try:
+                self._log.info("Importing from source: {}", source)
+                if "spotify" in source:
+                    tracks = self.import_spotify_playlist(self.get_playlist_id(source))
+                elif "jiosaavn" in source:
+                    tracks = self.import_jiosaavn_playlist(source)
+                elif "apple" in source:
+                    tracks = self.import_apple_playlist(source)
+                elif "gaana" in source:
+                    tracks = self.import_gaana_playlist(source)
+                elif "youtube" in source:
+                    tracks = self.import_yt_playlist(source)
+                elif "tidal" in source:
+                    tracks = self.import_tidal_playlist(source)
+                else:
+                    self._log.warning("Unsupported source: {}", source)
+                    continue
+
+                if tracks:
+                    all_tracks.extend(tracks)
+            except Exception as e:
+                self._log.error("Error importing from {}: {}", source, e)
+                continue
+
+        if not all_tracks:
+            self._log.warning("No tracks found from any source for playlist {}", playlist_name)
+            return
+
+        # Process tracks through Plex and filter out low-rated ones
+        matched_songs = []
+        for track in all_tracks:
+            found = self.search_plex_song(track, manual_search)
+            if found:
+                rating = float(getattr(found, 'userrating', 0))
+                if rating == 0 or rating > 2:  # Include unrated or rating > 2
+                    song_dict = {
+                        "title": found.title,
+                        "album": found.parentTitle,
+                        "plex_ratingkey": found.ratingKey,
+                    }
+                    matched_songs.append(self.dotdict(song_dict))
+                else:
+                    self._log.debug(
+                        "Skipping low-rated track: {} - {} (rating: {})",
+                        found.title,
+                        found.parentTitle,
+                        rating
+                    )
+            else:
+                self._log.debug("Track not found in Plex: {}", track)
+
+        # Deduplicate based on plex_ratingkey
+        seen = set()
+        unique_matched = []
+        for song in matched_songs:
+            if song.plex_ratingkey not in seen:
+                seen.add(song.plex_ratingkey)
+                unique_matched.append(song)
+
+        # Apply track limit if specified
+        if max_tracks:
+            unique_matched = unique_matched[:max_tracks]
+
+        self._log.info(
+            "Found {} unique tracks after filtering",
+            len(unique_matched)
+        )
+
+        # Create or update playlist based on clear_playlist setting
+        if clear_playlist:
+            try:
+                self._plex_clear_playlist(playlist_name)
+                self._log.info("Cleared existing playlist {}", playlist_name)
+            except exceptions.NotFound:
+                self._log.debug("No existing playlist {} found", playlist_name)
+
+        if unique_matched:
+            self._plex_add_playlist_item(unique_matched, playlist_name)
+            self._log.info(
+                "Successfully created playlist {} with {} tracks",
+                playlist_name,
+                len(unique_matched)
+            )
+        else:
+            self._log.warning("No tracks remaining after filtering for {}", playlist_name)
