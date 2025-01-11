@@ -10,37 +10,37 @@ A plugin for [beets][beets] to sync with your Plex server.
 Use `beet plex_smartplaylists` to generate or manage custom playlists in Plex. The plugin currently supports three types of playlists:
 
   1. **Daily Discovery**:
-     - Uses tracks you've played in the last 15 days as a base to learn about listening habits (configurable via `history_days`)
-     - Excludes tracks played in the last 30 days (configurable via `exclusion_days`)
-     - Uses an intelligent scoring system that considers:
-       - Track rating (primary factor)
-       - Last played date
-       - Play count
-       - Recently added bonus
-     - Introduces controlled randomization to ensure variety
-     - Matches genres with your recent listening history
-     - Uses Plex's [Sonic Analysis](https://support.plex.tv/articles/sonic-analysis-music/) to find sonically similar tracks
-     - Limits the playlist size (configurable via `max_tracks`, default 20)
-     - Controls discovery vs. familiar ratio (configurable via `discovery_ratio`, default 70%)
+      - Uses tracks you've played in the last 15 days as a base to learn about listening habits (configurable via `history_days`)
+      - Excludes tracks played in the last 30 days (configurable via `exclusion_days`)
+      - Uses an intelligent scoring system that considers:
+          - Track rating (primary factor)
+          - Last played date
+          - Play count
+          - Recently added bonus
+      - Introduces controlled randomization to ensure variety
+      - Matches genres with your recent listening history
+      - Uses Plex's [Sonic Analysis](https://support.plex.tv/articles/sonic-analysis-music/) to find sonically similar tracks
+      - Limits the playlist size (configurable via `max_tracks`, default 20)
+      - Controls discovery vs. familiar ratio (configurable via `discovery_ratio`, default 70%)
 
   2. **Forgotten Gems**:
-     - Creates a playlist of tracks that deserve more attention
-     - Uses your highly-rated tracks to establish a quality baseline
-     - Prioritizes unrated tracks with popularity comparable to your favorites
-     - Only includes tracks matching your genre preferences
-     - Automatically adjusts selection criteria based on your library's characteristics
-     - Limits the playlist size (configurable via `max_tracks`, default 20)
-     - Controls maximum play count (configurable via `max_plays`, default 2)
-     - Minimum rating for rated tracks to be included (configurable via `min_rating`, default 4)
-     - Percentage of playlist to fill with unrated but popular tracks (configurable via `discovery_ratio`, default 30)
+      - Creates a playlist of tracks that deserve more attention
+      - Uses your highly-rated tracks to establish a quality baseline
+      - Prioritizes unrated tracks with popularity comparable to your favorites
+      - Only includes tracks matching your genre preferences
+      - Automatically adjusts selection criteria based on your library's characteristics
+      - Limits the playlist size (configurable via `max_tracks`, default 20)
+      - Controls maximum play count (configurable via `max_plays`, default 2)
+      - Minimum rating for rated tracks to be included (configurable via `min_rating`, default 4)
+      - Percentage of playlist to fill with unrated but popular tracks (configurable via `discovery_ratio`, default 30)
 
   3. **Imported Playlists**:
-     - Import playlists from external services (Spotify, Apple Music, YouTube, etc.)
-     - Configure multiple source URLs per playlist
-     - Control playlist behavior with options:
-       - `manual_search`: Enable/disable manual matching for unmatched tracks
-       - `clear_playlist`: Clear existing playlist before adding new tracks
-       - `max_tracks`: Limit the number of tracks in the playlist
+      - Import playlists from external services (Spotify, Apple Music, YouTube, etc.)
+      - Configure multiple source URLs per playlist
+      - Control playlist behavior with options:
+        - `manual_search`: Enable/disable manual matching for unmatched tracks
+        - `clear_playlist`: Clear existing playlist before adding new tracks
+        - `max_tracks`: Limit the number of tracks in the playlist
 
 ### Library Sync
 - **Plex Library Sync**: `beet plexsync [-f]` imports all the data from your Plex library inside beets. Use the `-f` flag to force update the entire library with fresh information from Plex.
@@ -51,47 +51,17 @@ Use `beet plex_smartplaylists` to generate or manage custom playlists in Plex. T
 - **Playlist Clear**: `beet plexplaylistclear` clears a Plex playlist. Use the `-m` flag to specify the playlist name.
 
 ### Playlist Import
-- **Playlist Import**: `beet plexplaylistimport` imports individual playlists from Spotify, Apple Music, Gaana.com, JioSaavn, Youtube, and Tidal. Use the `-m` flag to specify the playlist name and the `-u` flag to supply the full playlist url.
+- **Playlist Import**: `beet plexplaylistimport` imports individual playlists from Spotify, Apple Music, Gaana.com, JioSaavn, Youtube, and Tidal. Use the `-m` flag to specify the playlist name and the `-u` flag to supply the full playlist url. For each import session, a detailed log file is created in your beets config directory (named `<playlist_name>_import.log`) that records:
+  - Tracks that couldn't be found in your Plex library
+  - Low-rated tracks that were skipped
+  - Import statistics and summary
+  - The log file helps you identify which tracks need manual attention
 - **Youtube Search Import**: `beet plexsearchimport` imports playlists based on Youtube search. Use the `-m` flag to specify the playlist name, the `-s` flag for the search query, and the `-l` flag to limit the number of search results.
 
 ### Additional Tools
 - **Plex to Spotify**: `beet plex2spotify` copies a Plex playlist to Spotify. Use the `-m` flag to specify the playlist name.
 - **Playlist to Collection**: `beet plexplaylist2collection` converts a Plex playlist to a collection. Use the `-m` flag to specify the playlist name.
 - **Album Collage**: `beet plexcollage` creates a collage of most played albums. Use the `-i` flag to specify the number of days and `-g` flag to specify the grid size.
-- **Smart Playlists**: Use `beet plex_smartplaylists` to generate or manage custom playlists in Plex. The plugin currently supports three types of playlists:
-
-  1. **Daily Discovery**:
-     - Uses tracks you've played in the last 15 days as a base to learn about listening habits (configurable via `history_days`)
-     - Excludes tracks played in the last 30 days (configurable via `exclusion_days`)
-     - Uses an intelligent scoring system that considers:
-       - Track rating (primary factor)
-       - Last played date
-       - Play count
-       - Recently added bonus
-     - Introduces controlled randomization to ensure variety
-     - Matches genres with your recent listening history
-     - Uses Plex's [Sonic Analysis](https://support.plex.tv/articles/sonic-analysis-music/) to find sonically similar tracks
-     - Limits the playlist size (configurable via `max_tracks`, default 20)
-     - Controls discovery vs. familiar ratio (configurable via `discovery_ratio`, default 70%)
-
-  2. **Forgotten Gems**:
-     - Creates a playlist of tracks that deserve more attention
-     - Uses your highly-rated tracks to establish a quality baseline
-     - Prioritizes unrated tracks with popularity comparable to your favorites
-     - Only includes tracks matching your genre preferences
-     - Automatically adjusts selection criteria based on your library's characteristics
-     - Limits the playlist size (configurable via `max_tracks`, default 20)
-     - Controls maximum play count (configurable via `max_plays`, default 2)
-     - Minimum rating for rated tracks to be included (configurable via `min_rating`, default 4)
-     - Percentage of playlist to fill with unrated but popular tracks (configurable via `discovery_ratio`, default 30)
-
-  3. **Imported Playlists**:
-     - Import playlists from external services (Spotify, Apple Music, YouTube, etc.)
-     - Configure multiple source URLs per playlist
-     - Control playlist behavior with options:
-       - `manual_search`: Enable/disable manual matching for unmatched tracks
-       - `clear_playlist`: Clear existing playlist before adding new tracks
-       - `max_tracks`: Limit the number of tracks in the playlist
 
 ## Introduction
 
@@ -195,7 +165,7 @@ plexsync:
       - id: daily_discovery
         name: "Daily Discovery"
         max_tracks: 20      # Maximum number of tracks for Daily Discovery playlist
-        exclusion_days: 30  # Number of days to exclude recently played tracks
+        exclusion_days: 30  # Number of days to exclude recently played tracks. Tracks played in the last 30 days will not be included in the playlist.
         history_days: 15    # Number of days to use to learn listening habits
         discovery_ratio: 70 # Percentage of unrated tracks (0-100)
                             # Higher values = more discovery
