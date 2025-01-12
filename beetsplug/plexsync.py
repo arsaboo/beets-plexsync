@@ -76,6 +76,9 @@ class PlexSync(BeetsPlugin):
         """Initialize plexsync plugin."""
         super().__init__()
 
+        # Add event loop initialization
+        self.loop = None
+
         self.config_dir = config.config_dir()
         self.llm_client = None
 
@@ -142,6 +145,13 @@ class PlexSync(BeetsPlugin):
                 library not found"
             )
         self.register_listener("database_change", self.listen_for_db_change)
+
+    def get_event_loop(self):
+        """Get or create an event loop."""
+        if self.loop is None or self.loop.is_closed():
+            self.loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self.loop)
+        return self.loop
 
     def authenticate_spotify(self):
         ID = config["spotify"]["client_id"].get()
@@ -575,37 +585,48 @@ class PlexSync(BeetsPlugin):
         return songs
 
     def import_jiosaavn_playlist(self, playlist_url):
-        data = asyncio.run(
-            self.saavn.get_playlist_songs(playlist_url, page=1, limit=100)
-        )
-        songs = data["data"]["list"]
-        song_list = []
-        for song in songs:
-            # Find and store the song title
-            if ('From "' in song["title"]) or ("From &quot" in song["title"]):
-                title_orig = song["title"].replace("&quot;", '"')
-                title, album = self.parse_title(title_orig)
-            else:
-                title = song["title"]
-                album = self.clean_album_name(song["more_info"]["album"])
-            year = song["year"]
-            # Find and store the song artist
-            try:
-                artist = song["more_info"]["artistMap"]["primary_artists"][0]["name"]
-            except KeyError:
-                continue
-            # Find and store the song duration
-            # duration = song.find("div", class_="songs-list-row__length").text.strip()
-            # Create a dictionary with the song information
-            song_dict = {
-                "title": title.strip(),
-                "album": album.strip(),
-                "artist": artist.strip(),
-                "year": year,
-            }
-            # Append the dictionary to the list of songs
-            song_list.append(song_dict)
-        return song_list
+        """Import a JioSaavn playlist using shared event loop."""
+        try:
+            loop = self.get_event_loop()
+
+            # Run the async operation and get results
+            data = loop.run_until_complete(
+                self.saavn.get_playlist_songs(playlist_url, page=1, limit=100)
+            )
+
+            songs = data["data"]["list"]
+            song_list = []
+
+            for song in songs:
+                # Find and store the song title
+                if ('From "' in song["title"]) or ("From &quot" in song["title"]):
+                    title_orig = song["title"].replace("&quot;", '"')
+                    title, album = self.parse_title(title_orig)
+                else:
+                    title = song["title"]
+                    album = self.clean_album_name(song["more_info"]["album"])
+                year = song["year"]
+                # Find and store the song artist
+                try:
+                    artist = song["more_info"]["artistMap"]["primary_artists"][0]["name"]
+                except KeyError:
+                    continue
+                # Find and store the song duration
+                # duration = song.find("div", class_="songs-list-row__length").text.strip()
+                # Create a dictionary with the song information
+                song_dict = {
+                    "title": title.strip(),
+                    "album": album.strip(),
+                    "artist": artist.strip(),
+                    "year": year,
+                }
+                # Append the dictionary to the list of songs
+                song_list.append(song_dict)
+            return song_list
+
+        except Exception as e:
+            self._log.error("Error importing JioSaavn playlist: {}", e)
+            return []
 
     def get_fuzzy_score(self, str1, str2):
         """Calculate fuzzy match score between two strings."""
@@ -891,7 +912,7 @@ class PlexSync(BeetsPlugin):
                     self._log.debug("Please sync Plex library again")
                     continue
 
-    def search_plex_song(self, song, manual_search=None):
+    def search_plex_song(self, song, manual_search=None, fallback_attempted=False):
         """Fetch the Plex track key."""
         # Get base manual_search setting if not provided
         if manual_search is None:
@@ -966,6 +987,16 @@ class PlexSync(BeetsPlugin):
                     song["artist"],
                     song["title"],
                 )
+                # Fallback to YouTube search if not already attempted and YouTube plugin is configured
+                if not fallback_attempted and "youtube" in config["plugins"].get(list):
+                    search_query = f'{song["artist"]} {song["title"]}'
+                    if song.get("album"):
+                        search_query += f' {song["album"]}'
+                    yt_search_results = self.import_yt_search(search_query, limit=1)
+                    if yt_search_results:
+                        yt_song = yt_search_results[0]
+                        self._log.info("Found track via YouTube search: {} - {} - {}", yt_song["album"], yt_song["artist"], yt_song["title"])
+                        return self.search_plex_song(yt_song, manual_search, fallback_attempted=True)
             return None
 
     def manual_track_search(self):
@@ -2109,3 +2140,8 @@ class PlexSync(BeetsPlugin):
             )
         else:
             self._log.warning("No tracks remaining after filtering for {}", playlist_name)
+
+    def shutdown(self, lib):
+        """Clean up when plugin is disabled."""
+        if self.loop and not self.loop.is_closed():
+            self.loop.close()
