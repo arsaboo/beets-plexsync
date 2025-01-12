@@ -575,37 +575,57 @@ class PlexSync(BeetsPlugin):
         return songs
 
     def import_jiosaavn_playlist(self, playlist_url):
-        data = asyncio.run(
-            self.saavn.get_playlist_songs(playlist_url, page=1, limit=100)
-        )
-        songs = data["data"]["list"]
-        song_list = []
-        for song in songs:
-            # Find and store the song title
-            if ('From "' in song["title"]) or ("From &quot" in song["title"]):
-                title_orig = song["title"].replace("&quot;", '"')
-                title, album = self.parse_title(title_orig)
-            else:
-                title = song["title"]
-                album = self.clean_album_name(song["more_info"]["album"])
-            year = song["year"]
-            # Find and store the song artist
-            try:
-                artist = song["more_info"]["artistMap"]["primary_artists"][0]["name"]
-            except KeyError:
-                continue
-            # Find and store the song duration
-            # duration = song.find("div", class_="songs-list-row__length").text.strip()
-            # Create a dictionary with the song information
-            song_dict = {
-                "title": title.strip(),
-                "album": album.strip(),
-                "artist": artist.strip(),
-                "year": year,
-            }
-            # Append the dictionary to the list of songs
-            song_list.append(song_dict)
-        return song_list
+        """Import a JioSaavn playlist using proper asyncio handling."""
+        try:
+            # Create a new event loop for this thread
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+            # Run the async operation and get results
+            data = loop.run_until_complete(
+                self.saavn.get_playlist_songs(playlist_url, page=1, limit=100)
+            )
+
+            # Close the loop properly
+            loop.close()
+
+            songs = data["data"]["list"]
+            song_list = []
+
+            for song in songs:
+                # Find and store the song title
+                if ('From "' in song["title"]) or ("From &quot" in song["title"]):
+                    title_orig = song["title"].replace("&quot;", '"')
+                    title, album = self.parse_title(title_orig)
+                else:
+                    title = song["title"]
+                    album = self.clean_album_name(song["more_info"]["album"])
+                year = song["year"]
+                # Find and store the song artist
+                try:
+                    artist = song["more_info"]["artistMap"]["primary_artists"][0]["name"]
+                except KeyError:
+                    continue
+                # Find and store the song duration
+                # duration = song.find("div", class_="songs-list-row__length").text.strip()
+                # Create a dictionary with the song information
+                song_dict = {
+                    "title": title.strip(),
+                    "album": album.strip(),
+                    "artist": artist.strip(),
+                    "year": year,
+                }
+                # Append the dictionary to the list of songs
+                song_list.append(song_dict)
+            return song_list
+
+        except Exception as e:
+            self._log.error("Error importing JioSaavn playlist: {}", e)
+            return []
+        finally:
+            # Ensure the loop is closed in case of errors
+            if 'loop' in locals() and not loop.is_closed():
+                loop.close()
 
     def get_fuzzy_score(self, str1, str2):
         """Calculate fuzzy match score between two strings."""
