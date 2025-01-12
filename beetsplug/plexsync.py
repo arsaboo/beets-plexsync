@@ -76,6 +76,9 @@ class PlexSync(BeetsPlugin):
         """Initialize plexsync plugin."""
         super().__init__()
 
+        # Add event loop initialization
+        self.loop = None
+
         self.config_dir = config.config_dir()
         self.llm_client = None
 
@@ -142,6 +145,13 @@ class PlexSync(BeetsPlugin):
                 library not found"
             )
         self.register_listener("database_change", self.listen_for_db_change)
+
+    def get_event_loop(self):
+        """Get or create an event loop."""
+        if self.loop is None or self.loop.is_closed():
+            self.loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self.loop)
+        return self.loop
 
     def authenticate_spotify(self):
         ID = config["spotify"]["client_id"].get()
@@ -575,19 +585,14 @@ class PlexSync(BeetsPlugin):
         return songs
 
     def import_jiosaavn_playlist(self, playlist_url):
-        """Import a JioSaavn playlist using proper asyncio handling."""
+        """Import a JioSaavn playlist using shared event loop."""
         try:
-            # Create a new event loop for this thread
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            loop = self.get_event_loop()
 
             # Run the async operation and get results
             data = loop.run_until_complete(
                 self.saavn.get_playlist_songs(playlist_url, page=1, limit=100)
             )
-
-            # Close the loop properly
-            loop.close()
 
             songs = data["data"]["list"]
             song_list = []
@@ -622,10 +627,6 @@ class PlexSync(BeetsPlugin):
         except Exception as e:
             self._log.error("Error importing JioSaavn playlist: {}", e)
             return []
-        finally:
-            # Ensure the loop is closed in case of errors
-            if 'loop' in locals() and not loop.is_closed():
-                loop.close()
 
     def get_fuzzy_score(self, str1, str2):
         """Calculate fuzzy match score between two strings."""
@@ -2139,3 +2140,8 @@ class PlexSync(BeetsPlugin):
             )
         else:
             self._log.warning("No tracks remaining after filtering for {}", playlist_name)
+
+    def shutdown(self, lib):
+        """Clean up when plugin is disabled."""
+        if self.loop and not self.loop.is_closed():
+            self.loop.close()
