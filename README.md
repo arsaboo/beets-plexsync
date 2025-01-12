@@ -189,7 +189,7 @@ plexsync:
         max_tracks: 100     # Optional limit
         manual_search: no
         clear_playlist: no
-
+```
 [collage]: collage.png
 [queries_]: https://beets.readthedocs.io/en/latest/reference/query.html?highlight=queries
 [plaxapi]: https://python-plexapi.readthedocs.io/en/latest/modules/audio.html
