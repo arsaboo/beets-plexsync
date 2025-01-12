@@ -891,7 +891,7 @@ class PlexSync(BeetsPlugin):
                     self._log.debug("Please sync Plex library again")
                     continue
 
-    def search_plex_song(self, song, manual_search=None):
+    def search_plex_song(self, song, manual_search=None, fallback_attempted=False):
         """Fetch the Plex track key."""
         # Get base manual_search setting if not provided
         if manual_search is None:
@@ -966,12 +966,13 @@ class PlexSync(BeetsPlugin):
                     song["artist"],
                     song["title"],
                 )
-                # Fallback to YouTube search
-                yt_search_results = self.import_yt_search(f'{song["artist"]} {song["title"]}', limit=1)
-                if yt_search_results:
-                    yt_song = yt_search_results[0]
-                    self._log.info("Found track via YouTube search: {} - {} - {}", yt_song["album"], yt_song["artist"], yt_song["title"])
-                    return self.search_plex_song(yt_song, manual_search)
+                # Fallback to YouTube search if not already attempted
+                if not fallback_attempted:
+                    yt_search_results = self.import_yt_search(f'{song["artist"]} {song["title"]}', limit=1)
+                    if yt_search_results:
+                        yt_song = yt_search_results[0]
+                        self._log.info("Found track via YouTube search: {} - {} - {}", yt_song["album"], yt_song["artist"], yt_song["title"])
+                        return self.search_plex_song(yt_song, manual_search, fallback_attempted=True)
             return None
 
     def manual_track_search(self):
