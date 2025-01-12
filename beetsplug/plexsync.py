@@ -966,9 +966,12 @@ class PlexSync(BeetsPlugin):
                     song["artist"],
                     song["title"],
                 )
-                # Fallback to YouTube search if not already attempted
-                if not fallback_attempted:
-                    yt_search_results = self.import_yt_search(f'{song["artist"]} {song["title"]}', limit=1)
+                # Fallback to YouTube search if not already attempted and YouTube plugin is configured
+                if not fallback_attempted and "youtube" in config["plugins"].get(list):
+                    search_query = f'{song["artist"]} {song["title"]}'
+                    if song.get("album"):
+                        search_query += f' {song["album"]}'
+                    yt_search_results = self.import_yt_search(search_query, limit=1)
                     if yt_search_results:
                         yt_song = yt_search_results[0]
                         self._log.info("Found track via YouTube search: {} - {} - {}", yt_song["album"], yt_song["artist"], yt_song["title"])
