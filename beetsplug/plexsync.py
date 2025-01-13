@@ -81,13 +81,17 @@ class PlexSync(BeetsPlugin):
 
         self.config_dir = config.config_dir()
         self.llm_client = None
+        self.search_llm = None
 
         # Call the setup methods
         try:
             self.setup_llm()
+            if config["plexsync"]["use_llm_search"].get(bool):
+                self.search_llm = setup_llm("search")
         except Exception as e:
             self._log.error("Failed to set up LLM client: {}", e)
             self.llm_client = None
+            self.search_llm = None
 
         # Adding defaults.
         config["plex"].add(
@@ -109,6 +113,7 @@ class PlexSync(BeetsPlugin):
                 "exclusion_days": 30,  # Days to exclude recently played tracks
                 "history_days": 15,  # Days to look back for base tracks
                 "discovery_ratio": 30,  # Percentage of discovery tracks (0-100)
+                "use_llm_search": False,  # Enable/disable LLM search cleaning
             }
         )
         self.plexsync_token = config["plexsync"]["tokenfile"].get(
@@ -121,6 +126,11 @@ class PlexSync(BeetsPlugin):
                 "api_key": "",
                 "model": "gpt-3.5-turbo",
                 "base_url": "",  # Optional, for other providers
+                "search": {
+                    "api_key": "",  # Will use base key if empty
+                    "base_url": "http://localhost:11434/v1",  # Ollama default URL
+                    "model": "mistral",  # Default model for search
+                }
             }
         )
 
@@ -940,8 +950,6 @@ class PlexSync(BeetsPlugin):
             )
             return None
         artist = song["artist"].split(",")[0]
-        if manual_search is None:
-            manual_search = config["plexsync"]["manual_search"].get(bool)
         if len(tracks) == 1:
             return tracks[0]
         elif len(tracks) > 1:
@@ -971,6 +979,19 @@ class PlexSync(BeetsPlugin):
                 if artist in plex_artist:
                     return track
         else:
+            # Clean search strings using LLM if enabled and initial search failed
+            if self.search_llm and config["plexsync"]["use_llm_search"].get(bool):
+                cleaned_title, cleaned_album, cleaned_artist = clean_search_string(
+                    self.search_llm,
+                    title=song.get("title"),
+                    album=song.get("album"),
+                    artist=song.get("artist")
+                )
+                song["title"] = cleaned_title
+                song["album"] = cleaned_album
+                song["artist"] = cleaned_artist
+                return self.search_plex_song(song, manual_search, fallback_attempted)
+
             if manual_search:
                 self._log.info(
                     "Track {} - {} - {} not found in Plex",

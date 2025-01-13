@@ -32,7 +32,7 @@ Use `beet plex_smartplaylists` to generate or manage custom playlists in Plex. T
       - Limits the playlist size (configurable via `max_tracks`, default 20)
       - Controls maximum play count (configurable via `max_plays`, default 2)
       - Minimum rating for rated tracks to be included (configurable via `min_rating`, default 4)
-      - Percentage of playlist to fill with unrated but popular tracks (configurable via `discovery_ratio`, default 30)
+      - Percentage of playlist to fill with unrated but popular tracks (configurable via `discovery_ratio`, default 30%)
 
   3. **Imported Playlists**:
       - Import playlists from external services (Spotify, Apple Music, YouTube, etc.)
@@ -114,6 +114,10 @@ spotify:
       api_key: API_KEY
       model: "gpt-3.5-turbo"
       base_url: "https://api.openai.com/v1"  # Optional, for other providers
+      search:
+        api_key: ""  # Will use base key if empty
+        base_url: "http://localhost:11434/v1"  # Ollama default URL
+        model: "mistral"  # Default model for search
   ```
 
   You can get started with `beet plexsonic -p "YOUR_PROMPT"` to create the playlist based on YOUR_PROMPT. The default playlist name is `SonicSage` (wink wink), you can modify it using `-m` flag. By default, it requests 10 tracks from the AI model. Use the `-n` flag to change the number of tracks requested. Finally, if you prefer to clear the playlist before adding the new songs, you can add `-c` flag. So, to create a new classical music playlist, you can use something like `beet plexsonic -c -n 10 -p "classical music, romanticism era, like Schubert, Chopin, Liszt"`.
@@ -158,6 +162,7 @@ Plex matching may be less than perfect and it can miss tracks if the tags don't 
 ```yaml
 plexsync:
   manual_search: yes
+  use_llm_search: yes  # Enable LLM search cleaning
   playlists:
     defaults:
       max_tracks: 20
