@@ -32,7 +32,7 @@ def setup_llm(llm_type="plexsonic"):
         }
 
         base_url = specific_config.get("base_url") or base_config["base_url"].get()
-        if base_url:
+        if (base_url):
             client_args["base_url"] = base_url
 
         return OpenAI(**client_args)
@@ -41,21 +41,16 @@ def setup_llm(llm_type="plexsonic"):
 
 
 def clean_search_string(client, title=None, album=None, artist=None):
-    """Clean and format search strings using LLM.
-
-    Args:
-        client: OpenAI client instance
-        title: Track title (optional)
-        album: Album name (optional)
-        artist: Artist name (optional)
-
-    Returns:
-        tuple: (cleaned_title, cleaned_album, cleaned_artist)
-    """
+    """Clean and format search strings using LLM."""
     if not client or not any([title, album, artist]):
         return title, album, artist
 
     logger.info("Starting LLM cleaning process for: %s - %s - %s", title, album, artist)
+
+    # Get model name for logging
+    model = config["llm"].get(dict).get("search", {}).get("model") or config["llm"]["model"].get()
+    base_url = config["llm"].get(dict).get("search", {}).get("base_url") or config["llm"]["base_url"].get()
+    logger.info("Using LLM model: %s at %s", model, base_url)
 
     sys_prompt = """
     You are a music metadata cleaner. Clean and format the provided music metadata
@@ -91,13 +86,41 @@ def clean_search_string(client, title=None, album=None, artist=None):
         ]
 
         logger.info("Sending request to LLM service...")
-        logger.debug("Original query: %s", context)
+        logger.debug("Request details: model=%s, messages=%s", model, messages)
 
-        response = client.chat.completions.create(
-            model=config["llm"].get(dict).get("search", {}).get("model") or config["llm"]["model"].get(),
-            messages=messages,
-            temperature=0.1
-        )
+        # Add timeout for the request
+        try:
+            from contextlib import contextmanager
+            import signal
+
+            @contextmanager
+            def timeout(seconds):
+                def handler(signum, frame):
+                    raise TimeoutError("LLM request timed out")
+
+                # Set the timeout handler
+                signal.signal(signal.SIGALRM, handler)
+                signal.alarm(seconds)
+                try:
+                    yield
+                finally:
+                    signal.alarm(0)
+
+            # Attempt request with timeout
+            with timeout(30):  # 30 second timeout
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    temperature=0.1
+                )
+                logger.info("LLM request successful")
+
+        except TimeoutError:
+            logger.error("LLM request timed out after 30 seconds")
+            return title, album, artist
+        except Exception as e:
+            logger.error("Error during LLM request: %s", str(e))
+            return title, album, artist
 
         raw_response = response.choices[0].message.content.strip()
         logger.debug("Raw LLM response: %s", raw_response)
