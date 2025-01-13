@@ -92,10 +92,13 @@ def clean_search_string(client, title=None, album=None, artist=None):
             temperature=0.1
         )
 
+        raw_response = response.choices[0].message.content
+        logger.debug(f"Raw LLM response: {raw_response}")
+
         import json
         import re
 
-        json_match = re.search(r'\{.*\}', response.choices[0].message.content, re.DOTALL)
+        json_match = re.search(r'\{.*\}', raw_response, re.DOTALL)
         if json_match:
             cleaned = json.loads(json_match.group())
             logger.debug(f"LLM cleaned metadata: {cleaned}")
@@ -105,6 +108,8 @@ def clean_search_string(client, title=None, album=None, artist=None):
                 cleaned.get("artist", artist)
             )
 
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON parsing error: {e}")
     except Exception as e:
         logger.error(f"Error in LLM cleaning: {e}")
 
