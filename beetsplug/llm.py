@@ -107,6 +107,8 @@ def clean_search_string(client, title=None, album=None, artist=None):
                 cleaned.get("album", album),
                 cleaned.get("artist", artist)
             )
+        else:
+            logger.error(f"No JSON object found in LLM response: {raw_response}")
 
     except json.JSONDecodeError as e:
         logger.error(f"JSON parsing error: {e}")
