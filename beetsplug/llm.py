@@ -55,11 +55,11 @@ def clean_search_string(client, title=None, album=None, artist=None):
     3. Remove version indicators (Original Mix, Radio Edit, etc.)
     4. Remove soundtrack/movie references
     5. Return only core metadata
-    6. Return JSON with 'title', 'album', and 'artist' fields
+    6. Return a valid JSON object with double-quoted property names
     7. Return null for missing fields
     8. Do not infer or add information
 
-    Example output:
+    Example format:
     {
         "title": "cleaned song title",
         "album": "cleaned album name",
@@ -68,15 +68,13 @@ def clean_search_string(client, title=None, album=None, artist=None):
     """
 
     # Build context from provided fields
-    context = {}
-    if title:
-        context["title"] = title
-    if album:
-        context["album"] = album
-    if artist:
-        context["artist"] = artist
+    context = {
+        "title": title if title else None,
+        "album": album if album else None,
+        "artist": artist if artist else None
+    }
 
-    user_prompt = f"Clean this music metadata:\n{context}"
+    user_prompt = f"Clean this music metadata (return only valid JSON):\n{context}"
 
     try:
         messages = [
@@ -92,27 +90,51 @@ def clean_search_string(client, title=None, album=None, artist=None):
             temperature=0.1
         )
 
-        raw_response = response.choices[0].message.content
+        raw_response = response.choices[0].message.content.strip()
         logger.debug(f"Raw LLM response: {raw_response}")
 
         import json
         import re
 
+        # Try to extract JSON from the response
         json_match = re.search(r'\{.*\}', raw_response, re.DOTALL)
-        if json_match:
+        if not json_match:
+            logger.error(f"No JSON object found in LLM response: {raw_response}")
+            return title, album, artist
+
+        try:
+            # Try parsing the extracted JSON
             cleaned = json.loads(json_match.group())
             logger.debug(f"LLM cleaned metadata: {cleaned}")
+
+            # Validate the cleaned data structure
+            if not isinstance(cleaned, dict):
+                logger.error("LLM response is not a dictionary")
+                return title, album, artist
+
             return (
                 cleaned.get("title", title),
                 cleaned.get("album", album),
                 cleaned.get("artist", artist)
             )
-        else:
-            logger.error(f"No JSON object found in LLM response: {raw_response}")
 
-    except json.JSONDecodeError as e:
-        logger.error(f"JSON parsing error: {e}")
+        except json.JSONDecodeError as e:
+            # If JSON parsing fails, try to fix common formatting issues
+            json_str = json_match.group()
+            # Ensure property names are double-quoted
+            json_str = re.sub(r'(\w+):', r'"\1":', json_str)
+            try:
+                cleaned = json.loads(json_str)
+                logger.debug(f"Fixed and parsed JSON: {cleaned}")
+                return (
+                    cleaned.get("title", title),
+                    cleaned.get("album", album),
+                    cleaned.get("artist", artist)
+                )
+            except json.JSONDecodeError:
+                logger.error(f"Failed to parse JSON even after fixes: {json_str}")
+                return title, album, artist
+
     except Exception as e:
         logger.error(f"Error in LLM cleaning: {e}")
-
-    return title, album, artist
+        return title, album, artist
