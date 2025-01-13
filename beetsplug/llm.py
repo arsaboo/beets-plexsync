@@ -11,9 +11,21 @@ logger = logging.getLogger(__name__)
 
 class CleanedMetadata(BaseModel):
     """Pydantic model for cleaned metadata response."""
-    title: Optional[str] = Field(None, description="Cleaned song title")
-    album: Optional[str] = Field(None, description="Cleaned album name")
-    artist: Optional[str] = Field(None, description="Cleaned artist name")
+    title: Optional[str] = Field(None, description="Cleaned song title without features, versions, or other extra info")
+    album: Optional[str] = Field(None, description="Cleaned album name without soundtrack/movie references")
+    artist: Optional[str] = Field(None, description="Main artist name without featuring artists")
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "title": "Clean Song Name",
+                    "album": "Album Name",
+                    "artist": "Artist Name"
+                }
+            ]
+        }
+    }
 
 def setup_llm(llm_type="plexsonic"):
     """Setup LLM client using OpenAI-compatible API.
@@ -63,22 +75,25 @@ def clean_search_string(client, title=None, album=None, artist=None):
 
     logger.info("Starting LLM cleaning for: %s - %s - %s", title, album, artist)
 
-    # Early return if any values are empty strings after stripping
     if title and not title.strip() or album and not album.strip() or artist and not artist.strip():
         logger.debug("Empty string detected after stripping, returning original values")
         return title, album, artist
 
     try:
         messages = [
-            {"role": "system", "content": f"""You are a music metadata cleaner. Clean and format the provided music metadata
-                following these rules:
-                1. Remove unnecessary information in parentheses/brackets; remove punctuations
-                2. Remove featuring artists or 'ft.' mentions from title
-                3. Remove version indicators (Original Mix, Radio Edit, etc.)
-                4. Remove soundtrack/movie references
-                5. Return only core metadata as valid JSON
-                Example: {{"title": "cleaned title", "album": "cleaned album", "artist": "cleaned artist"}}"""},
-            {"role": "user", "content": f"Clean: title='{title}' album='{album}' artist='{artist}'"}
+            {
+                "role": "system",
+                "content": """You are a music metadata cleaner. Clean the provided metadata by:
+1. Removing unnecessary information in parentheses/brackets and punctuations
+2. Removing featuring artists or 'ft.' mentions from title
+3. Removing version indicators (Original Mix, Radio Edit, etc.)
+4. Removing soundtrack/movie references
+Return ONLY the cleaned metadata in the specified JSON structure."""
+            },
+            {
+                "role": "user",
+                "content": f"Clean this metadata: {title=} {album=} {artist=}"
+            }
         ]
 
         logger.debug("Sending request to LLM...")
@@ -87,30 +102,36 @@ def clean_search_string(client, title=None, album=None, artist=None):
             model=config["llm"].get(dict).get("search", {}).get("model") or config["llm"]["model"].get(),
             messages=messages,
             temperature=0.1,
-            max_tokens=150,  # Limit response size
-            timeout=15.0     # 15 second timeout
+            max_tokens=150,
+            timeout=15.0,
+            response_format={"type": "json_object"},  # Force JSON response
+            tools=[{
+                "type": "function",
+                "function": {
+                    "name": "clean_metadata",
+                    "description": "Clean and format music metadata",
+                    "parameters": CleanedMetadata.model_json_schema()
+                }
+            }]
         )
 
-        logger.debug("LLM response received")
+        raw_response = response.choices[0].message.content.strip()
+        logger.debug("Raw LLM response: %s", raw_response)
 
-        try:
-            # Parse response using Pydantic model
-            cleaned = CleanedMetadata.model_validate_json(response.choices[0].message.content)
-            logger.info("Successfully cleaned metadata: %s", cleaned.model_dump())
+        # Parse response using Pydantic model
+        cleaned = CleanedMetadata.model_validate_json(raw_response)
+        logger.info("Successfully cleaned metadata: %s", cleaned.model_dump())
 
-            return (
-                cleaned.title or title,
-                cleaned.album or album,
-                cleaned.artist or artist
-            )
-
-        except Exception as e:
-            logger.error("Failed to parse LLM response: %s", str(e))
-            return title, album, artist
+        return (
+            cleaned.title or title,
+            cleaned.album or album,
+            cleaned.artist or artist
+        )
 
     except httpx.TimeoutException:
         logger.error("LLM request timed out")
         return title, album, artist
     except Exception as e:
-        logger.error("Error in LLM cleaning: %s", str(e))
+        logger.error("Error in clean_search_string: %s", str(e))
+        logger.debug("Original values: title=%s, album=%s, artist=%s", title, album, artist)
         return title, album, artist
