@@ -1,10 +1,18 @@
 """LLM integration for beets plugins."""
 
 import logging
+from typing import Optional
 from openai import OpenAI
 from beets import config
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
+
+class CleanedMetadata(BaseModel):
+    """Pydantic model for cleaned metadata response."""
+    title: Optional[str] = Field(None, description="Cleaned song title")
+    album: Optional[str] = Field(None, description="Cleaned album name")
+    artist: Optional[str] = Field(None, description="Cleaned artist name")
 
 def setup_llm(llm_type="plexsonic"):
     """Setup LLM client using OpenAI-compatible API.
@@ -47,6 +55,8 @@ def clean_search_string(client, title=None, album=None, artist=None):
     if not client or not any([title, album, artist]):
         return title, album, artist
 
+    logger.info("Starting LLM cleaning process for: %s - %s - %s", title, album, artist)
+
     sys_prompt = """
     You are a music metadata cleaner. Clean and format the provided music metadata
     following these rules:
@@ -55,16 +65,14 @@ def clean_search_string(client, title=None, album=None, artist=None):
     3. Remove version indicators (Original Mix, Radio Edit, etc.)
     4. Remove soundtrack/movie references
     5. Return only core metadata
-    6. Return a valid JSON object with double-quoted property names
-    7. Return null for missing fields
-    8. Do not infer or add information
-
-    Example format:
+    6. Return a valid JSON object matching this structure:
     {
         "title": "cleaned song title",
         "album": "cleaned album name",
         "artist": "cleaned artist name"
     }
+    7. Return null for missing fields
+    8. Do not infer or add information
     """
 
     # Build context from provided fields
@@ -82,7 +90,8 @@ def clean_search_string(client, title=None, album=None, artist=None):
             {"role": "user", "content": user_prompt}
         ]
 
-        logger.debug(f"Original query: {context}")
+        logger.info("Sending request to LLM service...")
+        logger.debug("Original query: %s", context)
 
         response = client.chat.completions.create(
             model=config["llm"].get(dict).get("search", {}).get("model") or config["llm"]["model"].get(),
@@ -91,7 +100,7 @@ def clean_search_string(client, title=None, album=None, artist=None):
         )
 
         raw_response = response.choices[0].message.content.strip()
-        logger.debug(f"Raw LLM response: {raw_response}")
+        logger.debug("Raw LLM response: %s", raw_response)
 
         import json
         import re
@@ -99,42 +108,39 @@ def clean_search_string(client, title=None, album=None, artist=None):
         # Try to extract JSON from the response
         json_match = re.search(r'\{.*\}', raw_response, re.DOTALL)
         if not json_match:
-            logger.error(f"No JSON object found in LLM response: {raw_response}")
+            logger.error("No JSON object found in LLM response: %s", raw_response)
             return title, album, artist
 
         try:
-            # Try parsing the extracted JSON
-            cleaned = json.loads(json_match.group())
-            logger.debug(f"LLM cleaned metadata: {cleaned}")
-
-            # Validate the cleaned data structure
-            if not isinstance(cleaned, dict):
-                logger.error("LLM response is not a dictionary")
-                return title, album, artist
+            # Parse response using Pydantic model
+            cleaned = CleanedMetadata.model_validate_json(json_match.group())
+            logger.info("Successfully cleaned metadata: %s", cleaned.model_dump())
 
             return (
-                cleaned.get("title", title),
-                cleaned.get("album", album),
-                cleaned.get("artist", artist)
+                cleaned.title or title,
+                cleaned.album or album,
+                cleaned.artist or artist
             )
 
-        except json.JSONDecodeError as e:
-            # If JSON parsing fails, try to fix common formatting issues
-            json_str = json_match.group()
-            # Ensure property names are double-quoted
-            json_str = re.sub(r'(\w+):', r'"\1":', json_str)
+        except Exception as e:
+            logger.error("Error parsing LLM response: %s", str(e))
+            # Try one more time with basic JSON fixes
             try:
-                cleaned = json.loads(json_str)
-                logger.debug(f"Fixed and parsed JSON: {cleaned}")
+                json_str = json_match.group()
+                # Ensure property names are double-quoted
+                json_str = re.sub(r'(\w+):', r'"\1":', json_str)
+                cleaned = CleanedMetadata.model_validate_json(json_str)
+                logger.info("Successfully cleaned metadata after fixes: %s", cleaned.model_dump())
+
                 return (
-                    cleaned.get("title", title),
-                    cleaned.get("album", album),
-                    cleaned.get("artist", artist)
+                    cleaned.title or title,
+                    cleaned.album or album,
+                    cleaned.artist or artist
                 )
-            except json.JSONDecodeError:
-                logger.error(f"Failed to parse JSON even after fixes: {json_str}")
+            except Exception as e:
+                logger.error("Failed to parse JSON even after fixes: %s", str(e))
                 return title, album, artist
 
     except Exception as e:
-        logger.error(f"Error in LLM cleaning: {e}")
+        logger.error("Error in LLM cleaning process: %s", str(e))
         return title, album, artist
