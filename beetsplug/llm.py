@@ -1,8 +1,10 @@
 """LLM integration for beets plugins."""
 
+import logging
 from openai import OpenAI
 from beets import config
 
+logger = logging.getLogger(__name__)
 
 def setup_llm(llm_type="plexsonic"):
     """Setup LLM client using OpenAI-compatible API.
@@ -82,6 +84,8 @@ def clean_search_string(client, title=None, album=None, artist=None):
             {"role": "user", "content": user_prompt}
         ]
 
+        logger.debug(f"Original query: {context}")
+
         response = client.chat.completions.create(
             model=config["llm"].get(dict).get("search", {}).get("model") or config["llm"]["model"].get(),
             messages=messages,
@@ -94,7 +98,7 @@ def clean_search_string(client, title=None, album=None, artist=None):
         json_match = re.search(r'\{.*\}', response.choices[0].message.content, re.DOTALL)
         if json_match:
             cleaned = json.loads(json_match.group())
-            print(f"LLM cleaned metadata: {cleaned}")
+            logger.debug(f"LLM cleaned metadata: {cleaned}")
             return (
                 cleaned.get("title", title),
                 cleaned.get("album", album),
@@ -102,6 +106,6 @@ def clean_search_string(client, title=None, album=None, artist=None):
             )
 
     except Exception as e:
-        print(f"Error in LLM cleaning: {e}")
+        logger.error(f"Error in LLM cleaning: {e}")
 
     return title, album, artist
