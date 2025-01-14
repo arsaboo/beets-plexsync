@@ -978,7 +978,25 @@ class PlexSync(BeetsPlugin):
                 self._log.debug("Using LLM cleaned artist: {} -> {}", original_artist, cleaned_artist)
                 song["artist"] = cleaned_artist
 
-            # Try
+            # Retry search with cleaned metadata
+            try:
+                if song["album"] is None:
+                    tracks = self.music.searchTracks(**{"track.title": song["title"]})
+                else:
+                    tracks = self.music.searchTracks(
+                        **{"album.title": song["album"], "track.title": song["title"]}
+                    )
+                    if len(tracks) == 0:
+                        song["title"] = re.sub(r"\(.*\)", "", song["title"]).strip()
+                        tracks = self.music.searchTracks(**{"track.title": song["title"]})
+            except Exception as e:
+                self._log.debug(
+                    "Error searching for {} - {}. Error: {}",
+                    song["album"],
+                    song["title"],
+                    e,
+                )
+                return None
 
         artist = song["artist"].split(",")[0]
         if len(tracks) == 1:
@@ -1010,19 +1028,6 @@ class PlexSync(BeetsPlugin):
                 if artist in plex_artist:
                     return track
         else:
-            # Clean search strings using LLM if enabled and initial search failed
-            if self.search_llm and config["plexsync"]["use_llm_search"].get(bool):
-                cleaned_title, cleaned_album, cleaned_artist = clean_search_string(
-                    self.search_llm,
-                    title=original_title,
-                    album=original_album,
-                    artist=original_artist
-                )
-                song["title"] = cleaned_title
-                song["album"] = cleaned_album
-                song["artist"] = cleaned_artist
-                return self.search_plex_song(song, manual_search, fallback_attempted)
-
             if manual_search:
                 self._log.info(
                     "Track {} - {} - {} not found in Plex",
@@ -2198,3 +2203,4 @@ class PlexSync(BeetsPlugin):
         """Clean up when plugin is disabled."""
         if self.loop and not self.loop.is_closed():
             self.loop.close()
+```
