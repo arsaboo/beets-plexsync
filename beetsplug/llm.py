@@ -182,31 +182,39 @@ Keep language indicators and core artist/song names unchanged.""",
             cleaned_album = album  # Keep original album if LLM returns null
             cleaned_artist = cleaned.artist.strip() if cleaned.artist else artist
 
-            # Compare strings after stripping, but only if they exist
-            title_changed = cleaned_title.strip() != (title.strip() if title else "")
-            album_changed = cleaned_album != album  # Album comparison without strip since it might be None
-            artist_changed = cleaned_artist.strip() != (artist.strip() if artist else "")
+            # Log values before comparison for debugging
+            logger.debug("Comparing values - Original title: '{}', Cleaned title: '{}'",
+                       title.strip() if title else "",
+                       cleaned_title.strip() if cleaned_title else "")
 
-            if not any([title_changed, album_changed, artist_changed]):
-                logger.debug("LLM cleaning made no changes to metadata")
-                return title, album, artist
+            # Compare strings after proper normalization
+            title_changed = (cleaned_title and title and
+                           cleaned_title.strip().lower() != title.strip().lower())
+            album_changed = (cleaned_album and album and
+                           cleaned_album.strip().lower() != album.strip().lower())
+            artist_changed = (cleaned_artist and artist and
+                           cleaned_artist.strip().lower() != artist.strip().lower())
 
             # Store actual cleaned values
             cleaned_result = (cleaned_title, cleaned_album, cleaned_artist)
 
-            logger.info(
-                "Successfully cleaned metadata - Original: {0}/{1}/{2} -> Cleaned: {3}/{4}/{5}",
-                title or "None",
-                album or "None",
-                artist or "None",
-                cleaned_title or "None",
-                cleaned_album or "None",
-                cleaned_artist or "None"
-            )
+            if any([title_changed, album_changed, artist_changed]):
+                logger.info(
+                    "Successfully cleaned metadata - Original: '{0}'/'{1}'/'{2}' -> Cleaned: '{3}'/'{4}'/'{5}'",
+                    title or "None",
+                    album or "None",
+                    artist or "None",
+                    cleaned_title or "None",
+                    cleaned_album or "None",
+                    cleaned_artist or "None"
+                )
 
-            # Cache the cleaned result
-            _metadata_cache[cache_key] = cleaned_result
-            return cleaned_result
+                # Cache the cleaned result only if there were changes
+                _metadata_cache[cache_key] = cleaned_result
+                return cleaned_result
+            else:
+                logger.debug("LLM cleaning made no changes to metadata")
+                return title, album, artist
 
         except Exception as e:
             logger.error("Failed to parse LLM response: {0}", str(e))
