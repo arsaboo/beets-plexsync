@@ -817,7 +817,7 @@ class PlexSync(BeetsPlugin):
         for item in items:
             try:
                 # Check for both plex_ratingkey and ratingKey
-                rating_key = getattr(item, 'plex_ratingkey', None) # or getattr(item, 'ratingKey', None)
+                rating_key = getattr(item, 'plex_ratingkey', None) or getattr(item, 'ratingKey', None)
                 if rating_key:
                     plex_set.add(self.plex.fetchItem(rating_key))
                 else:
