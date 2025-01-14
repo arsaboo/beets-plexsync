@@ -134,6 +134,7 @@ def clean_search_string(client, title=None, album=None, artist=None):
 - Soundtrack references (From the motion picture, OST)
 - Qualifiers (Single, Album Version,  Part 2, )
 - Any additional data that is not related to the core artist/song
+- If the title is in multiple languages, return the English version
 Keep language indicators and core artist/song names unchanged.""",
             },
             {
