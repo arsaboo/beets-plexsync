@@ -124,7 +124,7 @@ def clean_search_string(client, title=None, album=None, artist=None):
 - Featuring artists, 'ft.', 'feat.' mentions
 - Version indicators (Original Mix, Radio Edit, etc.)
 - Soundtrack references (From the motion picture, OST)
-- Qualifiers (Single, Album Version)
+- Qualifiers (Single, Album Version,  Part 2, )
 - Any additional data that is not related to the core artist/song
 Keep language indicators and core artist/song names unchanged.""",
             },
@@ -177,16 +177,24 @@ Keep language indicators and core artist/song names unchanged.""",
         try:
             cleaned = CleanedMetadata.model_validate_json(raw_response)
 
-            # Only use cleaned values if they exist and aren't "None"
-            cleaned_title = cleaned.title if cleaned.title and cleaned.title != "None" else title
-            cleaned_album = cleaned.album if cleaned.album and cleaned.album != "None" else album
-            cleaned_artist = cleaned.artist if cleaned.artist and cleaned.artist != "None" else artist
+            # Only use cleaned values if they exist, aren't "None", and are different
+            cleaned_title = cleaned.title if cleaned.title and cleaned.title != "None" and cleaned.title.strip() else title
+            cleaned_album = cleaned.album if cleaned.album and cleaned.album != "None" and cleaned.album.strip() else album
+            cleaned_artist = cleaned.artist if cleaned.artist and cleaned.artist != "None" and cleaned.artist.strip() else artist
+
+            if cleaned_title == title and cleaned_album == album and cleaned_artist == artist:
+                logger.debug("LLM cleaning made no changes to metadata")
+                return title, album, artist
 
             # Store actual cleaned values
             cleaned_result = (cleaned_title, cleaned_album, cleaned_artist)
 
-            logger.info("Successfully cleaned metadata - title: {0}, album: {1}, artist: {2}",
-                       cleaned_title, cleaned_album, cleaned_artist)
+            logger.debug(
+                "Successfully cleaned metadata - title: {0} -> {1}, album: {2} -> {3}, artist: {4} -> {5}",
+                title, cleaned_title,
+                album, cleaned_album,
+                artist, cleaned_artist
+            )
 
             # Cache the cleaned result
             _metadata_cache[cache_key] = cleaned_result
