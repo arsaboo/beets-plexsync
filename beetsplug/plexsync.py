@@ -1037,9 +1037,11 @@ class PlexSync(BeetsPlugin):
         if len(tracks) == 1:
             result = tracks[0]
             self._cache_result(cache_key, result)
+            self._log.debug("Found exact match: {} - {} - {} (Plex rating key: {})",
+                result.parentTitle, result.originalTitle, result.title, result.ratingKey)
             return result
         elif len(tracks) > 1:
-            sorted_tracks = self.find_closest_match(song, tracks)  # Simply pass the song dict
+            sorted_tracks = self.find_closest_match(song, tracks)
             self._log.debug("Found {} tracks for {}", len(sorted_tracks), song["title"])
             if manual_search and len(sorted_tracks) > 0:
                 return self._handle_manual_search(sorted_tracks, song)
@@ -1049,6 +1051,8 @@ class PlexSync(BeetsPlugin):
                 else:
                     plex_artist = track.artist().title
                 if artist in plex_artist:
+                    self._log.debug("Found best match with score {:.2f}: {} - {} - {} (Plex rating key: {})",
+                        score, track.parentTitle, plex_artist, track.title, track.ratingKey)
                     self._cache_result(cache_key, track)
                     return track
 
@@ -1065,35 +1069,35 @@ class PlexSync(BeetsPlugin):
             yt_search_results = self.import_yt_search(search_query, limit=1)
             if yt_search_results:
                 yt_song = yt_search_results[0]
-                self._log.info("Found track via YouTube search: {} - {} - {}", yt_song["album"], yt_song["artist"], yt_song["title"])
-                return self.search_plex_song(yt_song, manual_search, fallback_attempted=True)
+                self._log.info("Found track via YouTube search: {} - {} - {}",
+                    yt_song["album"], yt_song["artist"], yt_song["title"])
+
+                # Try direct Plex search with YouTube results
+                try:
+                    if yt_song["album"] is None:
+                        tracks = self.music.searchTracks(**{"track.title": yt_song["title"]})
+                    else:
+                        tracks = self.music.searchTracks(
+                            **{
+                                "album.title": yt_song["album"],
+                                "track.title": yt_song["title"]
+                            }
+                        )
+                    if tracks:
+                        if len(tracks) == 1:
+                            self._cache_result(cache_key, tracks[0])
+                            self._log.debug("Found match using YouTube metadata: {} - {} - {} (Plex rating key: {})",
+                                tracks[0].parentTitle, tracks[0].originalTitle, tracks[0].title, tracks[0].ratingKey)
+                            return tracks[0]
+                        # Process multiple matches with original song info for better context
+                        result = self._process_matches(tracks, song, manual_search)
+                        if result:
+                            self._cache_result(cache_key, result)
+                            return result
+                except Exception as e:
+                    self._log.debug("Search with YouTube metadata failed: {}", e)
 
         # Then try LLM cleaning if configured
-        if not llm_attempted and self.search_llm and config["plexsync"]["use_llm_search"].get(bool):
-            cleaned_title, cleaned_album, cleaned_artist = clean_search_string(
-                self.search_llm,
-                title=song.get("title"),
-                album=song.get("album"),
-                artist=song.get("artist")
-            )
-
-            # Create a new dict with cleaned values
-            cleaned_song = dict(song)
-            if cleaned_title != song.get("title"):
-                self._log.debug("Using LLM cleaned title: {} -> {}", song["title"], cleaned_title)
-                cleaned_song["title"] = cleaned_title
-            if cleaned_album and cleaned_album != "None" and cleaned_album != song.get("album"):
-                self._log.debug("Using LLM cleaned album: {} -> {}", song["album"], cleaned_album)
-                cleaned_song["album"] = cleaned_album
-            if cleaned_artist != song.get("artist"):
-                self._log.debug("Using LLM cleaned artist: {} -> {}", song["artist"], cleaned_artist)
-                cleaned_song["artist"] = cleaned_artist
-
-            # Try search with cleaned values first
-            try:
-                if cleaned_song["album"] is None:
-                    tracks = self.music.searchTracks(**{"track.title": cleaned_song["title"]})
-                else:
                     tracks = self.music.searchTracks(
                         **{
                             "album.title": cleaned_song["album"],
@@ -1101,12 +1105,13 @@ class PlexSync(BeetsPlugin):
                         }
                     )
                 if tracks:
-                    self._log.debug("Found match using cleaned metadata")
                     if len(tracks) == 1:
                         self._cache_result(cache_key, tracks[0])
+                        self._log.debug("Found match using cleaned data: {} - {} - {} (Plex rating key: {})", tracks[0].parentTitle, tracks[0].originalTitle, tracks[0].title, tracks[0].ratingKey)
                         return tracks[0]
                     # Continue with normal matching logic using cleaned values
                     result = self._process_matches(tracks, cleaned_song, manual_search)
+                    self._log.debug("Found match using cleaned data: {} - {} - {} (Plex rating key: {})", result.parentTitle, result.originalTitle, result.title, result.ratingKey)
                     self._cache_result(cache_key, result)
                     return result
             except Exception as e:
