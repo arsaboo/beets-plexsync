@@ -962,7 +962,7 @@ class PlexSync(BeetsPlugin):
             return None
 
         if len(tracks) == 1:
-            self.cache.set(cache_key, tracks[0])
+            self.cache.set(cache_key, tracks[0].__dict__)
             return tracks[0]
         elif len(tracks) > 1:
             sorted_tracks = self.find_closest_match(song, tracks)  # Simply pass the song dict
@@ -983,7 +983,7 @@ class PlexSync(BeetsPlugin):
                 if sel in ("b", "B", "s", "S"):
                     return None
                 result = sorted_tracks[sel - 1][0] if sel > 0 else None
-                self.cache.set(cache_key, result)
+                self.cache.set(cache_key, result.__dict__)
                 return result
             for track, score in sorted_tracks:
                 if track.originalTitle is not None:
@@ -991,7 +991,7 @@ class PlexSync(BeetsPlugin):
                 else:
                     plex_artist = track.artist().title
                 if artist in plex_artist:
-                    self.cache.set(cache_key, track)
+                    self.cache.set(cache_key, track.__dict__)
                     return track
         else:
             self._log.debug("Track {} not found in Plex library", song["title"])
@@ -1031,11 +1031,11 @@ class PlexSync(BeetsPlugin):
                 if tracks:
                     self._log.debug("Found match using cleaned metadata")
                     if len(tracks) == 1:
-                        self.cache.set(cache_key, tracks[0])
+                        self.cache.set(cache_key, tracks[0].__dict__)
                         return tracks[0]
                     # Continue with normal matching logic using cleaned values
                     result = self._process_matches(tracks, cleaned_song, manual_search)
-                    self.cache.set(cache_key, result)
+                    self.cache.set(cache_key, result.__dict__)
                     return result
             except Exception as e:
                 self._log.debug("Search with cleaned metadata failed: {}", str(e))
@@ -1092,7 +1092,7 @@ class PlexSync(BeetsPlugin):
 
         # Cache the result
         cache_key = json.dumps(song)
-        self.cache.set(cache_key, result)
+        self.cache.set(cache_key, result.__dict__)
         return result
 
     def _handle_manual_search(self, sorted_tracks, song):
@@ -2260,3 +2260,4 @@ class PlexSync(BeetsPlugin):
         """Clean up when plugin is disabled."""
         if self.loop and not self.loop.is_closed():
             self.loop.close()
+```python

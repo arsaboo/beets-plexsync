@@ -33,5 +33,8 @@ class Cache:
         """Store the result for a given query in the cache."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
+            # Convert result to dictionary if it's not serializable
+            if not isinstance(result, (dict, list, str, int, float, bool, type(None))):
+                result = result.__dict__
             cursor.execute('REPLACE INTO cache (query, result) VALUES (?, ?)', (query, json.dumps(result)))
             conn.commit()
