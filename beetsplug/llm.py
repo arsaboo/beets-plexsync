@@ -82,12 +82,14 @@ def clean_search_string(client, title=None, album=None, artist=None):
         logger.debug("Skipping LLM cleaning - no input or client")
         return title, album, artist
 
+    # Format metadata for logging
     metadata = {
         "title": title or "None",
         "album": album or "None",
         "artist": artist or "None"
     }
-    logger.debug("Starting LLM cleaning for: %s", metadata)
+    # Use string formatting directly for beets logger
+    logger.debug("Starting LLM cleaning for: " + str(metadata))
 
     # Early validation
     if any(val and not val.strip() for val in [title, album, artist]):
@@ -96,7 +98,7 @@ def clean_search_string(client, title=None, album=None, artist=None):
 
     try:
         model = config["llm"].get(dict).get("search", {}).get("model") or config["llm"]["model"].get()
-        logger.debug("Using model: '%s'", model)
+        logger.debug("Using model: " + str(model))
 
         messages = [
             {
@@ -118,7 +120,7 @@ Keep language indicators and core artist/song names unchanged.""",
             },
         ]
 
-        logger.debug("Sending request to LLM")
+        logger.debug("Sending request to LLM for model: " + str(model))
 
         # Add retries for failed requests
         max_retries = 3
@@ -152,7 +154,7 @@ Keep language indicators and core artist/song names unchanged.""",
             logger.error("Empty content in LLM response")
             return title, album, artist
 
-        logger.debug("Raw LLM response: '%s'", raw_response)
+        logger.debug("Raw LLM response: " + str(raw_response))
 
         try:
             cleaned = CleanedMetadata.model_validate_json(raw_response)
@@ -163,18 +165,18 @@ Keep language indicators and core artist/song names unchanged.""",
                 "artist": cleaned.artist or artist
             }
 
-            logger.info("Successfully cleaned metadata: %s", result)
+            logger.info("Successfully cleaned metadata: " + str(result))
 
             return (result["title"], result["album"], result["artist"])
 
         except Exception as e:
-            logger.error("Failed to parse LLM response: %s", str(e))
+            logger.error("Failed to parse LLM response: " + str(e))
             return title, album, artist
 
     except httpx.TimeoutException:
         logger.error("LLM request timed out")
         return title, album, artist
     except Exception as e:
-        logger.error("Error in clean_search_string: %s", str(e))
-        logger.debug("Original values: %s", metadata)
+        logger.error("Error in clean_search_string: " + str(e))
+        logger.debug("Original values: " + str(metadata))
         return title, album, artist
