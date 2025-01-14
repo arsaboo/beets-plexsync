@@ -81,11 +81,12 @@ def clean_search_string(client, title=None, album=None, artist=None):
     if not client or not any([title, album, artist]):
         return title, album, artist
 
+    # Use % formatting for beets logger compatibility
     logger.debug(
-        "Starting LLM cleaning for: title='%s', album='%s', artist='%s'",
-        title or "None",
-        album or "None",
-        artist or "None"
+        "Starting LLM cleaning for: title=%r, album=%r, artist=%r",
+        title,
+        album,
+        artist
     )
 
     if (
@@ -101,7 +102,7 @@ def clean_search_string(client, title=None, album=None, artist=None):
 
     try:
         model = config["llm"].get(dict).get("search", {}).get("model") or config["llm"]["model"].get()
-        logger.debug("Using model: '%s'", model)
+        logger.debug("Using model: %r", model)
 
         messages = [
             {
@@ -120,7 +121,7 @@ Keep language indicators and core artist/song names unchanged.""",
             },
         ]
 
-        logger.debug("Sending request to LLM with model '%s'...", model)
+        logger.debug("Sending request to LLM with model %r...", model)
 
         # Standard chat completion request (works with Ollama and OpenAI)
         response = client.chat.completions.create(
@@ -137,12 +138,12 @@ Keep language indicators and core artist/song names unchanged.""",
             return title, album, artist
 
         raw_response = response.choices[0].message.content.strip()
-        logger.debug("Raw LLM response: '%s'", raw_response)
+        logger.debug("Raw LLM response: %r", raw_response)
 
         # Parse response using Pydantic model
         cleaned = CleanedMetadata.model_validate_json(raw_response)
         logger.info(
-            "Successfully cleaned metadata - title: '%s', album: '%s', artist: '%s'",
+            "Successfully cleaned metadata - title=%r, album=%r, artist=%r",
             cleaned.title or title,
             cleaned.album or album,
             cleaned.artist or artist
@@ -160,6 +161,6 @@ Keep language indicators and core artist/song names unchanged.""",
     except Exception as e:
         logger.error("Error in clean_search_string: %s", str(e))
         logger.debug(
-            "Original values: title=%s, album=%s, artist=%s", title, album, artist
+            "Original values: title=%r, album=%r, artist=%r", title, album, artist
         )
         return title, album, artist
