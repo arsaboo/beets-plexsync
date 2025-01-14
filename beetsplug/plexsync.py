@@ -923,7 +923,7 @@ class PlexSync(BeetsPlugin):
                     self._log.debug("Please sync Plex library again")
                     continue
 
-    def search_plex_song(self, song, manual_search=None, fallback_attempted=False):
+    def search_plex_song(self, song, manual_search=None, fallback_attempted=False, llm_attempted=False):
         """Fetch the Plex track key."""
         if manual_search is None:
             manual_search = config["plexsync"]["manual_search"].get(bool)
@@ -989,6 +989,20 @@ class PlexSync(BeetsPlugin):
                 if artist in plex_artist:
                     return track
         else:
+            # Try LLM cleaning as a fallback if not already attempted
+            if not llm_attempted and self.search_llm and config["plexsync"]["use_llm_search"].get(bool):
+                cleaned_title, cleaned_album, cleaned_artist = clean_search_string(
+                    self.search_llm,
+                    title=original_title,
+                    album=original_album,
+                    artist=original_artist
+                )
+                song["title"] = cleaned_title
+                if cleaned_album and cleaned_album != "None":
+                    song["album"] = cleaned_album
+                song["artist"] = cleaned_artist
+                return self.search_plex_song(song, manual_search, fallback_attempted, llm_attempted=True)
+
             if manual_search:
                 self._log.info(
                     "Track {} - {} - {} not found in Plex",
@@ -1015,19 +1029,6 @@ class PlexSync(BeetsPlugin):
                         yt_song = yt_search_results[0]
                         self._log.info("Found track via YouTube search: {} - {} - {}", yt_song["album"], yt_song["artist"], yt_song["title"])
                         return self.search_plex_song(yt_song, manual_search, fallback_attempted=True)
-                # Try LLM cleaning as a fallback
-                if self.search_llm and config["plexsync"]["use_llm_search"].get(bool):
-                    cleaned_title, cleaned_album, cleaned_artist = clean_search_string(
-                        self.search_llm,
-                        title=original_title,
-                        album=original_album,
-                        artist=original_artist
-                    )
-                    song["title"] = cleaned_title
-                    if cleaned_album and cleaned_album != "None":
-                        song["album"] = cleaned_album
-                    song["artist"] = cleaned_artist
-                    return self.search_plex_song(song, manual_search, fallback_attempted=True)
             return None
 
     def manual_track_search(self):
@@ -2177,3 +2178,4 @@ class PlexSync(BeetsPlugin):
         """Clean up when plugin is disabled."""
         if self.loop and not self.loop.is_closed():
             self.loop.close()
+```
