@@ -1153,25 +1153,6 @@ class PlexSync(BeetsPlugin):
             self.cache.set(cache_key, result.ratingKey)
         return result
 
-    def manual_track_search(self):
-        """Manually search for a track in the Plex library.
-
-        Prompts the user to enter the title, album, and artist of the track
-        they want to search for.
-        Calls the `search_plex_song` method with the provided information and
-        sets the `manual_search` flag to True.
-        """
-        song_dict = {}
-        title = input_("Title:").strip()
-        album = input_("Album:").strip()
-        artist = input_("Artist:").strip()
-        song_dict = {
-            "title": title.strip(),
-            "album": album.strip(),
-            "artist": artist.strip(),
-        }
-        self.search_plex_song(song_dict, manual_search=True)
-
     def _plex_import_playlist(self, playlist, playlist_url=None, listenbrainz=False):
         """Import playlist into Plex."""
         if listenbrainz:
