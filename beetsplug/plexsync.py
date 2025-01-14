@@ -928,18 +928,7 @@ class PlexSync(BeetsPlugin):
         if manual_search is None:
             manual_search = config["plexsync"]["manual_search"].get(bool)
 
-        # Store original values for potential fallback
-        original_title = song.get("title")
-        original_album = song.get("album")
-        original_artist = song.get("artist")
-
-        # Clean up title and album using regular expressions if needed
-        if 'From "' in song["title"] or '[From "' in song["title"]:
-            song["title"], album = self.parse_title(song["title"])
-            if not song.get("album"):
-                song["album"] = album
-
-        # Initial search with original/regex-cleaned metadata
+        # Try regular search first
         artist = song["artist"].split(",")[0]
         try:
             if song["album"] is None:
@@ -989,53 +978,116 @@ class PlexSync(BeetsPlugin):
                 if artist in plex_artist:
                     return track
         else:
-            # Try LLM cleaning as a fallback if not already attempted
-            if not llm_attempted and self.search_llm and config["plexsync"]["use_llm_search"].get(bool):
-                cleaned_title, cleaned_album, cleaned_artist = clean_search_string(
-                    self.search_llm,
-                    title=original_title,
-                    album=original_album,
-                    artist=original_artist
-                )
-                # Only update if cleaning actually changed something
-                if cleaned_title != original_title:
-                    self._log.debug("Using LLM cleaned title: {} -> {}", original_title, cleaned_title)
-                    song["title"] = cleaned_title
-                if cleaned_album and cleaned_album != "None" and cleaned_album != original_album:
-                    self._log.debug("Using LLM cleaned album: {} -> {}", original_album, cleaned_album)
-                    song["album"] = cleaned_album
-                if cleaned_artist != original_artist:
-                    self._log.debug("Using LLM cleaned artist: {} -> {}", original_artist, cleaned_artist)
-                    song["artist"] = cleaned_artist
-                return self.search_plex_song(song, manual_search, fallback_attempted, llm_attempted=True)
+            self._log.debug("Track {} not found in Plex library", song["title"])
 
-            if manual_search:
-                self._log.info(
-                    "Track {} - {} - {} not found in Plex",
-                    song["album"],
-                    song["artist"],
-                    song["title"],
-                )
-                if ui.input_yn("Search manually? (Y/n)"):
-                    self.manual_track_search()
+        # If regular search fails, try LLM cleaning if enabled
+        if not llm_attempted and self.search_llm and config["plexsync"]["use_llm_search"].get(bool):
+            cleaned_title, cleaned_album, cleaned_artist = clean_search_string(
+                self.search_llm,
+                title=song.get("title"),
+                album=song.get("album"),
+                artist=song.get("artist")
+            )
+
+            # Create a new dict with cleaned values
+            cleaned_song = dict(song)
+            if cleaned_title != song.get("title"):
+                self._log.debug("Using LLM cleaned title: {} -> {}", song["title"], cleaned_title)
+                cleaned_song["title"] = cleaned_title
+            if cleaned_album and cleaned_album != "None" and cleaned_album != song.get("album"):
+                self._log.debug("Using LLM cleaned album: {} -> {}", song["album"], cleaned_album)
+                cleaned_song["album"] = cleaned_album
+            if cleaned_artist != song.get("artist"):
+                self._log.debug("Using LLM cleaned artist: {} -> {}", song["artist"], cleaned_artist)
+                cleaned_song["artist"] = cleaned_artist
+
+            # Try search with cleaned values first
+            try:
+                if cleaned_song["album"] is None:
+                    tracks = self.music.searchTracks(**{"track.title": cleaned_song["title"]})
+                else:
+                    tracks = self.music.searchTracks(
+                        **{
+                            "album.title": cleaned_song["album"],
+                            "track.title": cleaned_song["title"]
+                        }
+                    )
+                if tracks:
+                    self._log.debug("Found match using cleaned metadata")
+                    if len(tracks) == 1:
+                        return tracks[0]
+                    # Continue with normal matching logic using cleaned values
+                    return self._process_matches(tracks, cleaned_song, manual_search)
+            except Exception as e:
+                self._log.debug("Search with cleaned metadata failed: {}", str(e))
+
+        # If LLM also fails, fallback to manual search if requested
+        if manual_search:
+            self._log.info(
+                "Track {} - {} - {} not found in Plex",
+                song["album"],
+                song["artist"],
+                song["title"],
+            )
+            if ui.input_yn("Search manually? (Y/n)"):
+                self.manual_track_search()
+        else:
+            self._log.info(
+                "Track {} - {} - {} not found in Plex",
+                song["album"],
+                song["artist"],
+                song["title"],
+            )
+            # Fallback to YouTube search if not already attempted and YouTube plugin is configured
+            if not fallback_attempted and "youtube" in config["plugins"].get(list):
+                search_query = f'{song["artist"]} {song["title"]}'
+                if song.get("album"):
+                    search_query += f' {song["album"]}'
+                yt_search_results = self.import_yt_search(search_query, limit=1)
+                if yt_search_results:
+                    yt_song = yt_search_results[0]
+                    self._log.info("Found track via YouTube search: {} - {} - {}", yt_song["album"], yt_song["artist"], yt_song["title"])
+                    return self.search_plex_song(yt_song, manual_search, fallback_attempted=True)
+        return None
+
+    def _process_matches(self, tracks, song, manual_search):
+        """Helper function to process multiple track matches."""
+        artist = song["artist"].split(",")[0]
+        sorted_tracks = self.find_closest_match(song, tracks)
+        self._log.debug("Found {} tracks for {}", len(sorted_tracks), song["title"])
+
+        if manual_search and len(sorted_tracks) > 0:
+            # ...existing manual search code...
+            return self._handle_manual_search(sorted_tracks, song)
+
+        # Try to find automatic match
+        for track, score in sorted_tracks:
+            if track.originalTitle is not None:
+                plex_artist = track.originalTitle
             else:
-                self._log.info(
-                    "Track {} - {} - {} not found in Plex",
-                    song["album"],
-                    song["artist"],
-                    song["title"],
-                )
-                # Fallback to YouTube search if not already attempted and YouTube plugin is configured
-                if not fallback_attempted and "youtube" in config["plugins"].get(list):
-                    search_query = f'{song["artist"]} {song["title"]}'
-                    if song.get("album"):
-                        search_query += f' {song["album"]}'
-                    yt_search_results = self.import_yt_search(search_query, limit=1)
-                    if yt_search_results:
-                        yt_song = yt_search_results[0]
-                        self._log.info("Found track via YouTube search: {} - {} - {}", yt_song["album"], yt_song["artist"], yt_song["title"])
-                        return self.search_plex_song(yt_song, manual_search, fallback_attempted=True)
+                plex_artist = track.artist().title
+            if artist in plex_artist:
+                return track
+
+        return None
+
+    def _handle_manual_search(self, sorted_tracks, song):
+        """Helper function to handle manual search."""
+        print_(
+            f'\nChoose candidates for {song["album"]} '
+            f'- {song["title"]} - {song["artist"]}:'
+        )
+        for i, (track, score) in enumerate(sorted_tracks, start=1):
+            print_(
+                f"{i}. {track.parentTitle} - {track.title} - "
+                f"{track.artist().title}"
+            )
+        sel = ui.input_options(
+            ("aBort", "Skip"), numrange=(1, len(sorted_tracks)), default=1
+        )
+        if sel in ("b", "B", "s", "S"):
             return None
+        return sorted_tracks[sel - 1][0] if sel > 0 else None
 
     def manual_track_search(self):
         """Manually search for a track in the Plex library.
@@ -2184,3 +2236,4 @@ class PlexSync(BeetsPlugin):
         """Clean up when plugin is disabled."""
         if self.loop and not self.loop.is_closed():
             self.loop.close()
+````
