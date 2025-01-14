@@ -177,23 +177,31 @@ Keep language indicators and core artist/song names unchanged.""",
         try:
             cleaned = CleanedMetadata.model_validate_json(raw_response)
 
-            # Only use cleaned values if they exist, aren't "None", and are different
+            # Handle None values and strip only if the value exists
             cleaned_title = cleaned.title.strip() if cleaned.title else title
-            cleaned_album = cleaned.album.strip() if cleaned.album else album
+            cleaned_album = album  # Keep original album if LLM returns null
             cleaned_artist = cleaned.artist.strip() if cleaned.artist else artist
 
-            if cleaned_title.strip() == title.strip() and cleaned_album.strip() == album.strip() and cleaned_artist.strip() == artist.strip():
+            # Compare strings after stripping, but only if they exist
+            title_changed = cleaned_title.strip() != (title.strip() if title else "")
+            album_changed = cleaned_album != album  # Album comparison without strip since it might be None
+            artist_changed = cleaned_artist.strip() != (artist.strip() if artist else "")
+
+            if not any([title_changed, album_changed, artist_changed]):
                 logger.debug("LLM cleaning made no changes to metadata")
                 return title, album, artist
 
             # Store actual cleaned values
             cleaned_result = (cleaned_title, cleaned_album, cleaned_artist)
 
-            logger.debug(
-                "Successfully cleaned metadata - title: {0} -> {1}, album: {2} -> {3}, artist: {4} -> {5}",
-                title, cleaned_title,
-                album, cleaned_album,
-                artist, cleaned_artist
+            logger.info(
+                "Successfully cleaned metadata - Original: {0}/{1}/{2} -> Cleaned: {3}/{4}/{5}",
+                title or "None",
+                album or "None",
+                artist or "None",
+                cleaned_title or "None",
+                cleaned_album or "None",
+                cleaned_artist or "None"
             )
 
             # Cache the cleaned result
