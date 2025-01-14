@@ -928,20 +928,22 @@ class PlexSync(BeetsPlugin):
                     self._log.debug("Please sync Plex library again")
                     continue
 
+    def _cache_result(self, cache_key, result):
+        """Helper method to safely cache search results."""
+        if result is None:
+            self.cache.set(cache_key, {'not_found': True})
+            self._log.debug("Caching negative result for: {}", cache_key[:50])
+        else:
+            try:
+                self.cache.set(cache_key, result)
+                self._log.debug("Caching positive result for: {}", cache_key[:50])
+            except Exception as e:
+                self._log.debug("Failed to cache result: {}", e)
+
     def search_plex_song(self, song, manual_search=None, fallback_attempted=False, llm_attempted=False):
         """Fetch the Plex track key."""
         if manual_search is None:
             manual_search = config["plexsync"]["manual_search"].get(bool)
-
-        def _cache_result(self, cache_key, result):
-            """Helper method to safely cache search results."""
-            if result is None:
-                self.cache.set(cache_key, {'not_found': True})
-            else:
-                try:
-                    self.cache.set(cache_key, result)
-                except Exception as e:
-                    self._log.debug("Failed to cache result: {}", e)
 
         # Check cache first
         cache_key = json.dumps(sorted(song.items()))  # Sort to ensure consistent keys
