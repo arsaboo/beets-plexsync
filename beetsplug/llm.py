@@ -94,11 +94,8 @@ def clean_search_string(client, title=None, album=None, artist=None):
         return title, album, artist
 
     try:
-        logger.debug(
-            "Preparing request with model: %s",
-            config["llm"].get(dict).get("search", {}).get("model")
-            or config["llm"]["model"].get(),
-        )
+        model = config["llm"].get(dict).get("search", {}).get("model") or config["llm"]["model"].get()
+        logger.debug("Using model: %s", model)
 
         messages = [
             {
@@ -119,18 +116,25 @@ Keep language indicators and core artist/song names unchanged.""",
 
         logger.debug("Sending request to LLM...")
 
-        # Use parse method with our Pydantic model
-        completion = client.beta.chat.completions.parse(
-            model=config["llm"].get(dict).get("search", {}).get("model")
-            or config["llm"]["model"].get(),
+        # Standard chat completion request (works with Ollama and OpenAI)
+        response = client.chat.completions.create(
+            model=model,
             messages=messages,
-            response_format=CleanedMetadata,
             temperature=0.1,
             max_tokens=150,
-            timeout=15.0,
+            response_format={"type": "json_object"},
+            timeout=15.0
         )
 
-        cleaned = completion.choices[0].message.parsed
+        if not response.choices:
+            logger.error("Empty response from LLM")
+            return title, album, artist
+
+        raw_response = response.choices[0].message.content.strip()
+        logger.debug("Raw LLM response: %s", raw_response)
+
+        # Parse response using Pydantic model
+        cleaned = CleanedMetadata.model_validate_json(raw_response)
         logger.info("Successfully cleaned metadata: %s", cleaned.model_dump())
 
         return (
