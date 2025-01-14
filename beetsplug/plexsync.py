@@ -1056,19 +1056,7 @@ class PlexSync(BeetsPlugin):
         self._cache_result(cache_key, None)
         self._log.debug("Track {} not found in Plex library", song["title"])
 
-        # Attempt YouTube fallback first
-        if not fallback_attempted and "youtube" in config["plugins"].get(list):
-            self._log.debug("Attempting YouTube fallback for {}", song["title"])
-            search_query = f'{song["artist"]} {song["title"]}'
-            if song.get("album"):
-                search_query += f' {song["album"]}'
-            yt_search_results = self.import_yt_search(search_query, limit=1)
-            if yt_search_results:
-                yt_song = yt_search_results[0]
-                self._log.info("Found track via YouTube search: {} - {} - {}", yt_song["album"], yt_song["artist"], yt_song["title"])
-                return self.search_plex_song(yt_song, manual_search, fallback_attempted=True)
-
-        # Then try LLM cleaning if configured
+        # Try LLM cleaning first if configured
         if not llm_attempted and self.search_llm and config["plexsync"]["use_llm_search"].get(bool):
             cleaned_title, cleaned_album, cleaned_artist = clean_search_string(
                 self.search_llm,
@@ -1089,7 +1077,7 @@ class PlexSync(BeetsPlugin):
                 self._log.debug("Using LLM cleaned artist: {} -> {}", song["artist"], cleaned_artist)
                 cleaned_song["artist"] = cleaned_artist
 
-            # Try search with cleaned values first
+            # Try search with cleaned values
             try:
                 if cleaned_song["album"] is None:
                     tracks = self.music.searchTracks(**{"track.title": cleaned_song["title"]})
@@ -1101,18 +1089,53 @@ class PlexSync(BeetsPlugin):
                         }
                     )
                 if tracks:
-                    self._log.debug("Found match using cleaned metadata")
+                    self._log.debug("Found match using cleaned metadata: {} - {} - {}",
+                        cleaned_song["album"], cleaned_song["artist"], cleaned_song["title"])
                     if len(tracks) == 1:
                         self._cache_result(cache_key, tracks[0])
                         return tracks[0]
                     # Continue with normal matching logic using cleaned values
                     result = self._process_matches(tracks, cleaned_song, manual_search)
-                    self._cache_result(cache_key, result)
-                    return result
+                    if result:
+                        self._cache_result(cache_key, result)
+                        return result
             except Exception as e:
                 self._log.debug("Search with cleaned metadata failed: {}", e)
 
-        # If LLM also fails, fallback to manual search if requested
+        # Then try YouTube search if available
+        if not fallback_attempted and "youtube" in config["plugins"].get(list):
+            self._log.debug("Attempting YouTube fallback for {}", song["title"])
+            search_query = f'{song["artist"]} {song["title"]}'
+            if song.get("album"):
+                search_query += f' {song["album"]}'
+            yt_search_results = self.import_yt_search(search_query, limit=20)
+            if yt_search_results:
+                # Try each YouTube result until we find a match
+                for yt_song in yt_search_results:
+                    self._log.debug("Trying YouTube result: {} - {} - {}",
+                        yt_song["album"], yt_song["artist"], yt_song["title"])
+                    try:
+                        if yt_song["album"] is None:
+                            tracks = self.music.searchTracks(**{"track.title": yt_song["title"]})
+                        else:
+                            tracks = self.music.searchTracks(
+                                **{"album.title": yt_song["album"], "track.title": yt_song["title"]}
+                            )
+                        if tracks:
+                            if len(tracks) == 1:
+                                result = tracks[0]
+                            else:
+                                result = self._process_matches(tracks, yt_song, manual_search)
+                            if result:
+                                self._log.info("Found match via YouTube search: {} - {} - {}",
+                                    yt_song["album"], yt_song["artist"], yt_song["title"])
+                                self._cache_result(cache_key, result)
+                                return result
+                    except Exception as e:
+                        self._log.debug("Error searching YouTube result: {}", e)
+                        continue
+
+        # Finally try manual search if enabled
         if manual_search:
             self._log.info(
                 "Track {} - {} - {} not found in Plex",
