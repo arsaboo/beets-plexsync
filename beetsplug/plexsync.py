@@ -936,22 +936,11 @@ class PlexSync(BeetsPlugin):
 
         try:
             if result is None:
-                self.cache.set(cache_key, {'not_found': True})
+                self.cache.set(cache_key, -1)  # Use -1 to indicate not found
                 self._log.debug("Caching negative result")
             else:
-                # Convert PlexAPI object to dict safely
-                if hasattr(result, '__dict__'):
-                    result_dict = {
-                        'title': getattr(result, 'title', ''),
-                        'ratingKey': getattr(result, 'ratingKey', None),
-                        'parentTitle': getattr(result, 'parentTitle', ''),
-                        'originalTitle': getattr(result, 'originalTitle', ''),
-                        'userRating': getattr(result, 'userRating', None),
-                    }
-                else:
-                    result_dict = result
-                self.cache.set(cache_key, result_dict)
-                self._log.debug("Caching positive result for: {}", result_dict.get('title', 'Unknown'))
+                self.cache.set(cache_key, result.ratingKey)
+                self._log.debug("Caching positive result for: {}", getattr(result, 'title', 'Unknown'))
         except Exception as e:
             self._log.debug("Failed to cache result: {}", str(e))
 
@@ -965,13 +954,12 @@ class PlexSync(BeetsPlugin):
         cache_key = json.dumps(sorted(clean_song.items()))
 
         # Check cache first
-        cached_result = self.cache.get(cache_key)
-        if cached_result:
+        cached_ratingKey = self.cache.get(cache_key)
+        if cached_ratingKey is not None:
             self._log.debug("Cache hit for query: {}", json.dumps(clean_song))
-            # If we have a cache hit but it indicates no match was found
-            if cached_result.get('not_found', False):
+            if cached_ratingKey == -1:
                 return None
-            return cached_result
+            return self.plex.fetchItem(cached_ratingKey)
 
         # Try regular search first
         artist = song["artist"].split(",")[0]
@@ -1213,19 +1201,7 @@ class PlexSync(BeetsPlugin):
             for song in songs:
                 found = self.search_plex_song(song, manual_search)
                 if found is not None:
-                    if isinstance(found, dict):
-                        song_dict = {
-                            "title": found.get('title', ''),
-                            "album": found.get('parentTitle', ''),
-                            "plex_ratingkey": found.get('ratingKey', None),
-                        }
-                    else:
-                        song_dict = {
-                            "title": getattr(found, 'title', ''),
-                            "album": getattr(found, 'parentTitle', ''),
-                            "plex_ratingkey": getattr(found, 'ratingKey', None),
-                        }
-                    song_list.append(self.dotdict(song_dict))
+                    song_list.append(found)
         self._plex_add_playlist_item(song_list, playlist)
 
     def _plex_import_search(self, playlist, search, limit=10):
@@ -1237,19 +1213,7 @@ class PlexSync(BeetsPlugin):
             for song in songs:
                 found = self.search_plex_song(song)
                 if found is not None:
-                    if isinstance(found, dict):
-                        song_dict = {
-                            "title": found.get('title', ''),
-                            "album": found.get('parentTitle', ''),
-                            "plex_ratingkey": found.get('ratingKey', None),
-                        }
-                    else:
-                        song_dict = {
-                            "title": getattr(found, 'title', ''),
-                            "album": getattr(found, 'parentTitle', ''),
-                            "plex_ratingkey": getattr(found, 'ratingKey', None),
-                        }
-                    song_list.append(self.dotdict(song_dict))
+                    song_list.append(found)
         self._plex_add_playlist_item(song_list, playlist)
 
     def _plex_clear_playlist(self, playlist):
@@ -1478,20 +1442,7 @@ class PlexSync(BeetsPlugin):
         for song in song_list:
             found = self.search_plex_song(song)
             if found is not None:
-                if isinstance(found, dict):
-                    match_dict = {
-                        "title": found.get('title', ''),
-                        "album": found.get('parentTitle', ''),
-                        "plex_ratingkey": found.get('ratingKey', None),
-                    }
-                else:
-                    match_dict = {
-                        "title": getattr(found, 'title', ''),
-                        "album": getattr(found, 'parentTitle', ''),
-                        "plex_ratingkey": getattr(found, 'ratingKey', None),
-                    }
-                self._log.debug("Song matched in Plex library: {}", match_dict)
-                matched_songs.append(self.dotdict(match_dict))
+                matched_songs.append(found)
         self._log.debug("Songs matched in Plex library: {}", matched_songs)
         if clear:
             try:
@@ -2233,22 +2184,9 @@ class PlexSync(BeetsPlugin):
         for track in all_tracks:
             found = self.search_plex_song(track, manual_search)
             if found:
-                if isinstance(found, dict):
-                    rating = float(found.get('userrating', 0))
-                    song_dict = {
-                        "title": found.get('title', ''),
-                        "album": found.get('parentTitle', ''),
-                        "plex_ratingkey": found.get('ratingKey', None),
-                    }
-                else:
-                    rating = float(getattr(found, 'userRating', 0))
-                    song_dict = {
-                        "title": getattr(found, 'title', ''),
-                        "album": getattr(found, 'parentTitle', ''),
-                        "plex_ratingkey": getattr(found, 'ratingKey', None),
-                    }
+                rating = float(getattr(found, 'userRating', 0) or 0)
                 if rating == 0 or rating > 2:  # Include unrated or rating > 2
-                    matched_songs.append(self.dotdict(song_dict))
+                    matched_songs.append(found)
                 else:
                     with open(log_file, 'a', encoding='utf-8') as f:
                         f.write(f"Low rated ({rating}): {track.get('artist', 'Unknown')} - {track.get('album', 'Unknown')} - {track.get('title', 'Unknown')}\n")
@@ -2270,8 +2208,8 @@ class PlexSync(BeetsPlugin):
         seen = set()
         unique_matched = []
         for song in matched_songs:
-            if song.plex_ratingkey not in seen:
-                seen.add(song.plex_ratingkey)
+            if song.ratingKey not in seen:
+                seen.add(song.ratingKey)
                 unique_matched.append(song)
 
         # Apply track limit if specified
@@ -2305,4 +2243,4 @@ class PlexSync(BeetsPlugin):
     def shutdown(self, lib):
         """Clean up when plugin is disabled."""
         if self.loop and not self.loop.is_closed():
-            self.loop.close()
+            self.close()

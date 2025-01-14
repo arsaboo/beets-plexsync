@@ -37,6 +37,8 @@ class PlexJSONEncoder(json.JSONEncoder):
         elif isinstance(obj, PlexServer):
             logger.debug('Skipping PlexServer object serialization')
             return None
+        elif isinstance(obj, Element):
+            return str(obj)
         return super().default(obj)
 
 class Cache:
@@ -53,7 +55,7 @@ class Cache:
                 cursor.execute('''
                     CREATE TABLE IF NOT EXISTS cache (
                         query TEXT PRIMARY KEY,
-                        result TEXT,
+                        ratingKey INTEGER,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 ''')
@@ -77,26 +79,19 @@ class Cache:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                cursor.execute('SELECT result FROM cache WHERE query = ?', (query,))
+                cursor.execute('SELECT ratingKey FROM cache WHERE query = ?', (query,))
                 row = cursor.fetchone()
                 if row:
-                    try:
-                        result = json.loads(row[0])
-                        logger.debug('Cache hit for query: {}', self._sanitize_query_for_log(query))
-                        return result
-                    except json.JSONDecodeError as e:
-                        logger.warning('Invalid cache entry found, removing: {}', str(e))
-                        cursor.execute('DELETE FROM cache WHERE query = ?', (query,))
-                        conn.commit()
-                        return None
+                    logger.debug('Cache hit for query: {}', self._sanitize_query_for_log(query))
+                    return row[0]
                 logger.debug('Cache miss for query: {}', self._sanitize_query_for_log(query))
                 return None
         except Exception as e:
             logger.error('Cache lookup failed: {}', str(e))
             return None
 
-    def set(self, query, result):
-        """Store the result for a given query in the cache."""
+    def set(self, query, ratingKey):
+        """Store the ratingKey for a given query in the cache."""
         try:
             sanitized_query = self._sanitize_query_for_log(query)
 
@@ -104,25 +99,14 @@ class Cache:
                 logger.debug('Skipping cache for empty query')
                 return None
 
-            # Special handling for None or not found results
-            if result is None:
-                json_result = json.dumps({'not_found': True})
-                logger.debug('Caching negative result for query: {}', sanitized_query)
-            else:
-                try:
-                    json_result = json.dumps(result, cls=PlexJSONEncoder)
-                    logger.debug('Caching positive result for query: {}', sanitized_query)
-                except TypeError as e:
-                    logger.error('Failed to serialize result for query {}: {}', sanitized_query, str(e))
-                    return None
-
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    'REPLACE INTO cache (query, result) VALUES (?, ?)',
-                    (query, json_result)
+                    'REPLACE INTO cache (query, ratingKey) VALUES (?, ?)',
+                    (query, ratingKey)
                 )
                 conn.commit()
+                logger.debug('Caching result for query: {}', sanitized_query)
         except Exception as e:
             logger.error('Cache storage failed for query {}: {}', sanitized_query, str(e))
             return None
