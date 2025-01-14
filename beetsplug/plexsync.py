@@ -37,6 +37,7 @@ from plexapi.server import PlexServer
 from pydantic import BaseModel, Field
 from requests.exceptions import ConnectionError, ContentDecodingError
 from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
+from beetsplug.caching import Cache
 
 
 class Song(BaseModel):
@@ -83,6 +84,10 @@ class PlexSync(BeetsPlugin):
         self.config_dir = config.config_dir()
         self.llm_client = None
         self.search_llm = None
+
+        # Initialize cache
+        cache_path = os.path.join(self.config_dir, 'plexsync_cache.db')
+        self.cache = Cache(cache_path)
 
         # Call the setup methods
         try:
@@ -928,6 +933,13 @@ class PlexSync(BeetsPlugin):
         if manual_search is None:
             manual_search = config["plexsync"]["manual_search"].get(bool)
 
+        # Check cache first
+        cache_key = json.dumps(song)
+        cached_result = self.cache.get(cache_key)
+        if cached_result:
+            self._log.debug("Cache hit for query: {}", cache_key)
+            return cached_result
+
         # Try regular search first
         artist = song["artist"].split(",")[0]
         try:
@@ -950,6 +962,7 @@ class PlexSync(BeetsPlugin):
             return None
 
         if len(tracks) == 1:
+            self.cache.set(cache_key, tracks[0])
             return tracks[0]
         elif len(tracks) > 1:
             sorted_tracks = self.find_closest_match(song, tracks)  # Simply pass the song dict
@@ -969,13 +982,16 @@ class PlexSync(BeetsPlugin):
                 )
                 if sel in ("b", "B", "s", "S"):
                     return None
-                return sorted_tracks[sel - 1][0] if sel > 0 else None
+                result = sorted_tracks[sel - 1][0] if sel > 0 else None
+                self.cache.set(cache_key, result)
+                return result
             for track, score in sorted_tracks:
                 if track.originalTitle is not None:
                     plex_artist = track.originalTitle
                 else:
                     plex_artist = track.artist().title
                 if artist in plex_artist:
+                    self.cache.set(cache_key, track)
                     return track
         else:
             self._log.debug("Track {} not found in Plex library", song["title"])
@@ -1015,9 +1031,12 @@ class PlexSync(BeetsPlugin):
                 if tracks:
                     self._log.debug("Found match using cleaned metadata")
                     if len(tracks) == 1:
+                        self.cache.set(cache_key, tracks[0])
                         return tracks[0]
                     # Continue with normal matching logic using cleaned values
-                    return self._process_matches(tracks, cleaned_song, manual_search)
+                    result = self._process_matches(tracks, cleaned_song, manual_search)
+                    self.cache.set(cache_key, result)
+                    return result
             except Exception as e:
                 self._log.debug("Search with cleaned metadata failed: {}", str(e))
 
@@ -1061,15 +1080,20 @@ class PlexSync(BeetsPlugin):
             return self._handle_manual_search(sorted_tracks, song)
 
         # Try to find automatic match
+        result = None
         for track, score in sorted_tracks:
             if track.originalTitle is not None:
                 plex_artist = track.originalTitle
             else:
                 plex_artist = track.artist().title
             if artist in plex_artist:
-                return track
+                result = track
+                break
 
-        return None
+        # Cache the result
+        cache_key = json.dumps(song)
+        self.cache.set(cache_key, result)
+        return result
 
     def _handle_manual_search(self, sorted_tracks, song):
         """Helper function to handle manual search."""
