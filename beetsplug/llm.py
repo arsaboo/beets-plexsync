@@ -130,8 +130,8 @@ def clean_search_string(client, title=None, album=None, artist=None):
                 "content": """Clean the provided music metadata by removing:
 - Text in parentheses/brackets
 - Featuring artists, 'ft.', 'feat.' mentions
-- Version indicators (Original Mix, Radio Edit, etc.)
-- Soundtrack references (From the motion picture, OST)
+- Version indicators (Original Mix, Radio Edit, Music Video, Jhankar Beats, etc.)
+- Soundtrack references (From the motion picture, OST, Original Motion Picture Soundtrack, etc.)
 - Qualifiers (Single, Album Version,  Part 2, )
 - Any additional data that is not related to the core artist/song
 - If the title is in multiple languages, return the English version
