@@ -85,7 +85,7 @@ class PlexSync(BeetsPlugin):
         self.llm_client = None
         self.search_llm = None
 
-        # Initialize cache
+        # Initialize cache with a 30-day expiration
         cache_path = os.path.join(self.config_dir, 'plexsync_cache.db')
         self.cache = Cache(cache_path)
 
@@ -934,10 +934,13 @@ class PlexSync(BeetsPlugin):
             manual_search = config["plexsync"]["manual_search"].get(bool)
 
         # Check cache first
-        cache_key = json.dumps(song)
+        cache_key = json.dumps(sorted(song.items()))  # Sort to ensure consistent keys
         cached_result = self.cache.get(cache_key)
         if cached_result:
             self._log.debug("Cache hit for query: {}", cache_key)
+            # If we have a cache hit but it indicates no match was found
+            if cached_result.get('not_found', False):
+                return None
             return cached_result
 
         # Try regular search first
@@ -962,7 +965,7 @@ class PlexSync(BeetsPlugin):
             return None
 
         if len(tracks) == 1:
-            self.cache.set(cache_key, tracks[0].__dict__)
+            self.cache.set(cache_key, tracks[0])
             return tracks[0]
         elif len(tracks) > 1:
             sorted_tracks = self.find_closest_match(song, tracks)  # Simply pass the song dict
@@ -991,9 +994,11 @@ class PlexSync(BeetsPlugin):
                 else:
                     plex_artist = track.artist().title
                 if artist in plex_artist:
-                    self.cache.set(cache_key, track.__dict__)
+                    self.cache.set(cache_key, track)
                     return track
         else:
+            # Cache negative results too
+            self.cache.set(cache_key, {'not_found': True})
             self._log.debug("Track {} not found in Plex library", song["title"])
 
         # If regular search fails, try LLM cleaning if enabled
