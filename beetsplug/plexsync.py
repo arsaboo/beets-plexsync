@@ -934,17 +934,26 @@ class PlexSync(BeetsPlugin):
             self._log.debug("Skipping cache for empty key")
             return
 
-        if result is None:
-            self.cache.set(cache_key, {'not_found': True})
-            self._log.debug("Caching negative result")
-        else:
-            try:
-                # Convert PlexAPI object to dict if needed
-                result_dict = result.__dict__ if hasattr(result, '__dict__') else result
+        try:
+            if result is None:
+                self.cache.set(cache_key, {'not_found': True})
+                self._log.debug("Caching negative result")
+            else:
+                # Convert PlexAPI object to dict safely
+                if hasattr(result, '__dict__'):
+                    result_dict = {
+                        'title': getattr(result, 'title', ''),
+                        'ratingKey': getattr(result, 'ratingKey', None),
+                        'parentTitle': getattr(result, 'parentTitle', ''),
+                        'originalTitle': getattr(result, 'originalTitle', ''),
+                        'userRating': getattr(result, 'userRating', None),
+                    }
+                else:
+                    result_dict = result
                 self.cache.set(cache_key, result_dict)
-                self._log.debug("Caching positive result")
-            except Exception as e:
-                self._log.debug("Failed to cache result: {}", e)
+                self._log.debug("Caching positive result for: {}", result_dict.get('title', 'Unknown'))
+        except Exception as e:
+            self._log.debug("Failed to cache result: {}", str(e))
 
     def search_plex_song(self, song, manual_search=None, fallback_attempted=False, llm_attempted=False):
         """Fetch the Plex track key."""
@@ -958,7 +967,7 @@ class PlexSync(BeetsPlugin):
         # Check cache first
         cached_result = self.cache.get(cache_key)
         if cached_result:
-            self._log.debug("Cache hit for query: {}", cache_key)
+            self._log.debug("Cache hit for query: {}", json.dumps(clean_song))
             # If we have a cache hit but it indicates no match was found
             if cached_result.get('not_found', False):
                 return None

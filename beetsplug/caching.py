@@ -83,17 +83,17 @@ class Cache:
                     try:
                         result = json.loads(row[0])
                         created_at = row[1]
-                        logger.debug('Cache hit for query: %s', self._sanitize_query_for_log(query))
+                        logger.debug('Cache hit for query: {}', self._sanitize_query_for_log(query))
                         return result
                     except json.JSONDecodeError as e:
-                        logger.warning('Invalid cache entry found, removing: %s', e)
+                        logger.warning('Invalid cache entry found, removing: {}', str(e))
                         cursor.execute('DELETE FROM cache WHERE query = ?', (query,))
                         conn.commit()
                         return None
-                logger.debug('Cache miss for query: %s', self._sanitize_query_for_log(query))
+                logger.debug('Cache miss for query: {}', self._sanitize_query_for_log(query))
                 return None
         except Exception as e:
-            logger.error('Cache lookup failed: %s', e)
+            logger.error('Cache lookup failed: {}', str(e))
             return None
 
     def set(self, query, result):
@@ -108,13 +108,13 @@ class Cache:
             # Special handling for None or not found results
             if result is None:
                 json_result = json.dumps({'not_found': True})
-                logger.debug('Caching negative result for query: %s', sanitized_query)
+                logger.debug('Caching negative result for query: {}', sanitized_query)
             else:
                 try:
                     json_result = json.dumps(result, cls=PlexJSONEncoder)
-                    logger.debug('Caching positive result for query: %s', sanitized_query)
+                    logger.debug('Caching positive result for query: {}', sanitized_query)
                 except TypeError as e:
-                    logger.error('Failed to serialize result for query %s: %s', sanitized_query, e)
+                    logger.error('Failed to serialize result for query {}: {}', sanitized_query, str(e))
                     return None
 
             with sqlite3.connect(self.db_path) as conn:
@@ -125,7 +125,7 @@ class Cache:
                 )
                 conn.commit()
         except Exception as e:
-            logger.error('Cache storage failed for query %s: %s', sanitized_query, e)
+            logger.error('Cache storage failed for query {}: {}', sanitized_query, str(e))
             return None
 
     def clear(self):
