@@ -83,10 +83,7 @@ def clean_search_string(client, title=None, album=None, artist=None):
 
     # Use % formatting for beets logger compatibility
     logger.debug(
-        "Starting LLM cleaning for: title=%r, album=%r, artist=%r",
-        title,
-        album,
-        artist
+        f"Starting LLM cleaning for: title={title!r}, album={album!r}, artist={artist!r}"
     )
 
     if (
@@ -102,7 +99,7 @@ def clean_search_string(client, title=None, album=None, artist=None):
 
     try:
         model = config["llm"].get(dict).get("search", {}).get("model") or config["llm"]["model"].get()
-        logger.debug("Using model: %r", model)
+        logger.debug(f"Using model: {model!r}")
 
         messages = [
             {
@@ -121,7 +118,7 @@ Keep language indicators and core artist/song names unchanged.""",
             },
         ]
 
-        logger.debug("Sending request to LLM with model %r...", model)
+        logger.debug(f"Sending request to LLM with model {model!r}...")
 
         # Standard chat completion request (works with Ollama and OpenAI)
         response = client.chat.completions.create(
@@ -138,15 +135,13 @@ Keep language indicators and core artist/song names unchanged.""",
             return title, album, artist
 
         raw_response = response.choices[0].message.content.strip()
-        logger.debug("Raw LLM response: %r", raw_response)
+        logger.debug(f"Raw LLM response: {raw_response!r}")
 
         # Parse response using Pydantic model
         cleaned = CleanedMetadata.model_validate_json(raw_response)
         logger.info(
-            "Successfully cleaned metadata - title=%r, album=%r, artist=%r",
-            cleaned.title or title,
-            cleaned.album or album,
-            cleaned.artist or artist
+            f"Successfully cleaned metadata - title={cleaned.title or title!r}, "
+            f"album={cleaned.album or album!r}, artist={cleaned.artist or artist!r}"
         )
 
         return (
@@ -159,8 +154,8 @@ Keep language indicators and core artist/song names unchanged.""",
         logger.error("LLM request timed out")
         return title, album, artist
     except Exception as e:
-        logger.error("Error in clean_search_string: %s", str(e))
+        logger.error(f"Error in clean_search_string: {str(e)}")
         logger.debug(
-            "Original values: title=%r, album=%r, artist=%r", title, album, artist
+            f"Original values: title={title!r}, album={album!r}, artist={artist!r}"
         )
         return title, album, artist
