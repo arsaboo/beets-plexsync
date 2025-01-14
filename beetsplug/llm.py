@@ -120,7 +120,7 @@ def clean_search_string(client, title=None, album=None, artist=None):
             {
                 "role": "system",
                 "content": """Clean the provided music metadata by removing:
-- Text in parentheses/brackets (unless part of primary name)
+- Text in parentheses/brackets
 - Featuring artists, 'ft.', 'feat.' mentions
 - Version indicators (Original Mix, Radio Edit, etc.)
 - Soundtrack references (From the motion picture, OST)

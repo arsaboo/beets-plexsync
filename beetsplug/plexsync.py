@@ -929,9 +929,16 @@ class PlexSync(BeetsPlugin):
         if manual_search is None:
             manual_search = config["plexsync"]["manual_search"].get(bool)
 
-        # Clean up title and album
+        # Store original values for potential fallback
+        original_title = song.get("title")
+        original_album = song.get("album")
+        original_artist = song.get("artist")
+
+        # Clean up title and album if needed
         if 'From "' in song["title"] or '[From "' in song["title"]:
             song["title"], song["album"] = self.parse_title(song["title"])
+
+        # Initial search
         try:
             if song["album"] is None:
                 tracks = self.music.searchTracks(**{"track.title": song["title"]})
@@ -984,9 +991,9 @@ class PlexSync(BeetsPlugin):
             if self.search_llm and config["plexsync"]["use_llm_search"].get(bool):
                 cleaned_title, cleaned_album, cleaned_artist = clean_search_string(
                     self.search_llm,
-                    title=song.get("title"),
-                    album=song.get("album"),
-                    artist=song.get("artist")
+                    title=original_title,
+                    album=original_album,
+                    artist=original_artist
                 )
                 song["title"] = cleaned_title
                 song["album"] = cleaned_album
