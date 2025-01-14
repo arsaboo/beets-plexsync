@@ -997,10 +997,16 @@ class PlexSync(BeetsPlugin):
                     album=original_album,
                     artist=original_artist
                 )
-                song["title"] = cleaned_title
-                if cleaned_album and cleaned_album != "None":
+                # Only update if cleaning actually changed something
+                if cleaned_title != original_title:
+                    self._log.debug("Using LLM cleaned title: {} -> {}", original_title, cleaned_title)
+                    song["title"] = cleaned_title
+                if cleaned_album and cleaned_album != "None" and cleaned_album != original_album:
+                    self._log.debug("Using LLM cleaned album: {} -> {}", original_album, cleaned_album)
                     song["album"] = cleaned_album
-                song["artist"] = cleaned_artist
+                if cleaned_artist != original_artist:
+                    self._log.debug("Using LLM cleaned artist: {} -> {}", original_artist, cleaned_artist)
+                    song["artist"] = cleaned_artist
                 return self.search_plex_song(song, manual_search, fallback_attempted, llm_attempted=True)
 
             if manual_search:
