@@ -960,15 +960,38 @@ class PlexSync(BeetsPlugin):
                 f"{track.artist().title}"
             )
         sel = ui.input_options(
-            ("aBort", "Skip"), numrange=(1, len(sorted_tracks)), default=1
+            ("aBort", "Skip", "Enter"), numrange=(1, len(sorted_tracks)), default=1
         )
-        if sel in ("b", "B", "s", "S"):
+        if sel in ("b", "B"):
             return None
+        elif sel in ("s", "S"):
+            return None
+        elif sel in ("e", "E"):
+            return self.manual_track_search()
         selected_track = sorted_tracks[sel - 1][0] if sel > 0 else None
         if selected_track:
             cache_key = self._make_cache_key(song)
             self._cache_result(cache_key, selected_track)
         return selected_track
+
+    def manual_track_search(self):
+        """Manually search for a track in the Plex library.
+
+        Prompts the user to enter the title, album, and artist of the track
+        they want to search for.
+        Calls the `search_plex_song` method with the provided information and
+        sets the `manual_search` flag to True.
+        """
+        song_dict = {}
+        title = input_("Title:").strip()
+        album = input_("Album:").strip()
+        artist = input_("Artist:").strip()
+        song_dict = {
+            "title": title.strip(),
+            "album": album.strip(),
+            "artist": artist.strip(),
+        }
+        return self.search_plex_song(song_dict, manual_search=True)
 
     def search_plex_song(self, song, manual_search=None, fallback_attempted=False, llm_attempted=False):
         """Fetch the Plex track key."""
@@ -1082,7 +1105,7 @@ class PlexSync(BeetsPlugin):
                 song["title"],
             )
             if ui.input_yn("Search manually? (Y/n)"):
-                self.manual_track_search()
+                return self.manual_track_search()
         else:
             self._log.info(
                 "Track {} - {} - {} not found in Plex",
