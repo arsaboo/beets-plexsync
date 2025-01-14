@@ -1067,11 +1067,11 @@ class PlexSync(BeetsPlugin):
                 if tracks:
                     self._log.debug("Found match using cleaned metadata")
                     if len(tracks) == 1:
-                        self._cache_result(cache_key, tracks[0].__dict__)
+                        self._cache_result(cache_key, tracks[0])
                         return tracks[0]
                     # Continue with normal matching logic using cleaned values
                     result = self._process_matches(tracks, cleaned_song, manual_search)
-                    self._cache_result(cache_key, result.__dict__)
+                    self._cache_result(cache_key, result)
                     return result
             except Exception as e:
                 self._log.debug("Search with cleaned metadata failed: {}", str(e))

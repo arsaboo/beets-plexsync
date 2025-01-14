@@ -77,12 +77,11 @@ class Cache:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                cursor.execute('SELECT result, created_at FROM cache WHERE query = ?', (query,))
+                cursor.execute('SELECT result FROM cache WHERE query = ?', (query,))
                 row = cursor.fetchone()
                 if row:
                     try:
                         result = json.loads(row[0])
-                        created_at = row[1]
                         logger.debug('Cache hit for query: {}', self._sanitize_query_for_log(query))
                         return result
                     except json.JSONDecodeError as e:
