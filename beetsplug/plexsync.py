@@ -957,6 +957,29 @@ class PlexSync(BeetsPlugin):
                 e,
             )
             return None
+
+        # If initial search failed, try LLM cleaning
+        if not tracks and self.search_llm and config["plexsync"]["use_llm_search"].get(bool):
+            cleaned_title, cleaned_album, cleaned_artist = clean_search_string(
+                self.search_llm,
+                title=original_title,
+                album=original_album,
+                artist=original_artist
+            )
+
+            # Only update if cleaning actually changed something
+            if cleaned_title != original_title:
+                self._log.debug("Using LLM cleaned title: {} -> {}", original_title, cleaned_title)
+                song["title"] = cleaned_title
+            if cleaned_album and cleaned_album != "None" and cleaned_album != original_album:
+                self._log.debug("Using LLM cleaned album: {} -> {}", original_album, cleaned_album)
+                song["album"] = cleaned_album
+            if cleaned_artist != original_artist:
+                self._log.debug("Using LLM cleaned artist: {} -> {}", original_artist, cleaned_artist)
+                song["artist"] = cleaned_artist
+
+            # Try
+
         artist = song["artist"].split(",")[0]
         if len(tracks) == 1:
             return tracks[0]

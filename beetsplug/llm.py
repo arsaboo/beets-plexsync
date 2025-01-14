@@ -92,7 +92,7 @@ def clean_search_string(client, title=None, album=None, artist=None):
     cache_key = _make_cache_key(title, album, artist)
     if cache_key in _metadata_cache:
         cached = _metadata_cache[cache_key]
-        logger.debug("Using cached metadata for - title: {0}, album: {1}, artist: {2}",
+        logger.debug("Using cached cleaned metadata - title: {0}, album: {1}, artist: {2}",
                     cached[0], cached[1], cached[2])
         return cached
 
@@ -176,17 +176,18 @@ Keep language indicators and core artist/song names unchanged.""",
         try:
             cleaned = CleanedMetadata.model_validate_json(raw_response)
 
-            result = {
-                "title": cleaned.title or title,
-                "album": cleaned.album or album,
-                "artist": cleaned.artist or artist
-            }
+            # Only use cleaned values if they exist and aren't "None"
+            cleaned_title = cleaned.title if cleaned.title and cleaned.title != "None" else title
+            cleaned_album = cleaned.album if cleaned.album and cleaned.album != "None" else album
+            cleaned_artist = cleaned.artist if cleaned.artist and cleaned.artist != "None" else artist
+
+            # Store actual cleaned values
+            cleaned_result = (cleaned_title, cleaned_album, cleaned_artist)
 
             logger.info("Successfully cleaned metadata - title: {0}, album: {1}, artist: {2}",
-                       result["title"], result["album"], result["artist"])
+                       cleaned_title, cleaned_album, cleaned_artist)
 
-            # Cache the result before returning
-            cleaned_result = (result["title"], result["album"], result["artist"])
+            # Cache the cleaned result
             _metadata_cache[cache_key] = cleaned_result
             return cleaned_result
 
