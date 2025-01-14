@@ -930,13 +930,19 @@ class PlexSync(BeetsPlugin):
 
     def _cache_result(self, cache_key, result):
         """Helper method to safely cache search results."""
+        if not cache_key:
+            self._log.debug("Skipping cache for empty key")
+            return
+
         if result is None:
             self.cache.set(cache_key, {'not_found': True})
-            self._log.debug("Caching negative result for: {}", cache_key[:50])
+            self._log.debug("Caching negative result")
         else:
             try:
-                self.cache.set(cache_key, result)
-                self._log.debug("Caching positive result for: {}", cache_key[:50])
+                # Convert PlexAPI object to dict if needed
+                result_dict = result.__dict__ if hasattr(result, '__dict__') else result
+                self.cache.set(cache_key, result_dict)
+                self._log.debug("Caching positive result")
             except Exception as e:
                 self._log.debug("Failed to cache result: {}", e)
 
@@ -945,8 +951,11 @@ class PlexSync(BeetsPlugin):
         if manual_search is None:
             manual_search = config["plexsync"]["manual_search"].get(bool)
 
+        # Filter out None values and create a clean song dict for cache key
+        clean_song = {k: v for k, v in song.items() if v is not None}
+        cache_key = json.dumps(sorted(clean_song.items()))
+
         # Check cache first
-        cache_key = json.dumps(sorted(song.items()))  # Sort to ensure consistent keys
         cached_result = self.cache.get(cache_key)
         if cached_result:
             self._log.debug("Cache hit for query: {}", cache_key)
