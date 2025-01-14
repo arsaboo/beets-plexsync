@@ -79,11 +79,18 @@ def setup_llm(llm_type="plexsonic"):
 def clean_search_string(client, title=None, album=None, artist=None):
     """Clean and format search strings using LLM."""
     if not client or not any([title, album, artist]):
+        logger.debug("Skipping LLM cleaning - invalid input or no LLM client")
         return title, album, artist
 
-    # Use safer string formatting for logging
-    logger.debug("Starting LLM cleaning for: title='%s', album='%s', artist='%s'",
-                title or 'None', album or 'None', artist or 'None')
+    # Log input values with better formatting
+    logger.debug(
+        "Starting LLM cleaning for: %s",
+        {
+            "title": title or "None",
+            "album": album or "None",
+            "artist": artist or "None"
+        }
+    )
 
     if (
         title and not title.strip()
@@ -110,38 +117,55 @@ Keep language indicators and core artist/song names unchanged.""",
             },
             {
                 "role": "user",
-                "content": f"Clean this music metadata - Title: {title or 'None'}, Album: {album or 'None'}, Artist: {artist or 'None'}",
+                "content": "Clean this music metadata - "
+                          f"Title: {title or 'None'}, "
+                          f"Album: {album or 'None'}, "
+                          f"Artist: {artist or 'None'}",
             },
         ]
 
         logger.debug("Sending request to LLM with model '%s'...", model)
 
-        # Standard chat completion request (works with Ollama and OpenAI)
-        response = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=0.1,
-            max_tokens=150,
-            response_format={"type": "json_object"},
-            timeout=15.0
-        )
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=0.1,
+                max_tokens=150,
+                response_format={"type": "json_object"},
+                timeout=15.0
+            )
+        except Exception as e:
+            logger.error("LLM request failed: %s", str(e))
+            return title, album, artist
 
         if not response or not response.choices:
-            logger.error("Empty or invalid response from LLM")
+            logger.error("Empty response from LLM service")
             return title, album, artist
 
         raw_response = response.choices[0].message.content.strip()
-        # Use safer string format for raw JSON response
+        if not raw_response:
+            logger.error("Empty content in LLM response")
+            return title, album, artist
+
         logger.debug("Raw LLM response: '%s'", raw_response)
 
-        # Parse response using Pydantic model
-        cleaned = CleanedMetadata.model_validate_json(raw_response)
+        # Parse response using Pydantic model with better error handling
+        try:
+            cleaned = CleanedMetadata.model_validate_json(raw_response)
+        except Exception as e:
+            logger.error("Failed to parse LLM response: %s", str(e))
+            return title, album, artist
 
-        # Use safer string format for cleaned metadata
-        logger.info("Successfully cleaned metadata - title='%s', album='%s', artist='%s'",
-                   cleaned.title or title,
-                   cleaned.album or album,
-                   cleaned.artist or artist)
+        # Log cleaned metadata
+        logger.info(
+            "Successfully cleaned metadata: %s",
+            {
+                "title": cleaned.title or title,
+                "album": cleaned.album or album,
+                "artist": cleaned.artist or artist
+            }
+        )
 
         return (
             cleaned.title or title,
@@ -154,6 +178,12 @@ Keep language indicators and core artist/song names unchanged.""",
         return title, album, artist
     except Exception as e:
         logger.error("Error in clean_search_string: %s", str(e))
-        logger.debug("Original values: title='%s', album='%s', artist='%s'",
-                    title, album, artist)
+        logger.debug(
+            "Original values: %s",
+            {
+                "title": title,
+                "album": album,
+                "artist": artist
+            }
+        )
         return title, album, artist
