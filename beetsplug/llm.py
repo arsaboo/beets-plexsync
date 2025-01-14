@@ -9,15 +9,16 @@ from beets import config
 from beets.util import logger_name
 from pydantic import BaseModel, Field
 
-# Set up logger with the beets logger name pattern
-logger = logging.getLogger(f"{logger_name(__package__)}.{__name__}")
+# Set up logger
+logger = logging.getLogger('beets.plexsync.llm')
 
 # Add console handler if not already present
 if not logger.handlers:
     console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(logging.Formatter('%(name)-20s %(levelname)-8s %(message)s'))
+    console_handler.setFormatter(logging.Formatter('%(levelname)-8s %(message)s'))
     logger.addHandler(console_handler)
-    logger.setLevel(logging.DEBUG)  # Set to DEBUG for development
+    # Use DEBUG for development, INFO for production
+    logger.setLevel(logging.DEBUG)
 
 
 class CleanedMetadata(BaseModel):
