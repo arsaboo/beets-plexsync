@@ -944,19 +944,44 @@ class PlexSync(BeetsPlugin):
         except Exception as e:
             self._log.debug("Failed to cache result: {}", e)
 
+    def _make_cache_key(self, song):
+        """Create a cache key from song metadata."""
+        return json.dumps(sorted({k: v or "" for k, v in song.items()}.items()))
+
+    def _handle_manual_search(self, sorted_tracks, song):
+        """Helper function to handle manual search."""
+        print_(
+            f'\nChoose candidates for {song.get("album", "Unknown")} '
+            f'- {song["title"]} - {song["artist"]}:'
+        )
+        for i, (track, score) in enumerate(sorted_tracks, start=1):
+            print_(
+                f"{i}. {track.parentTitle} - {track.title} - "
+                f"{track.artist().title}"
+            )
+        sel = ui.input_options(
+            ("aBort", "Skip"), numrange=(1, len(sorted_tracks)), default=1
+        )
+        if sel in ("b", "B", "s", "S"):
+            return None
+        selected_track = sorted_tracks[sel - 1][0] if sel > 0 else None
+        if selected_track:
+            cache_key = self._make_cache_key(song)
+            self._cache_result(cache_key, selected_track)
+        return selected_track
+
     def search_plex_song(self, song, manual_search=None, fallback_attempted=False, llm_attempted=False):
         """Fetch the Plex track key."""
         if manual_search is None:
             manual_search = config["plexsync"]["manual_search"].get(bool)
 
-        # Filter out None values and create a clean song dict for cache key
-        clean_song = {k: v for k, v in song.items() if v is not None}
-        cache_key = json.dumps(sorted(clean_song.items()))
+        # Create a clean song dict for cache key
+        cache_key = self._make_cache_key(song)
 
         # Check cache first
         cached_ratingKey = self.cache.get(cache_key)
         if cached_ratingKey is not None:
-            self._log.debug("Cache hit for query: {}", json.dumps(clean_song))
+            self._log.debug("Cache hit for query: {}", cache_key)
             if cached_ratingKey == -1:
                 return None
             return self.plex.fetchItem(cached_ratingKey)
@@ -1100,28 +1125,6 @@ class PlexSync(BeetsPlugin):
             cache_key = json.dumps(song)
             self.cache.set(cache_key, result.ratingKey)
         return result
-
-    def _handle_manual_search(self, sorted_tracks, song):
-        """Helper function to handle manual search."""
-        print_(
-            f'\nChoose candidates for {song["album"]} '
-            f'- {song["title"]} - {song["artist"]}:'
-        )
-        for i, (track, score) in enumerate(sorted_tracks, start=1):
-            print_(
-                f"{i}. {track.parentTitle} - {track.title} - "
-                f"{track.artist().title}"
-            )
-        sel = ui.input_options(
-            ("aBort", "Skip"), numrange=(1, len(sorted_tracks)), default=1
-        )
-        if sel in ("b", "B", "s", "S"):
-            return None
-        selected_track = sorted_tracks[sel - 1][0] if sel > 0 else None
-        if selected_track:
-            cache_key = json.dumps(sorted(song.items()))
-            self._cache_result(cache_key, selected_track)
-        return selected_track
 
     def manual_track_search(self):
         """Manually search for a track in the Plex library.
