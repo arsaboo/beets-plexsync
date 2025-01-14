@@ -178,9 +178,9 @@ Keep language indicators and core artist/song names unchanged.""",
             cleaned = CleanedMetadata.model_validate_json(raw_response)
 
             # Only use cleaned values if they exist, aren't "None", and are different
-            cleaned_title = cleaned.title.strip() if cleaned.title and cleaned.title.strip() != "None" else title
-            cleaned_album = cleaned.album.strip() if cleaned.album and cleaned.album.strip() != "None" else album
-            cleaned_artist = cleaned.artist.strip() if cleaned.artist and cleaned.artist.strip() != "None" else artist
+            cleaned_title = cleaned.title.strip() if cleaned.title else title
+            cleaned_album = cleaned.album.strip() if cleaned.album else album
+            cleaned_artist = cleaned.artist.strip() if cleaned.artist else artist
 
             if cleaned_title.strip() == title.strip() and cleaned_album.strip() == album.strip() and cleaned_artist.strip() == artist.strip():
                 logger.debug("LLM cleaning made no changes to metadata")
