@@ -19,7 +19,7 @@ class PlexJSONEncoder(json.JSONEncoder):
             try:
                 encoded = {
                     '_type': obj.__class__.__name__,
-                    'ratingKey': getattr(obj, 'ratingKey', None),
+                    'plex_ratingkey': getattr(obj, 'ratingKey', None),
                     'title': getattr(obj, 'title', ''),
                     'parentTitle': getattr(obj, 'parentTitle', ''),
                     'originalTitle': getattr(obj, 'originalTitle', ''),
@@ -55,7 +55,7 @@ class Cache:
                 cursor.execute('''
                     CREATE TABLE IF NOT EXISTS cache (
                         query TEXT PRIMARY KEY,
-                        ratingKey INTEGER,
+                        plex_ratingkey INTEGER,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 ''')
@@ -79,7 +79,7 @@ class Cache:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                cursor.execute('SELECT ratingKey FROM cache WHERE query = ?', (query,))
+                cursor.execute('SELECT plex_ratingkey FROM cache WHERE query = ?', (query,))
                 row = cursor.fetchone()
                 if row:
                     logger.debug('Cache hit for query: {}', self._sanitize_query_for_log(query))
@@ -90,8 +90,8 @@ class Cache:
             logger.error('Cache lookup failed: {}', str(e))
             return None
 
-    def set(self, query, ratingKey):
-        """Store the ratingKey for a given query in the cache."""
+    def set(self, query, plex_ratingkey):
+        """Store the plex_ratingkey for a given query in the cache."""
         try:
             sanitized_query = self._sanitize_query_for_log(query)
 
@@ -102,8 +102,8 @@ class Cache:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    'REPLACE INTO cache (query, ratingKey) VALUES (?, ?)',
-                    (query, ratingKey)
+                    'REPLACE INTO cache (query, plex_ratingkey) VALUES (?, ?)',
+                    (query, plex_ratingkey)
                 )
                 conn.commit()
                 logger.debug('Caching result for query: {}', sanitized_query)
