@@ -1213,11 +1213,18 @@ class PlexSync(BeetsPlugin):
             for song in songs:
                 found = self.search_plex_song(song, manual_search)
                 if found is not None:
-                    song_dict = {
-                        "title": found.get('title', ''),
-                        "album": found.get('parentTitle', ''),
-                        "plex_ratingkey": found.get('ratingKey', None),
-                    }
+                    if isinstance(found, dict):
+                        song_dict = {
+                            "title": found.get('title', ''),
+                            "album": found.get('parentTitle', ''),
+                            "plex_ratingkey": found.get('ratingKey', None),
+                        }
+                    else:
+                        song_dict = {
+                            "title": getattr(found, 'title', ''),
+                            "album": getattr(found, 'parentTitle', ''),
+                            "plex_ratingkey": getattr(found, 'ratingKey', None),
+                        }
                     song_list.append(self.dotdict(song_dict))
         self._plex_add_playlist_item(song_list, playlist)
 
@@ -1230,11 +1237,18 @@ class PlexSync(BeetsPlugin):
             for song in songs:
                 found = self.search_plex_song(song)
                 if found is not None:
-                    song_dict = {
-                        "title": found.get('title', ''),
-                        "album": found.get('parentTitle', ''),
-                        "plex_ratingkey": found.get('ratingKey', None),
-                    }
+                    if isinstance(found, dict):
+                        song_dict = {
+                            "title": found.get('title', ''),
+                            "album": found.get('parentTitle', ''),
+                            "plex_ratingkey": found.get('ratingKey', None),
+                        }
+                    else:
+                        song_dict = {
+                            "title": getattr(found, 'title', ''),
+                            "album": getattr(found, 'parentTitle', ''),
+                            "plex_ratingkey": getattr(found, 'ratingKey', None),
+                        }
                     song_list.append(self.dotdict(song_dict))
         self._plex_add_playlist_item(song_list, playlist)
 
@@ -1464,11 +1478,18 @@ class PlexSync(BeetsPlugin):
         for song in song_list:
             found = self.search_plex_song(song)
             if found is not None:
-                match_dict = {
-                    "title": found.get('title', ''),
-                    "album": found.get('parentTitle', ''),
-                    "plex_ratingkey": found.get('ratingKey', None),
-                }
+                if isinstance(found, dict):
+                    match_dict = {
+                        "title": found.get('title', ''),
+                        "album": found.get('parentTitle', ''),
+                        "plex_ratingkey": found.get('ratingKey', None),
+                    }
+                else:
+                    match_dict = {
+                        "title": getattr(found, 'title', ''),
+                        "album": getattr(found, 'parentTitle', ''),
+                        "plex_ratingkey": getattr(found, 'ratingKey', None),
+                    }
                 self._log.debug("Song matched in Plex library: {}", match_dict)
                 matched_songs.append(self.dotdict(match_dict))
         self._log.debug("Songs matched in Plex library: {}", matched_songs)
@@ -2212,13 +2233,21 @@ class PlexSync(BeetsPlugin):
         for track in all_tracks:
             found = self.search_plex_song(track, manual_search)
             if found:
-                rating = float(found.get('userrating', 0))
-                if rating == 0 or rating > 2:  # Include unrated or rating > 2
+                if isinstance(found, dict):
+                    rating = float(found.get('userrating', 0))
                     song_dict = {
                         "title": found.get('title', ''),
                         "album": found.get('parentTitle', ''),
                         "plex_ratingkey": found.get('ratingKey', None),
                     }
+                else:
+                    rating = float(getattr(found, 'userRating', 0))
+                    song_dict = {
+                        "title": getattr(found, 'title', ''),
+                        "album": getattr(found, 'parentTitle', ''),
+                        "plex_ratingkey": getattr(found, 'ratingKey', None),
+                    }
+                if rating == 0 or rating > 2:  # Include unrated or rating > 2
                     matched_songs.append(self.dotdict(song_dict))
                 else:
                     with open(log_file, 'a', encoding='utf-8') as f:
