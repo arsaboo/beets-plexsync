@@ -66,8 +66,8 @@ class Cache:
     def _sanitize_query_for_log(self, query):
         """Sanitize and truncate query for logging."""
         try:
-            if isinstance(query, str) and len(query) > 50:
-                return query[:47] + "..."
+            if isinstance(query, str) and len(query) > 80:
+                return query[:77] + "..."
             return str(query)
         except Exception:
             return "<unserializable query>"
