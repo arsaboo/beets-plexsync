@@ -79,25 +79,19 @@ def setup_llm(llm_type="plexsonic"):
 def clean_search_string(client, title=None, album=None, artist=None):
     """Clean and format search strings using LLM."""
     if not client or not any([title, album, artist]):
-        logger.debug("Skipping LLM cleaning - invalid input or no LLM client")
+        logger.debug("Skipping LLM cleaning - no input or client")
         return title, album, artist
 
-    # Log input values with better formatting
-    logger.debug(
-        "Starting LLM cleaning for: %s",
-        {
-            "title": title or "None",
-            "album": album or "None",
-            "artist": artist or "None"
-        }
-    )
+    metadata = {
+        "title": title or "None",
+        "album": album or "None",
+        "artist": artist or "None"
+    }
+    logger.debug("Starting LLM cleaning for: %s", metadata)
 
-    if (
-        title and not title.strip()
-        or album and not album.strip()
-        or artist and not artist.strip()
-    ):
-        logger.debug("Empty string detected after stripping, returning original values")
+    # Early validation
+    if any(val and not val.strip() for val in [title, album, artist]):
+        logger.debug("Empty string detected after stripping")
         return title, album, artist
 
     try:
@@ -124,20 +118,30 @@ Keep language indicators and core artist/song names unchanged.""",
             },
         ]
 
-        logger.debug("Sending request to LLM with model '%s'...", model)
+        logger.debug("Sending request to LLM")
 
-        try:
-            response = client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=0.1,
-                max_tokens=150,
-                response_format={"type": "json_object"},
-                timeout=15.0
-            )
-        except Exception as e:
-            logger.error("LLM request failed: %s", str(e))
-            return title, album, artist
+        # Add retries for failed requests
+        max_retries = 3
+        retry_count = 0
+
+        while retry_count < max_retries:
+            try:
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    temperature=0.1,
+                    max_tokens=150,
+                    response_format={"type": "json_object"},
+                    timeout=15.0
+                )
+                break
+            except Exception as e:
+                retry_count += 1
+                if retry_count == max_retries:
+                    logger.error("LLM request failed after %d retries: %s", max_retries, str(e))
+                    return title, album, artist
+                logger.warning("Retry %d/%d - LLM request failed: %s", retry_count, max_retries, str(e))
+                continue
 
         if not response or not response.choices:
             logger.error("Empty response from LLM service")
@@ -150,40 +154,27 @@ Keep language indicators and core artist/song names unchanged.""",
 
         logger.debug("Raw LLM response: '%s'", raw_response)
 
-        # Parse response using Pydantic model with better error handling
         try:
             cleaned = CleanedMetadata.model_validate_json(raw_response)
-        except Exception as e:
-            logger.error("Failed to parse LLM response: %s", str(e))
-            return title, album, artist
 
-        # Log cleaned metadata
-        logger.info(
-            "Successfully cleaned metadata: %s",
-            {
+            result = {
                 "title": cleaned.title or title,
                 "album": cleaned.album or album,
                 "artist": cleaned.artist or artist
             }
-        )
 
-        return (
-            cleaned.title or title,
-            cleaned.album or album,
-            cleaned.artist or artist,
-        )
+            logger.info("Successfully cleaned metadata: %s", result)
+
+            return (result["title"], result["album"], result["artist"])
+
+        except Exception as e:
+            logger.error("Failed to parse LLM response: %s", str(e))
+            return title, album, artist
 
     except httpx.TimeoutException:
         logger.error("LLM request timed out")
         return title, album, artist
     except Exception as e:
         logger.error("Error in clean_search_string: %s", str(e))
-        logger.debug(
-            "Original values: %s",
-            {
-                "title": title,
-                "album": album,
-                "artist": artist
-            }
-        )
+        logger.debug("Original values: %s", metadata)
         return title, album, artist
