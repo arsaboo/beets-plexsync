@@ -942,7 +942,7 @@ class PlexSync(BeetsPlugin):
                 self.cache.set(cache_key, result.ratingKey)
                 self._log.debug("Caching positive result for: {}", getattr(result, 'title', 'Unknown'))
         except Exception as e:
-            self._log.debug("Failed to cache result: {}", str(e))
+            self._log.debug("Failed to cache result: {}", e)
 
     def search_plex_song(self, song, manual_search=None, fallback_attempted=False, llm_attempted=False):
         """Fetch the Plex track key."""
@@ -1046,7 +1046,7 @@ class PlexSync(BeetsPlugin):
                     self._cache_result(cache_key, result)
                     return result
             except Exception as e:
-                self._log.debug("Search with cleaned metadata failed: {}", str(e))
+                self._log.debug("Search with cleaned metadata failed: {}", e)
 
         # If LLM also fails, fallback to manual search if requested
         if manual_search:
@@ -1096,8 +1096,9 @@ class PlexSync(BeetsPlugin):
                 result = track
                 break
 
-        cache_key = json.dumps(song)
-        self.cache.set(cache_key, result.__dict__)
+        if result is not None:
+            cache_key = json.dumps(song)
+            self.cache.set(cache_key, result.ratingKey)
         return result
 
     def _handle_manual_search(self, sorted_tracks, song):
@@ -2244,4 +2245,3 @@ class PlexSync(BeetsPlugin):
         """Clean up when plugin is disabled."""
         if self.loop and not self.loop.is_closed():
             self.close()
-
