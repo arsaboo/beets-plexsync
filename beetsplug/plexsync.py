@@ -1056,7 +1056,19 @@ class PlexSync(BeetsPlugin):
         self._cache_result(cache_key, None)
         self._log.debug("Track {} not found in Plex library", song["title"])
 
-        # If regular search fails, try LLM cleaning if enabled
+        # Attempt YouTube fallback first
+        if not fallback_attempted and "youtube" in config["plugins"].get(list):
+            self._log.debug("Attempting YouTube fallback for {}", song["title"])
+            search_query = f'{song["artist"]} {song["title"]}'
+            if song.get("album"):
+                search_query += f' {song["album"]}'
+            yt_search_results = self.import_yt_search(search_query, limit=1)
+            if yt_search_results:
+                yt_song = yt_search_results[0]
+                self._log.info("Found track via YouTube search: {} - {} - {}", yt_song["album"], yt_song["artist"], yt_song["title"])
+                return self.search_plex_song(yt_song, manual_search, fallback_attempted=True)
+
+        # Then try LLM cleaning if configured
         if not llm_attempted and self.search_llm and config["plexsync"]["use_llm_search"].get(bool):
             cleaned_title, cleaned_album, cleaned_artist = clean_search_string(
                 self.search_llm,
@@ -1117,16 +1129,6 @@ class PlexSync(BeetsPlugin):
                 song["artist"],
                 song["title"],
             )
-            # Fallback to YouTube search if not already attempted and YouTube plugin is configured
-            if not fallback_attempted and "youtube" in config["plugins"].get(list):
-                search_query = f'{song["artist"]} {song["title"]}'
-                if song.get("album"):
-                    search_query += f' {song["album"]}'
-                yt_search_results = self.import_yt_search(search_query, limit=1)
-                if yt_search_results:
-                    yt_song = yt_search_results[0]
-                    self._log.info("Found track via YouTube search: {} - {} - {}", yt_song["album"], yt_song["artist"], yt_song["title"])
-                    return self.search_plex_song(yt_song, manual_search, fallback_attempted=True)
         return None
 
     def _process_matches(self, tracks, song, manual_search):
