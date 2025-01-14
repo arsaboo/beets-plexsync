@@ -1117,7 +1117,11 @@ class PlexSync(BeetsPlugin):
         )
         if sel in ("b", "B", "s", "S"):
             return None
-        return sorted_tracks[sel - 1][0] if sel > 0 else None
+        selected_track = sorted_tracks[sel - 1][0] if sel > 0 else None
+        if selected_track:
+            cache_key = json.dumps(sorted(song.items()))
+            self._cache_result(cache_key, selected_track)
+        return selected_track
 
     def manual_track_search(self):
         """Manually search for a track in the Plex library.
@@ -2245,3 +2249,4 @@ class PlexSync(BeetsPlugin):
         """Clean up when plugin is disabled."""
         if self.loop and not self.loop.is_closed():
             self.close()
+```python
