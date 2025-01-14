@@ -819,7 +819,7 @@ class PlexSync(BeetsPlugin):
                 if hasattr(item, 'plex_ratingkey') and item.plex_ratingkey:
                     plex_set.add(self.plex.fetchItem(item.plex_ratingkey))
                 else:
-                    self._log.warning("{} does not have plex_ratingkey attribute", item)
+                    self._log.warning("{} does not have plex_ratingkey attribute. Item details: {}", item, vars(item))
             except (exceptions.NotFound, AttributeError) as e:
                 self._log.warning("{} not found in Plex library. Error: {}", item, e)
                 continue
