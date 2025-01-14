@@ -10,6 +10,8 @@ from pydantic import BaseModel, Field
 # Simple logger for standalone use
 logger = logging.getLogger('beets')
 
+# Add cache at module level
+_metadata_cache = {}
 
 class CleanedMetadata(BaseModel):
     """Pydantic model for cleaned metadata response."""
@@ -76,11 +78,23 @@ def setup_llm(llm_type="plexsonic"):
         return None
 
 
+def _make_cache_key(title, album, artist):
+    """Create a cache key from metadata."""
+    return f"{title}::{album}::{artist}"
+
 def clean_search_string(client, title=None, album=None, artist=None):
     """Clean and format search strings using LLM."""
     if not client or not any([title, album, artist]):
         logger.debug("Skipping LLM cleaning - no input or client")
         return title, album, artist
+
+    # Check cache first
+    cache_key = _make_cache_key(title, album, artist)
+    if cache_key in _metadata_cache:
+        cached = _metadata_cache[cache_key]
+        logger.debug("Using cached metadata for - title: {0}, album: {1}, artist: {2}",
+                    cached[0], cached[1], cached[2])
+        return cached
 
     # Format metadata for logging
     metadata = {
@@ -171,7 +185,10 @@ Keep language indicators and core artist/song names unchanged.""",
             logger.info("Successfully cleaned metadata - title: {0}, album: {1}, artist: {2}",
                        result["title"], result["album"], result["artist"])
 
-            return (result["title"], result["album"], result["artist"])
+            # Cache the result before returning
+            cleaned_result = (result["title"], result["album"], result["artist"])
+            _metadata_cache[cache_key] = cleaned_result
+            return cleaned_result
 
         except Exception as e:
             logger.error("Failed to parse LLM response: {0}", str(e))
