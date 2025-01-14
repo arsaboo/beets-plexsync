@@ -1119,7 +1119,7 @@ class PlexSync(BeetsPlugin):
             search_query = f'{song["artist"]} {song["title"]}'
             if song.get("album"):
                 search_query += f' {song["album"]}'
-            yt_search_results = self.import_yt_search(search_query, limit=20)
+            yt_search_results = self.import_yt_search(search_query, limit=1)
             if yt_search_results:
                 # Try each YouTube result until we find a match
                 for yt_song in yt_search_results:
