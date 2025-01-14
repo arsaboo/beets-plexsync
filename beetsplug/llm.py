@@ -1,24 +1,14 @@
 """LLM integration for beets plugins."""
 
 import logging
-import sys
 from typing import Optional
 import httpx
 from openai import OpenAI
 from beets import config
-from beets.util import logger_name
 from pydantic import BaseModel, Field
 
-# Set up logger
-logger = logging.getLogger('beets.plexsync.llm')
-
-# Add console handler if not already present
-if not logger.handlers:
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(logging.Formatter('%(levelname)-8s %(message)s'))
-    logger.addHandler(console_handler)
-    # Use DEBUG for development, INFO for production
-    logger.setLevel(logging.DEBUG)
+# Simple logger for standalone use
+logger = logging.getLogger('beets')
 
 
 class CleanedMetadata(BaseModel):
