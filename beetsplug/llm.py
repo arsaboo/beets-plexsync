@@ -16,27 +16,35 @@ _metadata_cache = {}
 class CleanedMetadata(BaseModel):
     """Pydantic model for cleaned metadata response."""
 
-    title: Optional[str] = Field(
+    # Update field names to match LLM response case
+    Title: Optional[str] = Field(
         None,
+        alias="title",
         description="Cleaned song title without features, versions, or other extra info",
     )
-    album: Optional[str] = Field(
-        None, description="Cleaned album name without soundtrack/movie references"
+    Album: Optional[str] = Field(
+        None,
+        alias="album",
+        description="Cleaned album name without soundtrack/movie references"
     )
-    artist: Optional[str] = Field(
-        None, description="Main artist name without featuring artists"
+    Artist: Optional[str] = Field(
+        None,
+        alias="artist",
+        description="Main artist name without featuring artists"
     )
 
     model_config = {
         "json_schema_extra": {
             "examples": [
                 {
-                    "title": "Clean Song Name",
-                    "album": "Album Name",
-                    "artist": "Artist Name",
+                    "Title": "Clean Song Name",
+                    "Album": "Album Name",
+                    "Artist": "Artist Name",
                 }
             ]
-        }
+        },
+        "populate_by_name": True,
+        "allow_population_by_field_name": True
     }
 
 
@@ -178,9 +186,9 @@ Keep language indicators and core artist/song names unchanged.""",
             cleaned = CleanedMetadata.model_validate_json(raw_response)
 
             # Take LLM output if present, otherwise keep original
-            cleaned_title = cleaned.title if cleaned.title else title
-            cleaned_album = cleaned.album if cleaned.album else album
-            cleaned_artist = cleaned.artist if cleaned.artist else artist
+            cleaned_title = cleaned.Title if cleaned.Title else title
+            cleaned_album = cleaned.Album if cleaned.Album else album
+            cleaned_artist = cleaned.Artist if cleaned.Artist else artist
 
             # Strip values if they exist
             if cleaned_title:
