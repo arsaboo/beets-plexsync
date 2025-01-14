@@ -1011,7 +1011,13 @@ class PlexSync(BeetsPlugin):
             self._log.debug("Cache hit for query: {}", cache_key)
             if cached_ratingKey == -1:
                 return None
-            return self.plex.fetchItem(cached_ratingKey)
+            try:
+                # Use music.fetchItem instead of plex.fetchItem
+                return self.music.fetchItem(cached_ratingKey)
+            except Exception as e:
+                self._log.debug("Failed to fetch cached item {}: {}", cached_ratingKey, e)
+                self.cache.set(cache_key, None)  # Clear invalid cache entry
+                # Continue with normal search
 
         # Try regular search first
         artist = song["artist"].split(",")[0]
