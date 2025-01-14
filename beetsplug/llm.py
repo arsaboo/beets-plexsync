@@ -83,59 +83,38 @@ def clean_search_string(client, title=None, album=None, artist=None):
         logger.debug("Preparing request with model: %s",
                     config["llm"].get(dict).get("search", {}).get("model") or config["llm"]["model"].get())
 
-        # Build input data
-        input_data = {k: v for k, v in {'title': title, 'album': album, 'artist': artist}.items() if v}
-
         messages = [
             {
                 "role": "system",
-                "content": """You are a music metadata cleaner that returns ONLY valid JSON.
-Your task is to clean the provided music metadata and return it in this exact format:
-{
-    "title": "cleaned song title",
-    "album": "cleaned album name",
-    "artist": "cleaned artist name"
-}
-
-Follow these rules:
-1. Remove: parentheses/brackets content, featuring artists, version info (Original Mix, Radio Edit, etc.), soundtrack references
-2. Return null for missing fields
-3. DO NOT add or infer any information
-4. ONLY return the JSON object, no other text"""
+                "content": """Clean the provided music metadata by removing:
+- Text in parentheses/brackets (unless part of primary name)
+- Featuring artists, 'ft.', 'feat.' mentions
+- Version indicators (Original Mix, Radio Edit, etc.)
+- Soundtrack references (From the motion picture, OST)
+- Qualifiers (Single, Album Version)
+Keep language indicators and core artist/song names unchanged."""
             },
             {
                 "role": "user",
-                "content": f"Clean this metadata (respond ONLY with JSON): {input_data}"
+                "content": f"Clean this music metadata - Title: {title or 'None'}, Album: {album or 'None'}, Artist: {artist or 'None'}"
             }
         ]
 
         logger.debug("Sending request to LLM...")
-        response = client.chat.completions.create(
+
+        # Use parse method with our Pydantic model
+        completion = client.beta.chat.completions.parse(
             model=config["llm"].get(dict).get("search", {}).get("model") or config["llm"]["model"].get(),
             messages=messages,
+            response_format=CleanedMetadata,
             temperature=0.1,
             max_tokens=150,
-            timeout=15.0,
-            response_format={"type": "json_object"}
+            timeout=15.0
         )
 
-        raw_response = response.choices[0].message.content.strip()
-        logger.debug("Raw LLM response: %s", raw_response)
-
-        if not raw_response:
-            logger.error("Received empty response from LLM")
-            return title, album, artist
-
-        try:
-            # First attempt: direct JSON parsing
-            cleaned = CleanedMetadata.model_validate_json(raw_response)
-        except Exception as json_err:
-            logger.error("JSON parsing error: %s", str(json_err))
-            return title, album, artist
-
+        cleaned = completion.choices[0].message.parsed
         logger.info("Successfully cleaned metadata: %s", cleaned.model_dump())
 
-        # Return cleaned values, falling back to original values if None
         return (
             cleaned.title or title,
             cleaned.album or album,
