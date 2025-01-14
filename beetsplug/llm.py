@@ -125,6 +125,7 @@ def clean_search_string(client, title=None, album=None, artist=None):
 - Version indicators (Original Mix, Radio Edit, etc.)
 - Soundtrack references (From the motion picture, OST)
 - Qualifiers (Single, Album Version)
+- Any additional data that is not related to the core artist/song
 Keep language indicators and core artist/song names unchanged.""",
             },
             {
