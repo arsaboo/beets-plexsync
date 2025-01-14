@@ -81,25 +81,21 @@ def clean_search_string(client, title=None, album=None, artist=None):
     if not client or not any([title, album, artist]):
         return title, album, artist
 
-    # Use % formatting for beets logger compatibility
-    logger.debug(
-        f"Starting LLM cleaning for: title={title!r}, album={album!r}, artist={artist!r}"
-    )
+    # Use safer string formatting for logging
+    logger.debug("Starting LLM cleaning for: title='%s', album='%s', artist='%s'",
+                title or 'None', album or 'None', artist or 'None')
 
     if (
-        title
-        and not title.strip()
-        or album
-        and not album.strip()
-        or artist
-        and not artist.strip()
+        title and not title.strip()
+        or album and not album.strip()
+        or artist and not artist.strip()
     ):
         logger.debug("Empty string detected after stripping, returning original values")
         return title, album, artist
 
     try:
         model = config["llm"].get(dict).get("search", {}).get("model") or config["llm"]["model"].get()
-        logger.debug(f"Using model: {model!r}")
+        logger.debug("Using model: '%s'", model)
 
         messages = [
             {
@@ -118,7 +114,7 @@ Keep language indicators and core artist/song names unchanged.""",
             },
         ]
 
-        logger.debug(f"Sending request to LLM with model {model!r}...")
+        logger.debug("Sending request to LLM with model '%s'...", model)
 
         # Standard chat completion request (works with Ollama and OpenAI)
         response = client.chat.completions.create(
@@ -135,14 +131,17 @@ Keep language indicators and core artist/song names unchanged.""",
             return title, album, artist
 
         raw_response = response.choices[0].message.content.strip()
-        logger.debug(f"Raw LLM response: {raw_response!r}")
+        # Use safer string format for raw JSON response
+        logger.debug("Raw LLM response: '%s'", raw_response)
 
         # Parse response using Pydantic model
         cleaned = CleanedMetadata.model_validate_json(raw_response)
-        logger.info(
-            f"Successfully cleaned metadata - title={cleaned.title or title!r}, "
-            f"album={cleaned.album or album!r}, artist={cleaned.artist or artist!r}"
-        )
+
+        # Use safer string format for cleaned metadata
+        logger.info("Successfully cleaned metadata - title='%s', album='%s', artist='%s'",
+                   cleaned.title or title,
+                   cleaned.album or album,
+                   cleaned.artist or artist)
 
         return (
             cleaned.title or title,
@@ -154,8 +153,7 @@ Keep language indicators and core artist/song names unchanged.""",
         logger.error("LLM request timed out")
         return title, album, artist
     except Exception as e:
-        logger.error(f"Error in clean_search_string: {str(e)}")
-        logger.debug(
-            f"Original values: title={title!r}, album={album!r}, artist={artist!r}"
-        )
+        logger.error("Error in clean_search_string: %s", str(e))
+        logger.debug("Original values: title='%s', album='%s', artist='%s'",
+                    title, album, artist)
         return title, album, artist
