@@ -8,7 +8,7 @@ from plexapi.audio import Track
 from plexapi.server import PlexServer
 
 # Initialize logger with plexsync prefix
-logger = logging.getLogger('beets.plexsync')
+logger = logging.getLogger('beets')
 
 class PlexJSONEncoder(json.JSONEncoder):
     """Custom JSON encoder for Plex objects."""
