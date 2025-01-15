@@ -44,7 +44,7 @@ class PlexJSONEncoder(json.JSONEncoder):
 class Cache:
     def __init__(self, db_path):
         self.db_path = db_path
-        logger.debug('Initializing cache at: %s', db_path)
+        logger.debug('Initializing cache at: {}', db_path)
         self._initialize_db()
 
     def _initialize_db(self):
@@ -62,7 +62,7 @@ class Cache:
                 conn.commit()
                 logger.debug('Cache database initialized successfully')
         except Exception as e:
-            logger.error('Failed to initialize cache database: %s', e)
+            logger.error('Failed to initialize cache database: {}', e)
             raise
 
     def _sanitize_query_for_log(self, query):
@@ -120,6 +120,6 @@ class Cache:
                 cursor.execute('DELETE FROM cache')
                 conn.commit()
 
-                logger.info('Cleared %d entries from cache', count_before)
+                logger.info('Cleared {} entries from cache', count_before)
         except Exception as e:
-            logger.error('Failed to clear cache: %s', e)
+            logger.error('Failed to clear cache: {}', e)
