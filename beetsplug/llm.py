@@ -6,6 +6,7 @@ import httpx
 from openai import OpenAI
 from beets import config
 from pydantic import BaseModel, Field
+import json
 
 # Simple logger for standalone use
 logger = logging.getLogger('beets')
@@ -130,10 +131,11 @@ def clean_search_string(client, title=None, album=None, artist=None):
                 "content": """Clean the provided music metadata by removing:
 - Text in parentheses/brackets
 - Featuring artists, 'ft.', 'feat.' mentions
-- Version indicators (Original Mix, Radio Edit, etc.)
-- Soundtrack references (From the motion picture, OST)
+- Version indicators (Original Mix, Radio Edit, Music Video, Jhankar Beats, etc.)
+- Soundtrack references (From the motion picture, OST, Original Motion Picture Soundtrack, etc.)
 - Qualifiers (Single, Album Version,  Part 2, )
 - Any additional data that is not related to the core artist/song
+- If the title is in multiple languages, return the English version
 Keep language indicators and core artist/song names unchanged.""",
             },
             {
@@ -183,6 +185,17 @@ Keep language indicators and core artist/song names unchanged.""",
         logger.debug("Raw LLM response: {0}", raw_response)
 
         try:
+            # Pre-process the response to handle potential artist arrays
+            try:
+                parsed_json = json.loads(raw_response)
+                # Handle case where artist is returned as a list
+                if isinstance(parsed_json.get('Artist'), list):
+                    parsed_json['Artist'] = ', '.join(parsed_json['Artist'])
+                raw_response = json.dumps(parsed_json)
+            except json.JSONDecodeError as e:
+                logger.error("Invalid JSON in LLM response: {0}", str(e))
+                return title, album, artist
+
             cleaned = CleanedMetadata.model_validate_json(raw_response)
 
             # Take LLM output if present, otherwise keep original
@@ -222,7 +235,7 @@ Keep language indicators and core artist/song names unchanged.""",
 
             if changed:
                 logger.info(
-                    "Successfully cleaned metadata - Original: '{0}'/'{1}'/'{2}' -> Cleaned: '{3}'/'{4}'/'{5}'",
+                    "Successfully cleaned metadata - Original: '{0}' - '{1}' - '{2}' -> Cleaned: '{3}' - '{4}' - '{5}'",
                     title or "None",
                     album or "None",
                     artist or "None",
@@ -240,6 +253,8 @@ Keep language indicators and core artist/song names unchanged.""",
 
         except Exception as e:
             logger.error("Failed to parse LLM response: {0}", str(e))
+            if 'raw_response' in locals():
+                logger.debug("Raw response that failed parsing: {0}", raw_response)
             return title, album, artist
 
     except httpx.TimeoutException:

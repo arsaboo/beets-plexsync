@@ -37,6 +37,8 @@ from plexapi.server import PlexServer
 from pydantic import BaseModel, Field
 from requests.exceptions import ConnectionError, ContentDecodingError
 from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
+from beetsplug.caching import Cache
+from pathlib import Path
 
 
 class Song(BaseModel):
@@ -83,6 +85,10 @@ class PlexSync(BeetsPlugin):
         self.config_dir = config.config_dir()
         self.llm_client = None
         self.search_llm = None
+
+        # Initialize cache with plugin instance reference
+        cache_path = os.path.join(self.config_dir, 'plexsync_cache.db')
+        self.cache = Cache(cache_path, self)
 
         # Call the setup methods
         try:
@@ -497,7 +503,30 @@ class PlexSync(BeetsPlugin):
             help="Generate system-defined or custom smart playlists",
         )
 
+        # Add import-failed option and log-file option
+        plex_smartplaylists_cmd.parser.add_option(
+            "-i",
+            "--import-failed",
+            action="store_true",
+            default=False,
+            help="import previously failed tracks from log files using manual search",
+        )
+        plex_smartplaylists_cmd.parser.add_option(
+            "-l",
+            "--log-file",
+            default=None,
+            help="specific log file to process (default: process all logs)",
+        )
+
         def func_plex_smartplaylists(lib, opts, args):
+            if opts.import_failed:
+                total_imported, total_failed = self.process_import_logs(lib, opts.log_file)
+                self._log.info(
+                    "Manual import complete - Successfully imported: {}, Failed: {}",
+                    total_imported, total_failed
+                )
+                return
+
             # Retrieve playlists from config
             playlists_config = config["plexsync"]["playlists"]["items"].get(list)
             if not playlists_config:
@@ -761,7 +790,7 @@ class PlexSync(BeetsPlugin):
     def search_plex_track(self, item):
         """Fetch the Plex track key."""
         tracks = self.music.searchTracks(
-            **{"album.title": item.album, "track.title": item.title}
+            **{"album.title": item.album, "track.title": item.title}, limit=50
         )
         if len(tracks) == 1:
             return tracks[0]
@@ -811,7 +840,12 @@ class PlexSync(BeetsPlugin):
             playlist_set = set()
         for item in items:
             try:
-                plex_set.add(self.plex.fetchItem(item.plex_ratingkey))
+                # Check for both plex_ratingkey and ratingKey
+                rating_key = getattr(item, 'plex_ratingkey', None) or getattr(item, 'ratingKey', None)
+                if rating_key:
+                    plex_set.add(self.plex.fetchItem(rating_key))
+                else:
+                    self._log.warning("{} does not have plex_ratingkey or ratingKey attribute. Item details: {}", item, vars(item))
             except (exceptions.NotFound, AttributeError) as e:
                 self._log.warning("{} not found in Plex library. Error: {}", item, e)
                 continue
@@ -923,23 +957,105 @@ class PlexSync(BeetsPlugin):
                     self._log.debug("Please sync Plex library again")
                     continue
 
+    def _cache_result(self, cache_key, result):
+        """Helper method to safely cache search results."""
+        if not cache_key:
+            return
+
+        try:
+            if result is None:
+                self.cache.set(cache_key, -1)  # Use -1 to indicate not found
+            else:
+                self.cache.set(cache_key, result.ratingKey)
+        except Exception as e:
+            self._log.debug("Failed to cache result: {}", e)
+
+    def _make_cache_key(self, song):
+        """Create a cache key from song metadata."""
+        return json.dumps(sorted({k: v or "" for k, v in song.items()}.items()))
+
+    def _handle_manual_search(self, sorted_tracks, song):
+        """Helper function to handle manual search."""
+        print_(
+            f'\nChoose candidates for {song.get("album", "Unknown")} '
+            f'- {song["title"]} - {song["artist"]}:'
+        )
+        for i, (track, score) in enumerate(sorted_tracks, start=1):
+            print_(
+                f"{i}. {track.parentTitle} - {track.title} - "
+                f"{track.artist().title}"
+            )
+        sel = ui.input_options(
+            ("aBort", "Skip", "Enter"), numrange=(1, len(sorted_tracks)), default=1
+        )
+        if sel in ("b", "B"):
+            return None
+        elif sel in ("s", "S"):
+            return None
+        elif sel in ("e", "E"):
+            return self.manual_track_search(song)
+        selected_track = sorted_tracks[sel - 1][0] if sel > 0 else None
+        if selected_track:
+            cache_key = self._make_cache_key(song)
+            self._cache_result(cache_key, selected_track)
+        return selected_track
+
+    def manual_track_search(self, original_song=None):
+        """Manually search for a track in the Plex library.
+
+        Prompts the user to enter the title, album, and artist of the track
+        they want to search for.
+        Calls the `search_plex_song` method with the provided information and
+        sets the `manual_search` flag to True.
+        """
+        song_dict = {}
+        title = input_("Title:").strip()
+        album = input_("Album:").strip()
+        artist = input_("Artist:").strip()
+        song_dict = {
+            "title": title.strip(),
+            "album": album.strip(),
+            "artist": artist.strip(),
+        }
+        result = self.search_plex_song(song_dict, manual_search=True)
+        if result and original_song:
+            cache_key = self._make_cache_key(original_song)
+            self._cache_result(cache_key, result)
+        return result
+
     def search_plex_song(self, song, manual_search=None, fallback_attempted=False, llm_attempted=False):
         """Fetch the Plex track key."""
         if manual_search is None:
             manual_search = config["plexsync"]["manual_search"].get(bool)
 
+        # Create a clean song dict for cache key
+        cache_key = self._make_cache_key(song)
+
+        # Check cache first
+        cached_ratingKey = self.cache.get(cache_key)
+        if cached_ratingKey is not None:
+            if cached_ratingKey == -1:
+                return None
+            try:
+                # Use music.fetchItem instead of plex.fetchItem
+                return self.music.fetchItem(cached_ratingKey)
+            except Exception as e:
+                self._log.debug("Failed to fetch cached item {}: {}", cached_ratingKey, e)
+                self.cache.set(cache_key, None)  # Clear invalid cache entry
+                # Continue with normal search
+
         # Try regular search first
         artist = song["artist"].split(",")[0]
         try:
             if song["album"] is None:
-                tracks = self.music.searchTracks(**{"track.title": song["title"]})
+                tracks = self.music.searchTracks(**{"track.title": song["title"]}, limit=50)
             else:
                 tracks = self.music.searchTracks(
-                    **{"album.title": song["album"], "track.title": song["title"]}
+                    **{"album.title": song["album"], "track.title": song["title"]}, limit=50
                 )
                 if len(tracks) == 0:
                     song["title"] = re.sub(r"\(.*\)", "", song["title"]).strip()
-                    tracks = self.music.searchTracks(**{"track.title": song["title"]})
+                    tracks = self.music.searchTracks(**{"track.title": song["title"]}, limit=50)
         except Exception as e:
             self._log.debug(
                 "Error searching for {} - {}. Error: {}",
@@ -950,37 +1066,28 @@ class PlexSync(BeetsPlugin):
             return None
 
         if len(tracks) == 1:
-            return tracks[0]
+            result = tracks[0]
+            self._cache_result(cache_key, result)
+            return result
         elif len(tracks) > 1:
             sorted_tracks = self.find_closest_match(song, tracks)  # Simply pass the song dict
             self._log.debug("Found {} tracks for {}", len(sorted_tracks), song["title"])
             if manual_search and len(sorted_tracks) > 0:
-                print_(
-                    f'\nChoose candidates for {song["album"]} '
-                    f'- {song["title"]} - {song["artist"]}:'
-                )
-                for i, (track, score) in enumerate(sorted_tracks, start=1):
-                    print_(
-                        f"{i}. {track.parentTitle} - {track.title} - "
-                        f"{track.artist().title}"
-                    )
-                sel = ui.input_options(
-                    ("aBort", "Skip"), numrange=(1, len(sorted_tracks)), default=1
-                )
-                if sel in ("b", "B", "s", "S"):
-                    return None
-                return sorted_tracks[sel - 1][0] if sel > 0 else None
+                return self._handle_manual_search(sorted_tracks, song)
             for track, score in sorted_tracks:
                 if track.originalTitle is not None:
                     plex_artist = track.originalTitle
                 else:
                     plex_artist = track.artist().title
                 if artist in plex_artist:
+                    self._cache_result(cache_key, track)
                     return track
-        else:
-            self._log.debug("Track {} not found in Plex library", song["title"])
 
-        # If regular search fails, try LLM cleaning if enabled
+        # If no match found
+        self._cache_result(cache_key, None)
+        self._log.debug("Track {} not found in Plex library", song["title"])
+
+        # Try LLM cleaning first if configured
         if not llm_attempted and self.search_llm and config["plexsync"]["use_llm_search"].get(bool):
             cleaned_title, cleaned_album, cleaned_artist = clean_search_string(
                 self.search_llm,
@@ -1001,27 +1108,63 @@ class PlexSync(BeetsPlugin):
                 self._log.debug("Using LLM cleaned artist: {} -> {}", song["artist"], cleaned_artist)
                 cleaned_song["artist"] = cleaned_artist
 
-            # Try search with cleaned values first
+            # Try search with cleaned values
             try:
                 if cleaned_song["album"] is None:
-                    tracks = self.music.searchTracks(**{"track.title": cleaned_song["title"]})
+                    tracks = self.music.searchTracks(**{"track.title": cleaned_song["title"]}, limit=50)
                 else:
                     tracks = self.music.searchTracks(
                         **{
                             "album.title": cleaned_song["album"],
                             "track.title": cleaned_song["title"]
-                        }
+                        }, limit=50
                     )
                 if tracks:
-                    self._log.debug("Found match using cleaned metadata")
+                    self._log.debug("Found match using cleaned metadata: {} - {} - {}",
+                        cleaned_song["album"], cleaned_song["artist"], cleaned_song["title"])
                     if len(tracks) == 1:
+                        self._cache_result(cache_key, tracks[0])
                         return tracks[0]
                     # Continue with normal matching logic using cleaned values
-                    return self._process_matches(tracks, cleaned_song, manual_search)
+                    result = self._process_matches(tracks, cleaned_song, manual_search)
+                    if result:
+                        self._cache_result(cache_key, result)
+                        return result
             except Exception as e:
-                self._log.debug("Search with cleaned metadata failed: {}", str(e))
+                self._log.debug("Search with cleaned metadata failed: {}", e)
 
-        # If LLM also fails, fallback to manual search if requested
+        # Then try YouTube search if available
+        if not fallback_attempted and "youtube" in config["plugins"].get(list):
+            self._log.debug("Attempting YouTube fallback for {}", song["title"])
+            search_query = f'{song["artist"]} {song["title"]}'
+            if song.get("album"):
+                search_query += f' {song["album"]}'
+            yt_search_results = self.import_yt_search(search_query, limit=1)
+            if yt_search_results:
+                yt_song = yt_search_results[0]
+                self._log.debug("Trying YouTube result: {} - {} - {}",
+                    yt_song["album"], yt_song["artist"], yt_song["title"])
+                try:
+                    if yt_song["album"] is None:
+                        tracks = self.music.searchTracks(**{"track.title": yt_song["title"]}, limit=50)
+                    else:
+                        tracks = self.music.searchTracks(
+                            **{"album.title": yt_song["album"], "track.title": yt_song["title"]}, limit=50
+                        )
+                    if tracks:
+                        if len(tracks) == 1:
+                            result = tracks[0]
+                        else:
+                            result = self._process_matches(tracks, yt_song, manual_search)
+                        if result:
+                            self._log.info("Found match via YouTube search: {} - {} - {}",
+                                yt_song["album"], yt_song["artist"], yt_song["title"])
+                            self._cache_result(cache_key, result)
+                            return result
+                except Exception as e:
+                    self._log.debug("Error searching YouTube result: {}", e)
+
+        # Finally try manual search if enabled
         if manual_search:
             self._log.info(
                 "Track {} - {} - {} not found in Plex",
@@ -1030,7 +1173,7 @@ class PlexSync(BeetsPlugin):
                 song["title"],
             )
             if ui.input_yn("Search manually? (Y/n)"):
-                self.manual_track_search()
+                return self.manual_track_search(song)
         else:
             self._log.info(
                 "Track {} - {} - {} not found in Plex",
@@ -1038,16 +1181,6 @@ class PlexSync(BeetsPlugin):
                 song["artist"],
                 song["title"],
             )
-            # Fallback to YouTube search if not already attempted and YouTube plugin is configured
-            if not fallback_attempted and "youtube" in config["plugins"].get(list):
-                search_query = f'{song["artist"]} {song["title"]}'
-                if song.get("album"):
-                    search_query += f' {song["album"]}'
-                yt_search_results = self.import_yt_search(search_query, limit=1)
-                if yt_search_results:
-                    yt_song = yt_search_results[0]
-                    self._log.info("Found track via YouTube search: {} - {} - {}", yt_song["album"], yt_song["artist"], yt_song["title"])
-                    return self.search_plex_song(yt_song, manual_search, fallback_attempted=True)
         return None
 
     def _process_matches(self, tracks, song, manual_search):
@@ -1057,56 +1190,22 @@ class PlexSync(BeetsPlugin):
         self._log.debug("Found {} tracks for {}", len(sorted_tracks), song["title"])
 
         if manual_search and len(sorted_tracks) > 0:
-            # ...existing manual search code...
             return self._handle_manual_search(sorted_tracks, song)
 
-        # Try to find automatic match
+        result = None
         for track, score in sorted_tracks:
             if track.originalTitle is not None:
                 plex_artist = track.originalTitle
             else:
                 plex_artist = track.artist().title
             if artist in plex_artist:
-                return track
+                result = track
+                break
 
-        return None
-
-    def _handle_manual_search(self, sorted_tracks, song):
-        """Helper function to handle manual search."""
-        print_(
-            f'\nChoose candidates for {song["album"]} '
-            f'- {song["title"]} - {song["artist"]}:'
-        )
-        for i, (track, score) in enumerate(sorted_tracks, start=1):
-            print_(
-                f"{i}. {track.parentTitle} - {track.title} - "
-                f"{track.artist().title}"
-            )
-        sel = ui.input_options(
-            ("aBort", "Skip"), numrange=(1, len(sorted_tracks)), default=1
-        )
-        if sel in ("b", "B", "s", "S"):
-            return None
-        return sorted_tracks[sel - 1][0] if sel > 0 else None
-
-    def manual_track_search(self):
-        """Manually search for a track in the Plex library.
-
-        Prompts the user to enter the title, album, and artist of the track
-        they want to search for.
-        Calls the `search_plex_song` method with the provided information and
-        sets the `manual_search` flag to True.
-        """
-        song_dict = {}
-        title = input_("Title:").strip()
-        album = input_("Album:").strip()
-        artist = input_("Artist:").strip()
-        song_dict = {
-            "title": title.strip(),
-            "album": album.strip(),
-            "artist": artist.strip(),
-        }
-        self.search_plex_song(song_dict, manual_search=True)
+        if result is not None:
+            cache_key = json.dumps(song)
+            self.cache.set(cache_key, result.ratingKey)
+        return result
 
     def _plex_import_playlist(self, playlist, playlist_url=None, listenbrainz=False):
         """Import playlist into Plex."""
@@ -1172,12 +1271,7 @@ class PlexSync(BeetsPlugin):
             for song in songs:
                 found = self.search_plex_song(song, manual_search)
                 if found is not None:
-                    song_dict = {
-                        "title": found.title,
-                        "album": found.parentTitle,
-                        "plex_ratingkey": found.ratingKey,
-                    }
-                    song_list.append(self.dotdict(song_dict))
+                    song_list.append(found)
         self._plex_add_playlist_item(song_list, playlist)
 
     def _plex_import_search(self, playlist, search, limit=10):
@@ -1187,14 +1281,9 @@ class PlexSync(BeetsPlugin):
         song_list = []
         if songs:
             for song in songs:
-                if self.search_plex_song(song) is not None:
-                    found = self.search_plex_song(song)
-                    song_dict = {
-                        "title": found.title,
-                        "album": found.parentTitle,
-                        "plex_ratingkey": found.ratingKey,
-                    }
-                    song_list.append(self.dotdict(song_dict))
+                found = self.search_plex_song(song)
+                if found is not None:
+                    song_list.append(found)
         self._plex_add_playlist_item(song_list, playlist)
 
     def _plex_clear_playlist(self, playlist):
@@ -1421,15 +1510,9 @@ class PlexSync(BeetsPlugin):
         )
         matched_songs = []
         for song in song_list:
-            if self.search_plex_song(song) is not None:
-                found = self.search_plex_song(song)
-                match_dict = {
-                    "title": found.title,
-                    "album": found.parentTitle,
-                    "plex_ratingkey": found.ratingKey,
-                }
-                self._log.debug("Song matched in Plex library: {}", match_dict)
-                matched_songs.append(self.dotdict(match_dict))
+            found = self.search_plex_song(song)
+            if found is not None:
+                matched_songs.append(found)
         self._log.debug("Songs matched in Plex library: {}", matched_songs)
         if clear:
             try:
@@ -2171,14 +2254,9 @@ class PlexSync(BeetsPlugin):
         for track in all_tracks:
             found = self.search_plex_song(track, manual_search)
             if found:
-                rating = float(getattr(found, 'userrating', 0))
+                rating = float(getattr(found, 'userRating', 0) or 0)
                 if rating == 0 or rating > 2:  # Include unrated or rating > 2
-                    song_dict = {
-                        "title": found.title,
-                        "album": found.parentTitle,
-                        "plex_ratingkey": found.ratingKey,
-                    }
-                    matched_songs.append(self.dotdict(song_dict))
+                    matched_songs.append(found)
                 else:
                     with open(log_file, 'a', encoding='utf-8') as f:
                         f.write(f"Low rated ({rating}): {track.get('artist', 'Unknown')} - {track.get('album', 'Unknown')} - {track.get('title', 'Unknown')}\n")
@@ -2200,8 +2278,8 @@ class PlexSync(BeetsPlugin):
         seen = set()
         unique_matched = []
         for song in matched_songs:
-            if song.plex_ratingkey not in seen:
-                seen.add(song.plex_ratingkey)
+            if song.ratingKey not in seen:
+                seen.add(song.ratingKey)
                 unique_matched.append(song)
 
         # Apply track limit if specified
@@ -2232,7 +2310,117 @@ class PlexSync(BeetsPlugin):
         else:
             self._log.warning("No tracks remaining after filtering for {}", playlist_name)
 
+    def process_import_logs(self, lib, specific_log=None):
+        """Process import logs in config directory and attempt manual import.
+
+        Args:
+            lib: The beets library instance
+            specific_log: Optional filename to process only one log file
+        """
+        total_imported = 0
+        total_failed = 0
+
+        if specific_log:
+            # Process single log file
+            log_path = Path(self.config_dir) / specific_log
+            if not log_path.exists():
+                self._log.error("Log file not found: {}", specific_log)
+                return total_imported, total_failed
+            log_files = [log_path]
+        else:
+            # Process all log files
+            log_files = Path(self.config_dir).glob("*_import.log")
+
+        for log_file in log_files:
+            playlist_name = log_file.stem.replace("_import", "").replace("_", " ").title()
+            self._log.info("Processing failed imports for playlist: {}", playlist_name)
+
+            # Read the entire log file
+            with open(log_file, 'r', encoding='utf-8') as f:
+                log_content = f.readlines()
+
+            tracks_to_import = []
+            track_lines_to_remove = set()  # Keep track of line numbers to remove
+            in_not_found_section = False
+            header_lines = []  # Store header content
+            summary_lines = []  # Store summary content
+            not_found_start = -1  # Track where "Not found" section starts
+
+            # First pass: collect tracks and identify sections
+            for i, line in enumerate(log_content):
+                if "Tracks not found in Plex library:" in line:
+                    in_not_found_section = True
+                    not_found_start = i
+                    continue
+                elif "Import Summary:" in line:
+                    in_not_found_section = False
+                    summary_lines = log_content[i:]  # Store summary section
+                    break
+
+                if i < not_found_start:
+                    header_lines.append(line)
+                elif in_not_found_section and line.startswith("Not found:"):
+                    try:
+                        _, track_info = line.split("Not found:", 1)
+                        artist, album, title = [x.strip() for x in track_info.split(" - ")]
+                        if artist != "Unknown" and title != "Unknown":
+                            tracks_to_import.append({
+                                "artist": artist,
+                                "album": album if album != "Unknown" else None,
+                                "title": title,
+                                "line_num": i  # Store the line number
+                            })
+                    except ValueError:
+                        self._log.debug("Skipping malformed log line: {}", line.strip())
+
+            if tracks_to_import:
+                self._log.info("Attempting to manually import {} tracks for {}",
+                             len(tracks_to_import), playlist_name)
+
+                matched_tracks = []
+                for track in tracks_to_import:
+                    found = self.search_plex_song(track, manual_search=True)
+                    if found:
+                        matched_tracks.append(found)
+                        track_lines_to_remove.add(track["line_num"])
+                        total_imported += 1
+                    else:
+                        total_failed += 1
+
+                if matched_tracks:
+                    self._plex_add_playlist_item(matched_tracks, playlist_name)
+                    self._log.info("Added {} tracks to playlist {}",
+                                 len(matched_tracks), playlist_name)
+
+                    # Update the log file: remove matched tracks and update summary
+                    remaining_not_found = [
+                        line for i, line in enumerate(log_content)
+                        if i not in track_lines_to_remove
+                    ]
+
+                    # Update summary with new counts
+                    new_summary = []
+                    for line in summary_lines:
+                        if "Tracks not found in Plex" in line:
+                            remaining_not_found_count = len([
+                                l for l in remaining_not_found
+                                if l.startswith("Not found:")
+                            ])
+                            new_summary.append(f"Tracks not found in Plex: {remaining_not_found_count}\n")
+                        else:
+                            new_summary.append(line)
+
+                    # Write updated log file
+                    with open(log_file, 'w', encoding='utf-8') as f:
+                        f.writelines(header_lines)  # Original header
+                        f.write("Tracks not found in Plex library:\n")  # Section header
+                        f.writelines(l for l in remaining_not_found if l.startswith("Not found:"))
+                        f.write("\nUpdated at: {}\n".format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+                        f.writelines(new_summary)  # Updated summary
+
+        return total_imported, total_failed
+
     def shutdown(self, lib):
         """Clean up when plugin is disabled."""
         if self.loop and not self.loop.is_closed():
-            self.loop.close()
+            self.close()
