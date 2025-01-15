@@ -107,8 +107,7 @@ class Cache:
                 row = cursor.fetchone()
                 if row:
                     rating_key, created_at = row
-                    # If it's a negative cache entry, check if expired
-                    if rating_key == -1:
+                    if rating_key == -1:  # Negative cache entry
                         created = datetime.fromisoformat(created_at)
                         if datetime.now() - created > timedelta(days=7):
                             # Expired negative entry, remove and return None
@@ -117,6 +116,18 @@ class Cache:
                             logger.debug('Expired negative cache entry removed for query: {}',
                                        self._sanitize_query_for_log(query))
                             return None
+                    else:  # Positive cache entry - verify track still exists
+                        try:
+                            # This will raise NotFound if track doesn't exist
+                            self.music.fetchItem(rating_key)
+                        except Exception:
+                            # Track no longer exists, remove from cache
+                            cursor.execute('DELETE FROM cache WHERE query = ?', (query,))
+                            conn.commit()
+                            logger.debug('Removed cache entry for deleted track: {}',
+                                       self._sanitize_query_for_log(query))
+                            return None
+
                     logger.debug('Cache hit for query: {}', self._sanitize_query_for_log(query))
                     return rating_key
                 logger.debug('Cache miss for query: {}', self._sanitize_query_for_log(query))
