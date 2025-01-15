@@ -7,8 +7,8 @@ from plexapi.video import Video
 from plexapi.audio import Track
 from plexapi.server import PlexServer
 
-# Initialize logger
-logger = logging.getLogger('beets')
+# Initialize logger with plexsync prefix
+logger = logging.getLogger('beets.plexsync')
 
 class PlexJSONEncoder(json.JSONEncoder):
     """Custom JSON encoder for Plex objects."""
@@ -66,10 +66,8 @@ class Cache:
             raise
 
     def _sanitize_query_for_log(self, query):
-        """Sanitize and truncate query for logging."""
+        """Sanitize query for logging."""
         try:
-            if isinstance(query, str) and len(query) > 80:
-                return query[:77] + "..."
             return str(query)
         except Exception:
             return "<unserializable query>"

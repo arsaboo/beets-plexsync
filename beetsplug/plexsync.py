@@ -960,16 +960,13 @@ class PlexSync(BeetsPlugin):
     def _cache_result(self, cache_key, result):
         """Helper method to safely cache search results."""
         if not cache_key:
-            self._log.debug("Skipping cache for empty key")
             return
 
         try:
             if result is None:
                 self.cache.set(cache_key, -1)  # Use -1 to indicate not found
-                self._log.debug("Caching negative result")
             else:
                 self.cache.set(cache_key, result.ratingKey)
-                self._log.debug("Caching positive result for: {}", getattr(result, 'title', 'Unknown'))
         except Exception as e:
             self._log.debug("Failed to cache result: {}", e)
 
@@ -1037,7 +1034,6 @@ class PlexSync(BeetsPlugin):
         # Check cache first
         cached_ratingKey = self.cache.get(cache_key)
         if cached_ratingKey is not None:
-            self._log.debug("Cache hit for query: {}", cache_key)
             if cached_ratingKey == -1:
                 return None
             try:
