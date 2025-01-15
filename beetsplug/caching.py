@@ -2,7 +2,7 @@ import sqlite3
 import json
 import os
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from plexapi.video import Video
 from plexapi.audio import Track
 from plexapi.server import PlexServer
@@ -59,11 +59,34 @@ class Cache:
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 ''')
+                # Add index on created_at for faster cleanup
+                cursor.execute('''
+                    CREATE INDEX IF NOT EXISTS idx_created_at ON cache(created_at)
+                ''')
                 conn.commit()
                 logger.debug('Cache database initialized successfully')
+
+                # Cleanup old entries on startup
+                self._cleanup_expired()
         except Exception as e:
             logger.error('Failed to initialize cache database: {}', e)
             raise
+
+    def _cleanup_expired(self, days=7):
+        """Remove negative cache entries older than specified days."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                expiry = datetime.now() - timedelta(days=days)
+                cursor.execute(
+                    'DELETE FROM cache WHERE plex_ratingkey = -1 AND created_at < ?',
+                    (expiry.isoformat(),)
+                )
+                if cursor.rowcount:
+                    logger.debug('Cleaned up {} expired negative cache entries', cursor.rowcount)
+                conn.commit()
+        except Exception as e:
+            logger.error('Failed to cleanup expired cache entries: {}', e)
 
     def _sanitize_query_for_log(self, query):
         """Sanitize query for logging."""
@@ -77,11 +100,25 @@ class Cache:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                cursor.execute('SELECT plex_ratingkey FROM cache WHERE query = ?', (query,))
+                cursor.execute(
+                    'SELECT plex_ratingkey, created_at FROM cache WHERE query = ?',
+                    (query,)
+                )
                 row = cursor.fetchone()
                 if row:
+                    rating_key, created_at = row
+                    # If it's a negative cache entry, check if expired
+                    if rating_key == -1:
+                        created = datetime.fromisoformat(created_at)
+                        if datetime.now() - created > timedelta(days=7):
+                            # Expired negative entry, remove and return None
+                            cursor.execute('DELETE FROM cache WHERE query = ?', (query,))
+                            conn.commit()
+                            logger.debug('Expired negative cache entry removed for query: {}',
+                                       self._sanitize_query_for_log(query))
+                            return None
                     logger.debug('Cache hit for query: {}', self._sanitize_query_for_log(query))
-                    return row[0]
+                    return rating_key
                 logger.debug('Cache miss for query: {}', self._sanitize_query_for_log(query))
                 return None
         except Exception as e:
