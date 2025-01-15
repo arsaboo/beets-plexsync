@@ -235,7 +235,7 @@ Keep language indicators and core artist/song names unchanged.""",
 
             if changed:
                 logger.info(
-                    "Successfully cleaned metadata - Original: '{0}'/'{1}'/'{2}' -> Cleaned: '{3}'/'{4}'/'{5}'",
+                    "Successfully cleaned metadata - Original: '{0}' - '{1}' - '{2}' -> Cleaned: '{3}' - '{4}' - '{5}'",
                     title or "None",
                     album or "None",
                     artist or "None",
