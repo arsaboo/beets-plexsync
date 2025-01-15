@@ -38,6 +38,7 @@ from pydantic import BaseModel, Field
 from requests.exceptions import ConnectionError, ContentDecodingError
 from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
 from beetsplug.caching import Cache
+from pathlib import Path
 
 
 class Song(BaseModel):
@@ -502,7 +503,24 @@ class PlexSync(BeetsPlugin):
             help="Generate system-defined or custom smart playlists",
         )
 
+        # Add import-failed option
+        plex_smartplaylists_cmd.parser.add_option(
+            "-i",
+            "--import-failed",
+            action="store_true",
+            default=False,
+            help="import previously failed tracks from log files using manual search",
+        )
+
         def func_plex_smartplaylists(lib, opts, args):
+            if opts.import_failed:
+                total_imported, total_failed = self.process_import_logs(lib)
+                self._log.info(
+                    "Manual import complete - Successfully imported: {}, Failed: {}",
+                    total_imported, total_failed
+                )
+                return
+
             # Retrieve playlists from config
             playlists_config = config["plexsync"]["playlists"]["items"].get(list)
             if not playlists_config:
@@ -2289,6 +2307,101 @@ class PlexSync(BeetsPlugin):
             )
         else:
             self._log.warning("No tracks remaining after filtering for {}", playlist_name)
+
+    def process_import_logs(self, lib):
+        """Process all import logs in config directory and attempt manual import."""
+        log_files = Path(self.config_dir).glob("*_import.log")
+        total_imported = 0
+        total_failed = 0
+
+        for log_file in Path(self.config_dir).glob("*_import.log"):
+            playlist_name = log_file.stem.replace("_import", "").replace("_", " ").title()
+            self._log.info("Processing failed imports for playlist: {}", playlist_name)
+
+            # Read the entire log file
+            with open(log_file, 'r', encoding='utf-8') as f:
+                log_content = f.readlines()
+
+            tracks_to_import = []
+            track_lines_to_remove = set()  # Keep track of line numbers to remove
+            in_not_found_section = False
+            header_lines = []  # Store header content
+            summary_lines = []  # Store summary content
+            not_found_start = -1  # Track where "Not found" section starts
+
+            # First pass: collect tracks and identify sections
+            for i, line in enumerate(log_content):
+                if "Tracks not found in Plex library:" in line:
+                    in_not_found_section = True
+                    not_found_start = i
+                    continue
+                elif "Import Summary:" in line:
+                    in_not_found_section = False
+                    summary_lines = log_content[i:]  # Store summary section
+                    break
+
+                if i < not_found_start:
+                    header_lines.append(line)
+                elif in_not_found_section and line.startswith("Not found:"):
+                    try:
+                        _, track_info = line.split("Not found:", 1)
+                        artist, album, title = [x.strip() for x in track_info.split(" - ")]
+                        if artist != "Unknown" and title != "Unknown":
+                            tracks_to_import.append({
+                                "artist": artist,
+                                "album": album if album != "Unknown" else None,
+                                "title": title,
+                                "line_num": i  # Store the line number
+                            })
+                    except ValueError:
+                        self._log.debug("Skipping malformed log line: {}", line.strip())
+
+            if tracks_to_import:
+                self._log.info("Attempting to manually import {} tracks for {}",
+                             len(tracks_to_import), playlist_name)
+
+                matched_tracks = []
+                for track in tracks_to_import:
+                    found = self.search_plex_song(track, manual_search=True)
+                    if found:
+                        matched_tracks.append(found)
+                        track_lines_to_remove.add(track["line_num"])
+                        total_imported += 1
+                    else:
+                        total_failed += 1
+
+                if matched_tracks:
+                    self._plex_add_playlist_item(matched_tracks, playlist_name)
+                    self._log.info("Added {} tracks to playlist {}",
+                                 len(matched_tracks), playlist_name)
+
+                    # Update the log file: remove matched tracks and update summary
+                    remaining_not_found = [
+                        line for i, line in enumerate(log_content)
+                        if i not in track_lines_to_remove
+                    ]
+
+                    # Update summary with new counts
+                    new_summary = []
+                    for line in summary_lines:
+                        if "Tracks not found in Plex" in line:
+                            remaining_not_found_count = len([
+                                l for l in remaining_not_found
+                                if l.startswith("Not found:")
+                            ])
+                            new_summary.append(f"Tracks not found in Plex: {remaining_not_found_count}\n")
+                        else:
+                            new_summary.append(line)
+
+                    # Write updated log file
+                    with open(log_file, 'w', encoding='utf-8') as f:
+                        f.writelines(header_lines)  # Original header
+                        f.write("Tracks not found in Plex library:\n")  # Section header
+                        f.writelines(l for l in remaining_not_found if l.startswith("Not found:"))
+                        f.write("\nUpdated at: {}\n".format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+                        f.writelines(new_summary)  # Updated summary
+
+        return total_imported, total_failed
 
     def shutdown(self, lib):
         """Clean up when plugin is disabled."""
