@@ -63,6 +63,17 @@ Use `beet plex_smartplaylists` to generate or manage custom playlists in Plex. T
 - **Playlist to Collection**: `beet plexplaylist2collection` converts a Plex playlist to a collection. Use the `-m` flag to specify the playlist name.
 - **Album Collage**: `beet plexcollage` creates a collage of most played albums. Use the `-i` flag to specify the number of days and `-g` flag to specify the grid size.
 
+### Manual Import for Failed Tracks
+The plugin creates detailed import logs for each playlist import session. You can manually process failed imports using:
+
+- `beet plex_smartplaylists --import-failed`: Process all import logs and attempt manual matching for failed tracks
+- `beet plex_smartplaylists --import-failed --log-file playlist_name_import.log`: Process a specific log file
+
+This is especially useful when:
+- You've added new music to your library and want to retry matching previously failed tracks
+- You want to manually match specific tracks from a particular playlist's import log
+- You need to clean up import logs by removing successfully matched tracks
+
 ## Introduction
 
 This plugin allows you to sync your Plex library with beets, create playlists based on AI-generated prompts, import playlists from other online services, and more.

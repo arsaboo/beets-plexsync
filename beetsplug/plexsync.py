@@ -503,7 +503,7 @@ class PlexSync(BeetsPlugin):
             help="Generate system-defined or custom smart playlists",
         )
 
-        # Add import-failed option
+        # Add import-failed option and log-file option
         plex_smartplaylists_cmd.parser.add_option(
             "-i",
             "--import-failed",
@@ -511,10 +511,16 @@ class PlexSync(BeetsPlugin):
             default=False,
             help="import previously failed tracks from log files using manual search",
         )
+        plex_smartplaylists_cmd.parser.add_option(
+            "-l",
+            "--log-file",
+            default=None,
+            help="specific log file to process (default: process all logs)",
+        )
 
         def func_plex_smartplaylists(lib, opts, args):
             if opts.import_failed:
-                total_imported, total_failed = self.process_import_logs(lib)
+                total_imported, total_failed = self.process_import_logs(lib, opts.log_file)
                 self._log.info(
                     "Manual import complete - Successfully imported: {}, Failed: {}",
                     total_imported, total_failed
@@ -2308,13 +2314,28 @@ class PlexSync(BeetsPlugin):
         else:
             self._log.warning("No tracks remaining after filtering for {}", playlist_name)
 
-    def process_import_logs(self, lib):
-        """Process all import logs in config directory and attempt manual import."""
-        log_files = Path(self.config_dir).glob("*_import.log")
+    def process_import_logs(self, lib, specific_log=None):
+        """Process import logs in config directory and attempt manual import.
+
+        Args:
+            lib: The beets library instance
+            specific_log: Optional filename to process only one log file
+        """
         total_imported = 0
         total_failed = 0
 
-        for log_file in Path(self.config_dir).glob("*_import.log"):
+        if specific_log:
+            # Process single log file
+            log_path = Path(self.config_dir) / specific_log
+            if not log_path.exists():
+                self._log.error("Log file not found: {}", specific_log)
+                return total_imported, total_failed
+            log_files = [log_path]
+        else:
+            # Process all log files
+            log_files = Path(self.config_dir).glob("*_import.log")
+
+        for log_file in log_files:
             playlist_name = log_file.stem.replace("_import", "").replace("_", " ").title()
             self._log.info("Processing failed imports for playlist: {}", playlist_name)
 
