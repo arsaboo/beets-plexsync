@@ -19,7 +19,7 @@ class PlexJSONEncoder(json.JSONEncoder):
             try:
                 encoded = {
                     '_type': obj.__class__.__name__,
-                    'plex_ratingkey': getattr(obj, 'ratingKey', None),
+                    'plex_ratingkey': getattr(obj, 'ratingKey', None),  # Use ratingKey from Plex but encode as plex_ratingkey
                     'title': getattr(obj, 'title', ''),
                     'parentTitle': getattr(obj, 'parentTitle', ''),
                     'originalTitle': getattr(obj, 'originalTitle', ''),
@@ -27,10 +27,10 @@ class PlexJSONEncoder(json.JSONEncoder):
                     'viewCount': getattr(obj, 'viewCount', 0),
                     'lastViewedAt': obj.lastViewedAt.isoformat() if getattr(obj, 'lastViewedAt', None) else None,
                 }
-                logger.debug('Encoded Plex object: %s -> %s', obj.title, encoded)
+                logger.debug('Encoded Plex object: {} -> {}', obj.title, encoded)
                 return encoded
             except AttributeError as e:
-                logger.error('Failed to encode Plex object: %s', e)
+                logger.error('Failed to encode Plex object: {}', e)
                 return None
         elif isinstance(obj, datetime):
             return obj.isoformat()
@@ -42,8 +42,9 @@ class PlexJSONEncoder(json.JSONEncoder):
         return super().default(obj)
 
 class Cache:
-    def __init__(self, db_path):
+    def __init__(self, db_path, plugin_instance):
         self.db_path = db_path
+        self.plugin = plugin_instance  # Store reference to plugin instance
         logger.debug('Initializing cache at: {}', db_path)
         self._initialize_db()
 
@@ -106,8 +107,8 @@ class Cache:
                 )
                 row = cursor.fetchone()
                 if row:
-                    rating_key, created_at = row
-                    if rating_key == -1:  # Negative cache entry
+                    plex_ratingkey, created_at = row
+                    if plex_ratingkey == -1:  # Negative cache entry
                         created = datetime.fromisoformat(created_at)
                         if datetime.now() - created > timedelta(days=7):
                             # Expired negative entry, remove and return None
@@ -118,8 +119,8 @@ class Cache:
                             return None
                     else:  # Positive cache entry - verify track still exists
                         try:
-                            # This will raise NotFound if track doesn't exist
-                            self.music.fetchItem(rating_key)
+                            # Use plugin's music library reference to check track
+                            self.plugin.music.fetchItem(plex_ratingkey)
                         except Exception:
                             # Track no longer exists, remove from cache
                             cursor.execute('DELETE FROM cache WHERE query = ?', (query,))
@@ -129,7 +130,7 @@ class Cache:
                             return None
 
                     logger.debug('Cache hit for query: {}', self._sanitize_query_for_log(query))
-                    return rating_key
+                    return plex_ratingkey
                 logger.debug('Cache miss for query: {}', self._sanitize_query_for_log(query))
                 return None
         except Exception as e:

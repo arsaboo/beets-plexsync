@@ -86,9 +86,9 @@ class PlexSync(BeetsPlugin):
         self.llm_client = None
         self.search_llm = None
 
-        # Initialize cache with a 30-day expiration
+        # Initialize cache with plugin instance reference
         cache_path = os.path.join(self.config_dir, 'plexsync_cache.db')
-        self.cache = Cache(cache_path)
+        self.cache = Cache(cache_path, self)
 
         # Call the setup methods
         try:
