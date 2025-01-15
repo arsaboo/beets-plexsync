@@ -790,7 +790,7 @@ class PlexSync(BeetsPlugin):
     def search_plex_track(self, item):
         """Fetch the Plex track key."""
         tracks = self.music.searchTracks(
-            **{"album.title": item.album, "track.title": item.title}
+            **{"album.title": item.album, "track.title": item.title}, limit=50
         )
         if len(tracks) == 1:
             return tracks[0]
@@ -1048,14 +1048,14 @@ class PlexSync(BeetsPlugin):
         artist = song["artist"].split(",")[0]
         try:
             if song["album"] is None:
-                tracks = self.music.searchTracks(**{"track.title": song["title"]})
+                tracks = self.music.searchTracks(**{"track.title": song["title"]}, limit=50)
             else:
                 tracks = self.music.searchTracks(
-                    **{"album.title": song["album"], "track.title": song["title"]}
+                    **{"album.title": song["album"], "track.title": song["title"]}, limit=50
                 )
                 if len(tracks) == 0:
                     song["title"] = re.sub(r"\(.*\)", "", song["title"]).strip()
-                    tracks = self.music.searchTracks(**{"track.title": song["title"]})
+                    tracks = self.music.searchTracks(**{"track.title": song["title"]}, limit=50)
         except Exception as e:
             self._log.debug(
                 "Error searching for {} - {}. Error: {}",
@@ -1111,13 +1111,13 @@ class PlexSync(BeetsPlugin):
             # Try search with cleaned values
             try:
                 if cleaned_song["album"] is None:
-                    tracks = self.music.searchTracks(**{"track.title": cleaned_song["title"]})
+                    tracks = self.music.searchTracks(**{"track.title": cleaned_song["title"]}, limit=50)
                 else:
                     tracks = self.music.searchTracks(
                         **{
                             "album.title": cleaned_song["album"],
                             "track.title": cleaned_song["title"]
-                        }
+                        }, limit=50
                     )
                 if tracks:
                     self._log.debug("Found match using cleaned metadata: {} - {} - {}",
@@ -1146,10 +1146,10 @@ class PlexSync(BeetsPlugin):
                     yt_song["album"], yt_song["artist"], yt_song["title"])
                 try:
                     if yt_song["album"] is None:
-                        tracks = self.music.searchTracks(**{"track.title": yt_song["title"]})
+                        tracks = self.music.searchTracks(**{"track.title": yt_song["title"]}, limit=50)
                     else:
                         tracks = self.music.searchTracks(
-                            **{"album.title": yt_song["album"], "track.title": yt_song["title"]}
+                            **{"album.title": yt_song["album"], "track.title": yt_song["title"]}, limit=50
                         )
                     if tracks:
                         if len(tracks) == 1:
