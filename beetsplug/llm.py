@@ -86,11 +86,11 @@ def search_track_info(query: str):
             return structured_data
 
         except (json.JSONDecodeError, ValidationError) as e:
-            logger.error("JSON Parsing Error: {}", e)
+            logger.error("JSON Parsing Error: {}", str(e))
             return None  # Return None if JSON is invalid
 
     except requests.exceptions.RequestException as e:
-        logger.error("Request Error: {}", e)
+        logger.error("Request Error: {}", str(e))
         return None  # Return None on API failure
 
 def clean_json_string(json_string: str):
@@ -107,7 +107,7 @@ def clean_json_string(json_string: str):
     try:
         json_string = repair_json(json_string)
     except Exception as e:
-        logger.error("Error repairing JSON: {}", e)
+        logger.error("Error repairing JSON: {}", str(e))
 
     return json_string
 
