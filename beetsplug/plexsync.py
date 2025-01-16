@@ -1091,7 +1091,12 @@ class PlexSync(BeetsPlugin):
 
         # Try LLM cleaning first if configured
         if not llm_attempted and self.search_llm and config["plexsync"]["use_llm_search"].get(bool):
-            cleaned_metadata = search_track_info(song["title"])
+            # Create a search query with all available metadata
+            search_query = f"{song['title']} by {song['artist']}"
+            if song.get('album'):
+                search_query += f" from {song['album']}"
+
+            cleaned_metadata = search_track_info(search_query)
             if cleaned_metadata:
                 cleaned_song = {
                     "title": cleaned_metadata.get("title", song["title"]),
