@@ -30,7 +30,7 @@ from beets.plugins import BeetsPlugin
 from beets.ui import input_, print_
 from bs4 import BeautifulSoup
 from jiosaavn import JioSaavn
-from beetsplug.llm import clean_search_string, setup_llm
+from beetsplug.llm import clean_search_string, setup_llm, search_track_info
 from openai import OpenAI
 from plexapi import exceptions
 from plexapi.server import PlexServer
@@ -134,9 +134,11 @@ class PlexSync(BeetsPlugin):
                 "model": "gpt-3.5-turbo",
                 "base_url": "",  # Optional, for other providers
                 "search": {
+                    "provider": "ollama",
                     "api_key": "",  # Will use base key if empty
-                    "base_url": "http://localhost:11434/v1",  # Ollama default URL
-                    "model": "mistral",  # Default model for search
+                    "base_url": "http://192.168.2.162:3006/api/search",  # Override base_url for search
+                    "model": "qwen2.5:72b-instruct",  # Override model for search
+                    "embedding_model": "snowflake-arctic-embed2:latest"  # Embedding model
                 }
             }
         )
@@ -1089,49 +1091,15 @@ class PlexSync(BeetsPlugin):
 
         # Try LLM cleaning first if configured
         if not llm_attempted and self.search_llm and config["plexsync"]["use_llm_search"].get(bool):
-            cleaned_title, cleaned_album, cleaned_artist = clean_search_string(
-                self.search_llm,
-                title=song.get("title"),
-                album=song.get("album"),
-                artist=song.get("artist")
-            )
-
-            # Create a new dict with cleaned values
-            cleaned_song = dict(song)
-            if cleaned_title != song.get("title"):
-                self._log.debug("Using LLM cleaned title: {} -> {}", song["title"], cleaned_title)
-                cleaned_song["title"] = cleaned_title
-            if cleaned_album and cleaned_album != "None" and cleaned_album != song.get("album"):
-                self._log.debug("Using LLM cleaned album: {} -> {}", song["album"], cleaned_album)
-                cleaned_song["album"] = cleaned_album
-            if cleaned_artist != song.get("artist"):
-                self._log.debug("Using LLM cleaned artist: {} -> {}", song["artist"], cleaned_artist)
-                cleaned_song["artist"] = cleaned_artist
-
-            # Try search with cleaned values
-            try:
-                if cleaned_song["album"] is None:
-                    tracks = self.music.searchTracks(**{"track.title": cleaned_song["title"]}, limit=50)
-                else:
-                    tracks = self.music.searchTracks(
-                        **{
-                            "album.title": cleaned_song["album"],
-                            "track.title": cleaned_song["title"]
-                        }, limit=50
-                    )
-                if tracks:
-                    self._log.debug("Found match using cleaned metadata: {} - {} - {}",
-                        cleaned_song["album"], cleaned_song["artist"], cleaned_song["title"])
-                    if len(tracks) == 1:
-                        self._cache_result(cache_key, tracks[0])
-                        return tracks[0]
-                    # Continue with normal matching logic using cleaned values
-                    result = self._process_matches(tracks, cleaned_song, manual_search)
-                    if result:
-                        self._cache_result(cache_key, result)
-                        return result
-            except Exception as e:
-                self._log.debug("Search with cleaned metadata failed: {}", e)
+            cleaned_metadata = search_track_info(song["title"])
+            if cleaned_metadata:
+                cleaned_song = {
+                    "title": cleaned_metadata.get("title", song["title"]),
+                    "album": cleaned_metadata.get("album", song["album"]),
+                    "artist": cleaned_metadata.get("artist", song["artist"])
+                }
+                self._log.debug("Using LLM cleaned metadata: {}", cleaned_song)
+                return self.search_plex_song(cleaned_song, manual_search, llm_attempted=True)
 
         # Finally try manual search if enabled
         if manual_search:
