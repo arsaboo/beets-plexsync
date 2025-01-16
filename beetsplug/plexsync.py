@@ -30,7 +30,7 @@ from beets.plugins import BeetsPlugin
 from beets.ui import input_, print_
 from bs4 import BeautifulSoup
 from jiosaavn import JioSaavn
-from beetsplug.llm import setup_llm, search_track_info
+from beetsplug.llm import search_track_info
 from openai import OpenAI
 from plexapi import exceptions
 from plexapi.server import PlexServer
@@ -94,7 +94,7 @@ class PlexSync(BeetsPlugin):
         try:
             self.setup_llm()
             if config["plexsync"]["use_llm_search"].get(bool):
-                self.search_llm = setup_llm("search")
+                self.search_llm = self.llm_client  # Use llm_client directly
         except Exception as e:
             self._log.error("Failed to set up LLM client: {}", e)
             self.llm_client = None
