@@ -56,7 +56,7 @@ def search_track_info(query: str):
 
     try:
         response = requests.post(base_url, json=payload)
-        logger.debug(f"API Response: {response.text}")
+        logger.debug("API Response: {}", response.text)
         if not response.text.strip():
             logger.error("Error: Received empty response from API")
             return None  # Return None if no response
@@ -86,11 +86,11 @@ def search_track_info(query: str):
             return structured_data
 
         except (json.JSONDecodeError, ValidationError) as e:
-            logger.error(f"JSON Parsing Error: {e}")
+            logger.error("JSON Parsing Error: {}", e)
             return None  # Return None if JSON is invalid
 
     except requests.exceptions.RequestException as e:
-        logger.error(f"Request Error: {e}")
+        logger.error("Request Error: {}", e)
         return None  # Return None on API failure
 
 def clean_json_string(json_string: str):
@@ -107,7 +107,7 @@ def clean_json_string(json_string: str):
     try:
         json_string = repair_json(json_string)
     except Exception as e:
-        logger.error(f"Error repairing JSON: {e}")
+        logger.error("Error repairing JSON: {}", e)
 
     return json_string
 
