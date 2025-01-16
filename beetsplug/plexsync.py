@@ -30,7 +30,7 @@ from beets.plugins import BeetsPlugin
 from beets.ui import input_, print_
 from bs4 import BeautifulSoup
 from jiosaavn import JioSaavn
-from beetsplug.llm import clean_search_string, setup_llm, search_track_info
+from beetsplug.llm import setup_llm, search_track_info
 from openai import OpenAI
 from plexapi import exceptions
 from plexapi.server import PlexServer
