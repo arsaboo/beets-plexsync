@@ -2259,7 +2259,7 @@ class PlexSync(BeetsPlugin):
 
                 self._log.debug(
                     "Track rating check: {} - {} - {} (Rating: {})",
-                    track.get('album', 'Unknown'),
+                    track.get('parentTitle', 'Unknown'),
                     track.get('title', 'Unknown'),
                     plex_rating,
                     "excluded" if 0 < plex_rating <= 2 else "included"
@@ -2270,17 +2270,17 @@ class PlexSync(BeetsPlugin):
                     self._log.debug(
                         "Added to playlist: {} - {} - {} (Rating: {})",
                         track.get('artist', 'Unknown'),
-                        track.get('album', 'Unknown'),
+                        track.get('parentTitle', 'Unknown'),
                         track.get('title', 'Unknown'),
                         plex_rating
                     )
                 else:
                     with open(log_file, 'a', encoding='utf-8') as f:
-                        f.write(f"Low rated ({plex_rating}): {track.get('artist', 'Unknown')} - {track.get('album', 'Unknown')} - {track.get('title', 'Unknown')}\n")
+                        f.write(f"Low rated ({plex_rating}): {track.get('artist', 'Unknown')} - {track.get('parentTitle', 'Unknown')} - {track.get('title', 'Unknown')}\n")
             else:
                 not_found_count += 1
                 with open(log_file, 'a', encoding='utf-8') as f:
-                    f.write(f"Not found: {track.get('artist', 'Unknown')} - {track.get('album', 'Unknown')} - {track.get('title', 'Unknown')}\n")
+                    f.write(f"Not found: {track.get('artist', 'Unknown')} - {track.get('parentTitle', 'Unknown')} - {track.get('title', 'Unknown')}\n")
 
         # Write summary at the end of log file
         with open(log_file, 'a', encoding='utf-8') as f:
