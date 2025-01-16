@@ -56,7 +56,7 @@ def search_track_info(query: str):
 
     try:
         response = requests.post(base_url, json=payload)
-        logger.debug("API Response: {}", response.get("message"))
+        logger.debug("API Response: {}", response.json().get("message"))
         if not response.text.strip():
             logger.error("Error: Received empty response from API")
             return None  # Return None if no response
