@@ -2254,12 +2254,29 @@ class PlexSync(BeetsPlugin):
         for track in all_tracks:
             found = self.search_plex_song(track, manual_search)
             if found:
-                rating = float(getattr(found, 'userRating', 0) or 0)
-                if rating == 0 or rating > 2:  # Include unrated or rating > 2
+                # Just use Plex rating directly
+                plex_rating = float(getattr(found, "userRating", 0) or 0)
+
+                self._log.debug(
+                    "Track rating check: {} - {} - {} (Rating: {})",
+                    track.get('album', 'Unknown'),
+                    track.get('title', 'Unknown'),
+                    plex_rating,
+                    "excluded" if 0 < plex_rating <= 2 else "included"
+                )
+
+                if plex_rating == 0 or plex_rating > 2:  # Include unrated or rating > 2
                     matched_songs.append(found)
+                    self._log.debug(
+                        "Added to playlist: {} - {} - {} (Rating: {})",
+                        track.get('artist', 'Unknown'),
+                        track.get('album', 'Unknown'),
+                        track.get('title', 'Unknown'),
+                        plex_rating
+                    )
                 else:
                     with open(log_file, 'a', encoding='utf-8') as f:
-                        f.write(f"Low rated ({rating}): {track.get('artist', 'Unknown')} - {track.get('album', 'Unknown')} - {track.get('title', 'Unknown')}\n")
+                        f.write(f"Low rated ({plex_rating}): {track.get('artist', 'Unknown')} - {track.get('album', 'Unknown')} - {track.get('title', 'Unknown')}\n")
             else:
                 not_found_count += 1
                 with open(log_file, 'a', encoding='utf-8') as f:
