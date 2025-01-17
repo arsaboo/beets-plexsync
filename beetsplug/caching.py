@@ -71,6 +71,16 @@ class Cache:
                 conn.commit()
                 logger.debug('Cache database initialized successfully')
 
+                # Check if cleaned_query column exists, if not, add it
+                cursor.execute("PRAGMA table_info(cache)")
+                columns = [col[1] for col in cursor.fetchall()]
+                if 'cleaned_query' not in columns:
+                    cursor.execute('''
+                        ALTER TABLE cache ADD COLUMN cleaned_query TEXT
+                    ''')
+                    conn.commit()
+                    logger.debug('Added cleaned_query column to cache table')
+
                 # Cleanup old entries on startup
                 self._cleanup_expired()
         except Exception as e:
