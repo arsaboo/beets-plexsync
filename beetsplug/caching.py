@@ -247,15 +247,16 @@ class Cache:
 
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
+                # Store original query
                 cursor.execute(
                     'REPLACE INTO cache (query, plex_ratingkey, cleaned_query) VALUES (?, ?, ?)',
-                    (cache_key, plex_ratingkey, json.dumps(cleaned_key) if cleaned_key else None)
+                    (str(cache_key), int(plex_ratingkey), cleaned_key)
                 )
                 # Also store an entry with the cleaned query if available
                 if cleaned_key and cleaned_key != cache_key:
                     cursor.execute(
                         'REPLACE INTO cache (query, plex_ratingkey, cleaned_query) VALUES (?, ?, ?)',
-                        (cleaned_key, plex_ratingkey, None)  # No need to store cleaned_query for already cleaned entry
+                        (str(cleaned_key), int(plex_ratingkey), None)
                     )
                 conn.commit()
                 logger.debug('Cached result for query: {} (cleaned: {})',

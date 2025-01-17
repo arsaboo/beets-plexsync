@@ -959,14 +959,14 @@ class PlexSync(BeetsPlugin):
                     self._log.debug("Please sync Plex library again")
                     continue
 
-    def _cache_result(self, cache_key, result):
+    def _cache_result(self, cache_key, result, cleaned_metadata=None):
         """Helper method to safely cache search results."""
         if not cache_key:
             return
 
         try:
             ratingKey = result.ratingKey if hasattr(result, "ratingKey") else result
-            self.cache.set(cache_key, ratingKey)
+            self.cache.set(cache_key, ratingKey, cleaned_metadata)
         except Exception as e:
             self._log.error("Failed to cache result: {}", e)
 
@@ -1102,8 +1102,6 @@ class PlexSync(BeetsPlugin):
                     "artist": cleaned_metadata.get("artist", song["artist"])
                 }
                 self._log.debug("Using LLM cleaned metadata: {}", cleaned_song)
-                cleaned_cache_key = self.cache._make_cache_key(cleaned_song)
-                self._cache_result(cleaned_cache_key, cleaned_song)  # Cache cleaned metadata
                 return self.search_plex_song(cleaned_song, manual_search, llm_attempted=True)
 
         # Finally try manual search if enabled
