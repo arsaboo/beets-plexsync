@@ -126,9 +126,10 @@ spotify:
       model: "gpt-3.5-turbo"
       base_url: "https://api.openai.com/v1"  # Optional, for other providers
       search:
-        api_key: ""  # Will use base key if empty
-        base_url: "http://localhost:11434/v1"  # Ollama default URL
-        model: "mistral"  # Default model for search
+        api_key: "ollama"  # optional for local models; will use base key if empty
+        base_url: "http://192.168.2.162:3006/api/search"  # Override base_url for search
+        model: "qwen2.5:latest"  # Override model for search
+        embedding_model: "snowflake-arctic-embed2:latest"  # Embedding model
   ```
 
   You can get started with `beet plexsonic -p "YOUR_PROMPT"` to create the playlist based on YOUR_PROMPT. The default playlist name is `SonicSage` (wink wink), you can modify it using `-m` flag. By default, it requests 10 tracks from the AI model. Use the `-n` flag to change the number of tracks requested. Finally, if you prefer to clear the playlist before adding the new songs, you can add `-c` flag. So, to create a new classical music playlist, you can use something like `beet plexsonic -c -n 10 -p "classical music, romanticism era, like Schubert, Chopin, Liszt"`.
@@ -168,12 +169,14 @@ spotify:
 </p>
 
 ## Advanced
-Plex matching may be less than perfect and it can miss tracks if the tags don't match perfectly. You can enable manual search to improve the matching by enabling `manual_search` in your config (default: `False`):
+Plex matching may be less than perfect and it can miss tracks if the tags don't match perfectly. There are few tools you can use to improve searching:
+* You can enable manual search to improve the matching by enabling `manual_search` in your config (default: `False`).
+* You can enable a Perplexity-style LLM search. This is currently tested on [Perplexica](https://github.com/ItzCrazyKns/Perplexica). See `llm config above.
 
 ```yaml
 plexsync:
   manual_search: yes
-  use_llm_search: yes  # Enable LLM search cleaning
+  use_llm_search: yes  # Enable LLM searching; see llm config
   playlists:
     defaults:
       max_tracks: 20
