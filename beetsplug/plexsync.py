@@ -965,12 +965,10 @@ class PlexSync(BeetsPlugin):
             return
 
         try:
-            if result is None:
-                self.cache.set(cache_key, -1)  # Use -1 to indicate not found
-            else:
-                self.cache.set(cache_key, result.ratingKey)
+            ratingKey = result.ratingKey if hasattr(result, "ratingKey") else result
+            self.cache.set(cache_key, ratingKey)
         except Exception as e:
-            self._log.debug("Failed to cache result: {}", e)
+            self._log.error("Failed to cache result: {}", e)
 
     def _handle_manual_search(self, sorted_tracks, song):
         """Helper function to handle manual search."""
@@ -2382,3 +2380,4 @@ class PlexSync(BeetsPlugin):
         """Clean up when plugin is disabled."""
         if self.loop and not self.loop.is_closed():
             self.close()
+```python
