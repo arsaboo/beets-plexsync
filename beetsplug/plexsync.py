@@ -972,10 +972,6 @@ class PlexSync(BeetsPlugin):
         except Exception as e:
             self._log.debug("Failed to cache result: {}", e)
 
-    def _make_cache_key(self, song):
-        """Create a cache key from song metadata."""
-        return json.dumps(sorted({k: v or "" for k, v in song.items()}.items()))
-
     def _handle_manual_search(self, sorted_tracks, song):
         """Helper function to handle manual search."""
         print_(
@@ -998,7 +994,7 @@ class PlexSync(BeetsPlugin):
             return self.manual_track_search(song)
         selected_track = sorted_tracks[sel - 1][0] if sel > 0 else None
         if selected_track:
-            cache_key = self._make_cache_key(song)
+            cache_key = self.cache._make_cache_key(song)
             self._cache_result(cache_key, selected_track)
         return selected_track
 
@@ -1021,7 +1017,7 @@ class PlexSync(BeetsPlugin):
         }
         result = self.search_plex_song(song_dict, manual_search=True)
         if result and original_song:
-            cache_key = self._make_cache_key(original_song)
+            cache_key = self.cache._make_cache_key(original_song)
             self._cache_result(cache_key, result)
         return result
 
@@ -1030,8 +1026,8 @@ class PlexSync(BeetsPlugin):
         if manual_search is None:
             manual_search = config["plexsync"]["manual_search"].get(bool)
 
-        # Create a clean song dict for cache key
-        cache_key = self._make_cache_key(song)
+        # Create a clean song dict for cache key - only essential fields
+        cache_key = self.cache._make_cache_key(song)
 
         # Check cache first
         cached_ratingKey = self.cache.get(cache_key)

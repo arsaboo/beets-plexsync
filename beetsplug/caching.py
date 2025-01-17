@@ -96,14 +96,30 @@ class Cache:
         except Exception:
             return "<unserializable query>"
 
+    def _make_cache_key(self, query_data):
+        """Create a consistent cache key regardless of input type."""
+        if isinstance(query_data, str):
+            return query_data
+        elif isinstance(query_data, dict):
+            # Only use essential fields for the key
+            key_data = {
+                "title": query_data.get("title", "").strip().lower(),
+                "artist": query_data.get("artist", "").strip().lower(),
+                "album": query_data.get("album", "").strip().lower()
+            }
+            # Sort to ensure consistent order
+            return json.dumps(sorted(key_data.items()))
+        return str(query_data)
+
     def get(self, query):
         """Retrieve cached result for a given query."""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
+                cache_key = self._make_cache_key(query)
                 cursor.execute(
                     'SELECT plex_ratingkey, created_at FROM cache WHERE query = ?',
-                    (query,)
+                    (cache_key,)
                 )
                 row = cursor.fetchone()
                 if row:
@@ -140,9 +156,8 @@ class Cache:
     def set(self, query, plex_ratingkey):
         """Store the plex_ratingkey for a given query in the cache."""
         try:
-            sanitized_query = self._sanitize_query_for_log(query)
-
-            if not query:
+            cache_key = self._make_cache_key(query)
+            if not cache_key:
                 logger.debug('Skipping cache for empty query')
                 return None
 
@@ -150,12 +165,13 @@ class Cache:
                 cursor = conn.cursor()
                 cursor.execute(
                     'REPLACE INTO cache (query, plex_ratingkey) VALUES (?, ?)',
-                    (query, plex_ratingkey)
+                    (cache_key, plex_ratingkey)
                 )
                 conn.commit()
-                logger.debug('Caching result for query: {}', sanitized_query)
+                logger.debug('Caching result for query: {}', self._sanitize_query_for_log(cache_key))
         except Exception as e:
-            logger.error('Cache storage failed for query {}: {}', sanitized_query, str(e))
+            logger.error('Cache storage failed for query {}: {}',
+                        self._sanitize_query_for_log(cache_key), str(e))
             return None
 
     def clear(self):
