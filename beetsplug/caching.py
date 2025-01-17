@@ -128,7 +128,7 @@ class Cache:
                         created = datetime.fromisoformat(created_at)
                         if datetime.now() - created > timedelta(days=7):
                             # Expired negative entry, remove and return None
-                            cursor.execute('DELETE FROM cache WHERE query = ?', (query,))
+                            cursor.execute('DELETE FROM cache WHERE query = ?', (cache_key,))
                             conn.commit()
                             logger.debug('Expired negative cache entry removed for query: {}',
                                        self._sanitize_query_for_log(query))
@@ -139,7 +139,7 @@ class Cache:
                             self.plugin.music.fetchItem(plex_ratingkey)
                         except Exception:
                             # Track no longer exists, remove from cache
-                            cursor.execute('DELETE FROM cache WHERE query = ?', (query,))
+                            cursor.execute('DELETE FROM cache WHERE query = ?', (cache_key,))
                             conn.commit()
                             logger.debug('Removed cache entry for deleted track: {}',
                                        self._sanitize_query_for_log(query))

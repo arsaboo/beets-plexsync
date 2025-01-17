@@ -995,8 +995,9 @@ class PlexSync(BeetsPlugin):
         selected_track = sorted_tracks[sel - 1][0] if sel > 0 else None
         if selected_track:
             track_ratingkey = selected_track.ratingKey if hasattr(selected_track, 'ratingKey') else selected_track
+            cache_key = self.cache._make_cache_key(song)  # Ensure consistent cache key
             self._log.debug("User selected track, caching positive result. RatingKey: {}", track_ratingkey)
-            self._cache_result(song, track_ratingkey)
+            self._cache_result(cache_key, track_ratingkey)
         return selected_track
 
     def manual_track_search(self, original_song=None):
@@ -1018,7 +1019,7 @@ class PlexSync(BeetsPlugin):
         }
         result = self.search_plex_song(song_dict, manual_search=True)
         if result and original_song:
-            cache_key = self.cache._make_cache_key(original_song)
+            cache_key = self.cache._make_cache_key(original_song)  # Ensure consistent cache key
             self._cache_result(cache_key, result)
         return result
 
