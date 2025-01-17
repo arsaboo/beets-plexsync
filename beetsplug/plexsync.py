@@ -1024,27 +1024,40 @@ class PlexSync(BeetsPlugin):
         return result
 
     def search_plex_song(self, song, manual_search=None, llm_attempted=False):
-        """Fetch the Plex track key."""
+        """Fetch the Plex track key with fallback options.
+
+        Args:
+            song: Dictionary containing song metadata
+            manual_search: Whether to enable manual search (defaults to config value)
+            llm_attempted: Whether LLM cleaning has been attempted already
+        """
         if manual_search is None:
             manual_search = config["plexsync"]["manual_search"].get(bool)
 
-        # Create a clean song dict for cache key - only essential fields
-        cache_key = self.cache._make_cache_key(song)
-
         # Check cache first
-        cached_ratingKey = self.cache.get(cache_key)
-        if cached_ratingKey is not None:
-            if cached_ratingKey == -1:
-                return None
-            try:
-                # Use music.fetchItem instead of plex.fetchItem
-                return self.music.fetchItem(cached_ratingKey)
-            except Exception as e:
-                self._log.debug("Failed to fetch cached item {}: {}", cached_ratingKey, e)
-                self.cache.set(cache_key, None)  # Clear invalid cache entry
-                # Continue with normal search
+        cache_key = self.cache._make_cache_key(song)
+        cached_result = self.cache.get(cache_key)
+        if cached_result is not None:
+            if isinstance(cached_result, tuple):
+                rating_key, cleaned_metadata = cached_result
+                if rating_key == -1:
+                    if cleaned_metadata and not llm_attempted:
+                        self._log.debug("Using cached cleaned metadata: {}", cleaned_metadata)
+                        return self.search_plex_song(cleaned_metadata, manual_search, llm_attempted=True)
+                    return None
+                try:
+                    return self.music.fetchItem(rating_key)
+                except Exception as e:
+                    self._log.debug("Failed to fetch cached item {}: {}", rating_key, e)
+            else:  # Legacy cache entry
+                if cached_result == -1:
+                    return None
+                try:
+                    return self.music.fetchItem(cached_result)
+                except Exception as e:
+                    self._log.debug("Failed to fetch cached item {}: {}", cached_result, e)
 
-        # Try regular search first
+        # Try regular search
         artist = song["artist"].split(",")[0]
         try:
             if song["album"] is None:
@@ -1054,6 +1067,7 @@ class PlexSync(BeetsPlugin):
                     **{"album.title": song["album"], "track.title": song["title"]}, limit=50
                 )
                 if len(tracks) == 0:
+                    # Try with simplified title (no parentheses)
                     song["title"] = re.sub(r"\(.*\)", "", song["title"]).strip()
                     tracks = self.music.searchTracks(**{"track.title": song["title"]}, limit=50)
         except Exception as e:
@@ -1065,15 +1079,22 @@ class PlexSync(BeetsPlugin):
             )
             return None
 
+        # Process search results
         if len(tracks) == 1:
             result = tracks[0]
             self._cache_result(cache_key, result)
             return result
         elif len(tracks) > 1:
-            sorted_tracks = self.find_closest_match(song, tracks)  # Simply pass the song dict
+            sorted_tracks = self.find_closest_match(song, tracks)
             self._log.debug("Found {} tracks for {}", len(sorted_tracks), song["title"])
+
+            # Try manual search first if enabled and we have matches
             if manual_search and len(sorted_tracks) > 0:
-                return self._handle_manual_search(sorted_tracks, song)
+                manual_result = self._handle_manual_search(sorted_tracks, song)
+                if manual_result:
+                    return manual_result
+
+            # Otherwise try automatic matching
             for track, score in sorted_tracks:
                 if track.originalTitle is not None:
                     plex_artist = track.originalTitle
@@ -1083,13 +1104,8 @@ class PlexSync(BeetsPlugin):
                     self._cache_result(cache_key, track)
                     return track
 
-        # If no match found
-        self._cache_result(cache_key, None)
-        self._log.debug("Track {} not found in Plex library", song["title"])
-
-        # Try LLM cleaning first if configured
+        # Try LLM cleaning if enabled and not already attempted
         if not llm_attempted and self.search_llm and config["plexsync"]["use_llm_search"].get(bool):
-            # Create a search query with all available metadata
             search_query = f"{song['title']} by {song['artist']}"
             if song.get('album'):
                 search_query += f" from {song['album']}"
@@ -1102,25 +1118,26 @@ class PlexSync(BeetsPlugin):
                     "artist": cleaned_metadata.get("artist", song["artist"])
                 }
                 self._log.debug("Using LLM cleaned metadata: {}", cleaned_song)
+
+                # Cache the original query with cleaned metadata
+                self._cache_result(cache_key, None, cleaned_song)
+
+                # Try search with cleaned metadata
                 return self.search_plex_song(cleaned_song, manual_search, llm_attempted=True)
 
-        # Finally try manual search if enabled
+        # Final fallback: try manual search if enabled
         if manual_search:
             self._log.info(
                 "Track {} - {} - {} not found in Plex",
-                song["album"],
-                song["artist"],
+                song.get("album", "Unknown"),
+                song.get("artist", "Unknown"),
                 song["title"],
             )
             if ui.input_yn("Search manually? (Y/n)"):
                 return self.manual_track_search(song)
-        else:
-            self._log.info(
-                "Track {} - {} - {} not found in Plex",
-                song["album"],
-                song["artist"],
-                song["title"],
-            )
+
+        # Store negative result if nothing found
+        self._cache_result(cache_key, None)
         return None
 
     def _process_matches(self, tracks, song, manual_search):
@@ -2381,3 +2398,4 @@ class PlexSync(BeetsPlugin):
         """Clean up when plugin is disabled."""
         if self.loop and not self.loop.is_closed():
             self.close()
+

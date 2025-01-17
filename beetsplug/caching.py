@@ -178,71 +178,27 @@ class Cache:
                 cursor = conn.cursor()
                 cache_key = self._make_cache_key(query)
 
-                # First check if this is a known cleaned query
                 cursor.execute(
-                    'SELECT query, plex_ratingkey FROM cache WHERE cleaned_query = ?',
-                    (cache_key,)
-                )
-                cleaned_row = cursor.fetchone()
-                if cleaned_row:
-                    original_key, plex_ratingkey = cleaned_row
-                    try:
-                        self.plugin.music.fetchItem(plex_ratingkey)
-                        logger.debug('Cache hit for cleaned query: {}', self._sanitize_query_for_log(query))
-                        return plex_ratingkey
-                    except Exception:
-                        pass
-
-                # Try original query
-                cursor.execute(
-                    'SELECT plex_ratingkey, cleaned_query, created_at FROM cache WHERE query = ?',
+                    'SELECT plex_ratingkey, cleaned_query FROM cache WHERE query = ?',
                     (cache_key,)
                 )
                 row = cursor.fetchone()
 
                 if row:
-                    plex_ratingkey, cleaned_query, created_at = row
-                    if plex_ratingkey == -1:  # Negative cache entry
-                        if cleaned_query:  # If we have a cleaned version, try that
-                            cursor.execute(
-                                'SELECT plex_ratingkey FROM cache WHERE query = ?',
-                                (cleaned_query,)
-                            )
-                            cleaned_row = cursor.fetchone()
-                            if cleaned_row and cleaned_row[0] != -1:
-                                try:
-                                    self.plugin.music.fetchItem(cleaned_row[0])
-                                    logger.debug('Cache hit via cleaned metadata: {}',
-                                               self._sanitize_query_for_log(cleaned_query))
-                                    return cleaned_row[0]
-                                except Exception:
-                                    pass
+                    plex_ratingkey, cleaned_metadata_json = row
+                    cleaned_metadata = json.loads(cleaned_metadata_json) if cleaned_metadata_json else None
 
-                        # If no cleaned version or it failed, check expiry
-                        created = datetime.fromisoformat(created_at)
-                        if datetime.now() - created > timedelta(days=7):
-                            cursor.execute('DELETE FROM cache WHERE query = ?', (cache_key,))
-                            conn.commit()
-                            logger.debug('Expired negative cache entry removed for query: {}',
-                                       self._sanitize_query_for_log(query))
-                        return None
-                    else:  # Positive cache entry - verify track exists
-                        try:
-                            self.plugin.music.fetchItem(plex_ratingkey)
-                            logger.debug('Cache hit for query: {}', self._sanitize_query_for_log(query))
-                            return plex_ratingkey
-                        except Exception:
-                            # Remove invalid entries
-                            cursor.execute('DELETE FROM cache WHERE query = ?', (cache_key,))
-                            if cleaned_query:
-                                cursor.execute('DELETE FROM cache WHERE query = ?', (cleaned_query,))
-                            conn.commit()
-                            logger.debug('Removed invalid cache entries for track: {}',
-                                       self._sanitize_query_for_log(query))
-                            return None
+                    # Return tuple of rating key and cleaned metadata
+                    logger.debug('Cache hit for query: {} (rating_key: {}, cleaned: {})',
+                               self._sanitize_query_for_log(cache_key),
+                               plex_ratingkey,
+                               cleaned_metadata)
+                    return (plex_ratingkey, cleaned_metadata)
 
-                logger.debug('Cache miss for query: {}', self._sanitize_query_for_log(query))
+                logger.debug('Cache miss for query: {}',
+                            self._sanitize_query_for_log(cache_key))
                 return None
+
         except Exception as e:
             logger.error('Cache lookup failed: {}', str(e))
             return None
@@ -255,30 +211,23 @@ class Cache:
                 logger.debug('Skipping cache for empty query')
                 return None
 
-            cleaned_key = None
-            if cleaned_metadata:
-                cleaned_key = self._make_cache_key(cleaned_metadata)
-
             # Use -1 for negative cache entries (when plex_ratingkey is None)
             rating_key = -1 if plex_ratingkey is None else int(plex_ratingkey)
 
+            # Store cleaned metadata as JSON string
+            cleaned_json = json.dumps(cleaned_metadata) if cleaned_metadata else None
+
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                # Store original query with link to cleaned version
                 cursor.execute(
                     'REPLACE INTO cache (query, plex_ratingkey, cleaned_query) VALUES (?, ?, ?)',
-                    (str(cache_key), rating_key, cleaned_key)
+                    (str(cache_key), rating_key, cleaned_json)
                 )
-                # Store cleaned version independently if available
-                if cleaned_key and cleaned_key != cache_key:
-                    cursor.execute(
-                        'REPLACE INTO cache (query, plex_ratingkey, cleaned_query) VALUES (?, ?, ?)',
-                        (str(cleaned_key), rating_key, None)  # Cleaned version doesn't need another cleaned_query
-                    )
                 conn.commit()
-                logger.debug('Cached result for query: {} (cleaned: {})',
+                logger.debug('Cached result for query: {} (rating_key: {}, cleaned: {})',
                            self._sanitize_query_for_log(cache_key),
-                           self._sanitize_query_for_log(cleaned_key) if cleaned_key else "None")
+                           rating_key,
+                           cleaned_metadata)
         except Exception as e:
             logger.error('Cache storage failed for query {}: {}',
                         self._sanitize_query_for_log(cache_key), str(e))
