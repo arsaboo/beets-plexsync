@@ -54,28 +54,25 @@ class Cache:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
 
+                # Create the table if it doesn't exist
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS cache (
+                        query TEXT PRIMARY KEY,
+                        plex_ratingkey INTEGER,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                ''')
+                # Add indexes
+                cursor.execute('''
+                    CREATE INDEX IF NOT EXISTS idx_created_at ON cache(created_at)
+                ''')
+                conn.commit()
+                logger.debug('Cache database initialized successfully')
+
                 # Check if cleaned_query column exists, if not, add it
                 cursor.execute("PRAGMA table_info(cache)")
                 columns = [col[1] for col in cursor.fetchall()]
                 if 'cleaned_query' not in columns:
-                    cursor.execute('''
-                        CREATE TABLE IF NOT EXISTS cache (
-                            query TEXT PRIMARY KEY,
-                            plex_ratingkey INTEGER,
-                            cleaned_query TEXT,
-                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                        )
-                    ''')
-                    # Add indexes
-                    cursor.execute('''
-                        CREATE INDEX IF NOT EXISTS idx_created_at ON cache(created_at)
-                    ''')
-                    cursor.execute('''
-                        CREATE INDEX IF NOT EXISTS idx_cleaned_query ON cache(cleaned_query)
-                    ''')
-                    conn.commit()
-                    logger.debug('Cache database initialized successfully')
-                else:
                     cursor.execute('''
                         ALTER TABLE cache ADD COLUMN cleaned_query TEXT
                     ''')
