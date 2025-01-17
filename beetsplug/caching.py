@@ -103,9 +103,9 @@ class Cache:
         elif isinstance(query_data, dict):
             # Only use essential fields for the key
             key_data = {
-                "title": query_data.get("title", "").strip().lower(),
-                "artist": query_data.get("artist", "").strip().lower(),
-                "album": query_data.get("album", "").strip().lower()
+                "title": (query_data.get("title") or "").strip().lower(),
+                "artist": (query_data.get("artist") or "").strip().lower(),
+                "album": (query_data.get("album") or "").strip().lower()
             }
             # Sort to ensure consistent order
             return json.dumps(sorted(key_data.items()))
