@@ -245,18 +245,21 @@ class Cache:
             if cleaned_metadata:
                 cleaned_key = self._make_cache_key(cleaned_metadata)
 
+            # Use -1 for negative cache entries (when plex_ratingkey is None)
+            rating_key = -1 if plex_ratingkey is None else int(plex_ratingkey)
+
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 # Store original query
                 cursor.execute(
                     'REPLACE INTO cache (query, plex_ratingkey, cleaned_query) VALUES (?, ?, ?)',
-                    (str(cache_key), int(plex_ratingkey), cleaned_key)
+                    (str(cache_key), rating_key, cleaned_key)
                 )
                 # Also store an entry with the cleaned query if available
                 if cleaned_key and cleaned_key != cache_key:
                     cursor.execute(
                         'REPLACE INTO cache (query, plex_ratingkey, cleaned_query) VALUES (?, ?, ?)',
-                        (str(cleaned_key), int(plex_ratingkey), None)
+                        (str(cleaned_key), rating_key, None)
                     )
                 conn.commit()
                 logger.debug('Cached result for query: {} (cleaned: {})',
