@@ -137,6 +137,8 @@ class Cache:
                         try:
                             # Use plugin's music library reference to check track
                             self.plugin.music.fetchItem(plex_ratingkey)
+                            logger.debug('Cache hit for query: {}', self._sanitize_query_for_log(query))
+                            return plex_ratingkey
                         except Exception:
                             # Track no longer exists, remove from cache
                             cursor.execute('DELETE FROM cache WHERE query = ?', (cache_key,))
