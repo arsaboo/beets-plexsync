@@ -1040,20 +1040,22 @@ class PlexSync(BeetsPlugin):
         if cached_result is not None:
             if isinstance(cached_result, tuple):
                 rating_key, cleaned_metadata = cached_result
-                if rating_key == -1:
+                if rating_key == -1 or rating_key is None:  # Handle both None and -1
                     if cleaned_metadata and not llm_attempted:
                         self._log.debug("Using cached cleaned metadata: {}", cleaned_metadata)
                         return self.search_plex_song(cleaned_metadata, manual_search, llm_attempted=True)
                     return None
                 try:
-                    return self.music.fetchItem(rating_key)
+                    if rating_key:  # Only try to fetch if we have a valid rating key
+                        return self.music.fetchItem(rating_key)
                 except Exception as e:
                     self._log.debug("Failed to fetch cached item {}: {}", rating_key, e)
             else:  # Legacy cache entry
-                if cached_result == -1:
+                if cached_result == -1 or cached_result is None:
                     return None
                 try:
-                    return self.music.fetchItem(cached_result)
+                    if cached_result:  # Only try to fetch if we have a valid rating key
+                        return self.music.fetchItem(cached_result)
                 except Exception as e:
                     self._log.debug("Failed to fetch cached item {}: {}", cached_result, e)
 
