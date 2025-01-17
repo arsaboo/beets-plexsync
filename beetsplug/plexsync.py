@@ -989,13 +989,15 @@ class PlexSync(BeetsPlugin):
         if sel in ("b", "B"):
             return None
         elif sel in ("s", "S"):
+            self._log.debug("User skipped, storing negative cache result.")
+            self._cache_result(song, None)
             return None
         elif sel in ("e", "E"):
             return self.manual_track_search(song)
         selected_track = sorted_tracks[sel - 1][0] if sel > 0 else None
         if selected_track:
-            cache_key = self.cache._make_cache_key(song)
-            self._cache_result(cache_key, selected_track)
+            self._log.debug("User selected track, caching positive result.")
+            self._cache_result(song, selected_track.ratingKey)
         return selected_track
 
     def manual_track_search(self, original_song=None):
