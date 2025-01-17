@@ -249,7 +249,7 @@ class Cache:
                 cursor = conn.cursor()
                 cursor.execute(
                     'REPLACE INTO cache (query, plex_ratingkey, cleaned_query) VALUES (?, ?, ?)',
-                    (cache_key, plex_ratingkey, cleaned_key)
+                    (cache_key, plex_ratingkey, json.dumps(cleaned_key) if cleaned_key else None)
                 )
                 # Also store an entry with the cleaned query if available
                 if cleaned_key and cleaned_key != cache_key:
