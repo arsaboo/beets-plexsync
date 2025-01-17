@@ -1102,6 +1102,8 @@ class PlexSync(BeetsPlugin):
                     "artist": cleaned_metadata.get("artist", song["artist"])
                 }
                 self._log.debug("Using LLM cleaned metadata: {}", cleaned_song)
+                cleaned_cache_key = self.cache._make_cache_key(cleaned_song)
+                self._cache_result(cleaned_cache_key, cleaned_song)  # Cache cleaned metadata
                 return self.search_plex_song(cleaned_song, manual_search, llm_attempted=True)
 
         # Finally try manual search if enabled

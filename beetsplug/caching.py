@@ -57,12 +57,16 @@ class Cache:
                     CREATE TABLE IF NOT EXISTS cache (
                         query TEXT PRIMARY KEY,
                         plex_ratingkey INTEGER,
+                        cleaned_query TEXT,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 ''')
-                # Add index on created_at for faster cleanup
+                # Add indexes
                 cursor.execute('''
                     CREATE INDEX IF NOT EXISTS idx_created_at ON cache(created_at)
+                ''')
+                cursor.execute('''
+                    CREATE INDEX IF NOT EXISTS idx_cleaned_query ON cache(cleaned_query)
                 ''')
                 conn.commit()
                 logger.debug('Cache database initialized successfully')
@@ -111,66 +115,144 @@ class Cache:
             return json.dumps(sorted(key_data.items()))
         return str(query_data)
 
+    def _verify_track_exists(self, plex_ratingkey, query):
+        """Verify track exists, checking both original and cleaned metadata."""
+        try:
+            # First try direct lookup
+            self.plugin.music.fetchItem(plex_ratingkey)
+            return True
+        except Exception:
+            # If direct lookup fails, check if we have cleaned metadata
+            if self.plugin.search_llm and self.plugin.config["plexsync"]["use_llm_search"].get(bool):
+                try:
+                    # Create search query from available metadata
+                    search_query = ""
+                    if isinstance(query, dict):
+                        parts = []
+                        if query.get("title"): parts.append(query["title"])
+                        if query.get("artist"): parts.append(f"by {query['artist']}")
+                        if query.get("album"): parts.append(f"from {query['album']}")
+                        search_query = " ".join(parts)
+                    else:
+                        search_query = str(query)
+
+                    # Get cleaned metadata
+                    cleaned = self.plugin.search_track_info(search_query)
+                    if cleaned:
+                        # Look for cache entry with cleaned metadata
+                        cleaned_key = self._make_cache_key({
+                            "title": cleaned.get("title", ""),
+                            "album": cleaned.get("album", ""),
+                            "artist": cleaned.get("artist", "")
+                        })
+                        # Check if we have a valid cache entry with cleaned metadata
+                        with sqlite3.connect(self.db_path) as conn:
+                            cursor = conn.cursor()
+                            cursor.execute(
+                                'SELECT plex_ratingkey FROM cache WHERE query = ?',
+                                (cleaned_key,)
+                            )
+                            row = cursor.fetchone()
+                            if row and row[0] != -1:
+                                try:
+                                    self.plugin.music.fetchItem(row[0])
+                                    return True
+                                except Exception:
+                                    pass
+                except Exception as e:
+                    logger.debug('Error checking cleaned metadata: {}', e)
+            return False
+
     def get(self, query):
         """Retrieve cached result for a given query."""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cache_key = self._make_cache_key(query)
+
+                # Try original query first
                 cursor.execute(
-                    'SELECT plex_ratingkey, created_at FROM cache WHERE query = ?',
+                    'SELECT plex_ratingkey, cleaned_query, created_at FROM cache WHERE query = ?',
                     (cache_key,)
                 )
                 row = cursor.fetchone()
+
                 if row:
-                    plex_ratingkey, created_at = row
+                    plex_ratingkey, cleaned_query, created_at = row
                     if plex_ratingkey == -1:  # Negative cache entry
                         created = datetime.fromisoformat(created_at)
                         if datetime.now() - created > timedelta(days=7):
-                            # Expired negative entry, remove and return None
                             cursor.execute('DELETE FROM cache WHERE query = ?', (cache_key,))
                             conn.commit()
                             logger.debug('Expired negative cache entry removed for query: {}',
                                        self._sanitize_query_for_log(query))
                             return None
-                    else:  # Positive cache entry - verify track still exists
+                    else:  # Positive cache entry - verify track exists
                         try:
-                            # Use plugin's music library reference to check track
                             self.plugin.music.fetchItem(plex_ratingkey)
                             logger.debug('Cache hit for query: {}', self._sanitize_query_for_log(query))
                             return plex_ratingkey
                         except Exception:
-                            # Track no longer exists, remove from cache
+                            # If original fails, try cleaned version if available
+                            if cleaned_query:
+                                try:
+                                    cursor.execute(
+                                        'SELECT plex_ratingkey FROM cache WHERE query = ?',
+                                        (cleaned_query,)
+                                    )
+                                    cleaned_row = cursor.fetchone()
+                                    if cleaned_row and cleaned_row[0] != -1:
+                                        try:
+                                            self.plugin.music.fetchItem(cleaned_row[0])
+                                            return cleaned_row[0]
+                                        except Exception:
+                                            pass
+                                except Exception:
+                                    pass
+
+                            # If both fail, remove entries
                             cursor.execute('DELETE FROM cache WHERE query = ?', (cache_key,))
+                            if cleaned_query:
+                                cursor.execute('DELETE FROM cache WHERE query = ?', (cleaned_query,))
                             conn.commit()
-                            logger.debug('Removed cache entry for deleted track: {}',
+                            logger.debug('Removed cache entries for deleted track: {}',
                                        self._sanitize_query_for_log(query))
                             return None
 
-                    logger.debug('Cache hit for query: {}', self._sanitize_query_for_log(query))
-                    return plex_ratingkey
                 logger.debug('Cache miss for query: {}', self._sanitize_query_for_log(query))
                 return None
         except Exception as e:
             logger.error('Cache lookup failed: {}', str(e))
             return None
 
-    def set(self, query, plex_ratingkey):
-        """Store the plex_ratingkey for a given query in the cache."""
+    def set(self, query, plex_ratingkey, cleaned_metadata=None):
+        """Store both original and cleaned metadata in cache."""
         try:
             cache_key = self._make_cache_key(query)
             if not cache_key:
                 logger.debug('Skipping cache for empty query')
                 return None
 
+            cleaned_key = None
+            if cleaned_metadata:
+                cleaned_key = self._make_cache_key(cleaned_metadata)
+
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    'REPLACE INTO cache (query, plex_ratingkey) VALUES (?, ?)',
-                    (cache_key, plex_ratingkey)
+                    'REPLACE INTO cache (query, plex_ratingkey, cleaned_query) VALUES (?, ?, ?)',
+                    (cache_key, plex_ratingkey, cleaned_key)
                 )
+                # Also store an entry with the cleaned query if available
+                if cleaned_key and cleaned_key != cache_key:
+                    cursor.execute(
+                        'REPLACE INTO cache (query, plex_ratingkey, cleaned_query) VALUES (?, ?, ?)',
+                        (cleaned_key, plex_ratingkey, None)  # No need to store cleaned_query for already cleaned entry
+                    )
                 conn.commit()
-                logger.debug('Caching result for query: {}', self._sanitize_query_for_log(cache_key))
+                logger.debug('Cached result for query: {} (cleaned: {})',
+                           self._sanitize_query_for_log(cache_key),
+                           self._sanitize_query_for_log(cleaned_key) if cleaned_key else "None")
         except Exception as e:
             logger.error('Cache storage failed for query {}: {}',
                         self._sanitize_query_for_log(cache_key), str(e))
