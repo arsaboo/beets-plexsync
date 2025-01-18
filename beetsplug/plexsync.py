@@ -2097,20 +2097,35 @@ class PlexSync(BeetsPlugin):
             self._log.debug("Applying inclusion filters...")
             filtered_tracks = self._apply_inclusion_filters(filtered_tracks, filter_config['include'])
 
-        # Apply rating filter if specified
+        # Apply rating filter if specified, but preserve unrated tracks
         if 'min_rating' in filter_config:
             min_rating = filter_config['min_rating']
             original_count = len(filtered_tracks)
-            filtered_tracks = [
+
+            # Separate unrated and rated tracks
+            unrated_tracks = [
+                track for track in filtered_tracks
+                if not hasattr(track, 'userRating') or
+                track.userRating is None or
+                float(track.userRating or 0) == 0
+            ]
+
+            rated_tracks = [
                 track for track in filtered_tracks
                 if hasattr(track, 'userRating') and
+                track.userRating is not None and
                 float(track.userRating or 0) >= min_rating
             ]
+
+            filtered_tracks = rated_tracks + unrated_tracks
+
             self._log.debug(
-                "Rating filter (>= {}): {} -> {} tracks",
+                "Rating filter (>= {}): {} -> {} tracks ({} rated, {} unrated)",
                 min_rating,
                 original_count,
-                len(filtered_tracks)
+                len(filtered_tracks),
+                len(rated_tracks),
+                len(unrated_tracks)
             )
 
         self._log.debug(
@@ -2165,7 +2180,7 @@ class PlexSync(BeetsPlugin):
         for track in filtered_tracks:
             try:
                 beets_item = plex_lookup.get(track.ratingKey)
-                if beets_item and float(getattr(beets_item, "plex_userrating", 0)) > 3:
+                if beets_item:
                     final_tracks.append(beets_item)
             except Exception as e:
                 self._log.debug("Error converting track {}: {}", track.title, e)
@@ -2177,9 +2192,9 @@ class PlexSync(BeetsPlugin):
         unrated_tracks = []
         for track in final_tracks:
             rating = float(getattr(track, 'plex_userrating', 0))
-            if rating >= 6:  # Include all tracks rated 6 or higher
+            if rating > 0:  # Include all rated tracks
                 rated_tracks.append(track)
-            elif rating == 0:  # Only truly unrated tracks
+            else:  # Only truly unrated tracks
                 unrated_tracks.append(track)
 
         self._log.debug("Split into {} rated and {} unrated tracks",
