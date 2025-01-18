@@ -2581,3 +2581,33 @@ class PlexSync(BeetsPlugin):
         if self.loop and not self.loop.is_closed():
             self.close()
 
+def clean_title(title):
+    """Clean up track title by removing common extras and normalizing format.
+
+    Args:
+        title: The title string to clean
+
+    Returns:
+        str: Cleaned title string
+    """
+    # Remove various suffix patterns
+    patterns = [
+        r'\s*\([^)]*\)\s*$',  # Remove trailing parentheses and contents
+        r'\s*\[[^\]]*\]\s*$',  # Remove trailing square brackets and contents
+        r'\s*-\s*[^-]*$',      # Remove trailing dash and text
+        r'\s*\|[^|]*$',        # Remove trailing pipe and text
+        r'\s*feat\.[^,]*',     # Remove "feat." and featured artists
+        r'\s*ft\.[^,]*',       # Remove "ft." and featured artists
+        r'\s*\d+\s*$',         # Remove trailing numbers
+        r'\s+$'                # Remove trailing whitespace
+    ]
+
+    cleaned = title
+    for pattern in patterns:
+        cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
+
+    # Remove redundant spaces
+    cleaned = ' '.join(cleaned.split())
+
+    return cleaned.strip()
+
