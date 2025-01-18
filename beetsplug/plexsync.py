@@ -2134,58 +2134,63 @@ class PlexSync(BeetsPlugin):
         max_tracks = self.get_config_value(dd_config, defaults_cfg, "max_tracks", 20)
         discovery_ratio = self.get_config_value(dd_config, defaults_cfg, "discovery_ratio", 30)
 
-        # Get filters from config
-        filters = dd_config.get("filters", {})
-
-        # Apply filters to similar tracks
-        if filters:
-            similar_tracks = self.apply_playlist_filters(similar_tracks, filters)
-
-        self._log.debug(f"Using preferred genres: {preferred_genres}")
-        self._log.debug(f"Processing {len(similar_tracks)} pre-filtered similar tracks")
-
-        if (
-            "playlists" in config["plexsync"]
-            and "defaults" in config["plexsync"]["playlists"]
-        ):
-            defaults_cfg = config["plexsync"]["playlists"]["defaults"].get({})
-        else:
-            defaults_cfg = {}
-
-        max_tracks = self.get_config_value(dd_config, defaults_cfg, "max_tracks", 20)
-        discovery_ratio = self.get_config_value(
-            dd_config, defaults_cfg, "discovery_ratio", 30
-        )
-
-        # Use lookup dictionary instead of individual queries
+        # Use lookup dictionary to convert similar tracks to beets items first
         matched_tracks = []
         for plex_track in similar_tracks:
             try:
                 beets_item = plex_lookup.get(plex_track.ratingKey)
-                if beets_item and float(getattr(beets_item, "plex_userrating", 0)) > 3:
-                    matched_tracks.append(beets_item)
+                if beets_item:
+                    matched_tracks.append(plex_track)  # Keep Plex track object for filtering
             except Exception as e:
                 self._log.debug("Error processing track {}: {}", plex_track.title, e)
                 continue
 
-        self._log.debug("Found {} tracks matching criteria", len(matched_tracks))
+        self._log.debug("Found {} initial tracks", len(matched_tracks))
 
-        # Calculate proportions
-        unrated_tracks_count, rated_tracks_count = self.calculate_playlist_proportions(
-            max_tracks, discovery_ratio
-        )
+        # Get filters from config
+        filters = dd_config.get("filters", {})
+
+        # Apply filters to matched tracks
+        if filters:
+            self._log.debug("Applying filters to {} tracks...", len(matched_tracks))
+            filtered_tracks = self.apply_playlist_filters(matched_tracks, filters)
+            self._log.debug("After filtering: {} tracks", len(filtered_tracks))
+        else:
+            filtered_tracks = matched_tracks
+
+        self._log.debug("Processing {} filtered tracks", len(filtered_tracks))
+
+        # Now convert filtered Plex tracks to beets items for final processing
+        final_tracks = []
+        for track in filtered_tracks:
+            try:
+                beets_item = plex_lookup.get(track.ratingKey)
+                if beets_item and float(getattr(beets_item, "plex_userrating", 0)) > 3:
+                    final_tracks.append(beets_item)
+            except Exception as e:
+                self._log.debug("Error converting track {}: {}", track.title, e)
+
+        self._log.debug("Found {} tracks matching all criteria", len(final_tracks))
 
         # Split tracks into rated and unrated
         rated_tracks = []
         unrated_tracks = []
-        for track in matched_tracks:
+        for track in final_tracks:
             rating = float(getattr(track, 'plex_userrating', 0))
             if rating >= 6:  # Include all tracks rated 6 or higher
                 rated_tracks.append(track)
             elif rating == 0:  # Only truly unrated tracks
                 unrated_tracks.append(track)
 
-        # Select tracks using weighted probability, ensuring we don't exceed max_tracks
+        self._log.debug("Split into {} rated and {} unrated tracks",
+                       len(rated_tracks), len(unrated_tracks))
+
+        # Calculate proportions
+        unrated_tracks_count, rated_tracks_count = self.calculate_playlist_proportions(
+            max_tracks, discovery_ratio
+        )
+
+        # Select tracks using weighted probability
         selected_rated = self.select_tracks_weighted(rated_tracks, rated_tracks_count)
         selected_unrated = self.select_tracks_weighted(unrated_tracks, unrated_tracks_count)
 
@@ -2199,7 +2204,7 @@ class PlexSync(BeetsPlugin):
             additional_rated = self.select_tracks_weighted(remaining_rated, additional_count)
             selected_rated.extend(additional_rated)
 
-        # Combine and shuffle, ensuring total doesn't exceed max_tracks
+        # Combine and shuffle
         selected_tracks = selected_rated + selected_unrated
         if len(selected_tracks) > max_tracks:
             selected_tracks = selected_tracks[:max_tracks]
@@ -2207,7 +2212,6 @@ class PlexSync(BeetsPlugin):
         import random
         random.shuffle(selected_tracks)
 
-        # Add debug logging for selected track counts
         self._log.info(
             "Selected {} rated tracks and {} unrated tracks",
             len(selected_rated),
@@ -2218,20 +2222,19 @@ class PlexSync(BeetsPlugin):
             self._log.warning("No tracks matched criteria for Daily Discovery playlist")
             return
 
-        # Clear existing playlist only right before adding new tracks
+        # Create/update playlist
         try:
             self._plex_clear_playlist(playlist_name)
             self._log.info("Cleared existing Daily Discovery playlist")
         except exceptions.NotFound:
             self._log.debug("No existing Daily Discovery playlist found")
 
-        # Create playlist
         self._plex_add_playlist_item(selected_tracks, playlist_name)
 
         self._log.info(
             "Successfully updated {} playlist with {} tracks",
             playlist_name,
-            len(selected_tracks),
+            len(selected_tracks)
         )
 
     def generate_forgotten_gems(self, lib, ug_config, plex_lookup, preferred_genres, similar_tracks):
