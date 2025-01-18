@@ -1911,10 +1911,168 @@ class PlexSync(BeetsPlugin):
         rated_tracks_count = max_tracks - unrated_tracks_count
         return unrated_tracks_count, rated_tracks_count
 
+    def validate_filter_config(self, filter_config):
+        """Validate the filter configuration structure and values.
+
+        Args:
+            filter_config: Dictionary containing filter configuration
+
+        Returns:
+            tuple: (is_valid: bool, error_message: str)
+        """
+        if not isinstance(filter_config, dict):
+            return False, "Filter configuration must be a dictionary"
+
+        # Check exclude/include sections
+        for section in ['exclude', 'include']:
+            if section in filter_config:
+                if not isinstance(filter_config[section], dict):
+                    return False, f"{section} section must be a dictionary"
+
+                # Validate genres
+                if 'genres' in filter_config[section]:
+                    if not isinstance(filter_config[section]['genres'], list):
+                        return False, f"{section}.genres must be a list"
+
+                # Validate years
+                if 'years' in filter_config[section]:
+                    years = filter_config[section]['years']
+                    if not isinstance(years, dict):
+                        return False, f"{section}.years must be a dictionary"
+
+                    # Check year values
+                    if 'before' in years and not isinstance(years['before'], int):
+                        return False, f"{section}.years.before must be an integer"
+                    if 'after' in years and not isinstance(years['after'], int):
+                        return False, f"{section}.years.after must be an integer"
+                    if 'between' in years:
+                        if not isinstance(years['between'], list) or len(years['between']) != 2:
+                            return False, f"{section}.years.between must be a list of two integers"
+                        if not all(isinstance(y, int) for y in years['between']):
+                            return False, f"{section}.years.between values must be integers"
+
+        # Validate min_rating
+        if 'min_rating' in filter_config:
+            if not isinstance(filter_config['min_rating'], (int, float)):
+                return False, "min_rating must be a number"
+            if not 0 <= filter_config['min_rating'] <= 10:
+                return False, "min_rating must be between 0 and 10"
+
+        return True, ""
+
+    def apply_playlist_filters(self, tracks, filter_config):
+        """Apply configured filters to a list of tracks.
+
+        Args:
+            tracks: List of tracks to filter
+            filter_config: Dictionary containing filter configuration
+
+        Returns:
+            list: Filtered track list
+        """
+        # Validate filter configuration
+        is_valid, error = self.validate_filter_config(filter_config)
+        if not is_valid:
+            self._log.error("Invalid filter configuration: {}", error)
+            return tracks
+
+        filtered_tracks = tracks[:]  # Create a copy to work with
+
+        # Apply exclusion filters first
+        if 'exclude' in filter_config:
+            filtered_tracks = self._apply_exclusion_filters(filtered_tracks, filter_config['exclude'])
+
+        # Then apply inclusion filters
+        if 'include' in filter_config:
+            filtered_tracks = self._apply_inclusion_filters(filtered_tracks, filter_config['include'])
+
+        # Apply rating filter if specified
+        if 'min_rating' in filter_config:
+            min_rating = filter_config['min_rating']
+            filtered_tracks = [
+                track for track in filtered_tracks
+                if float(getattr(track, 'plex_userrating', 0) or 0) >= min_rating
+            ]
+
+        return filtered_tracks
+
+    def _apply_exclusion_filters(self, tracks, exclude_config):
+        """Apply exclusion filters to tracks."""
+        filtered_tracks = tracks[:]
+
+        # Filter by genres
+        if 'genres' in exclude_config:
+            exclude_genres = [g.lower() for g in exclude_config['genres']]
+            filtered_tracks = [
+                track for track in filtered_tracks
+                if not any(g.tag.lower() in exclude_genres for g in track.genres)
+            ]
+
+        # Filter by years
+        if 'years' in exclude_config:
+            years_config = exclude_config['years']
+
+            if 'before' in years_config:
+                year_before = years_config['before']
+                filtered_tracks = [
+                    track for track in filtered_tracks
+                    if track.year is None or track.year >= year_before
+                ]
+
+            if 'after' in years_config:
+                year_after = years_config['after']
+                filtered_tracks = [
+                    track for track in filtered_tracks
+                    if track.year is None or track.year <= year_after
+                ]
+
+        return filtered_tracks
+
+    def _apply_inclusion_filters(self, tracks, include_config):
+        """Apply inclusion filters to tracks."""
+        filtered_tracks = tracks[:]
+
+        # Filter by genres
+        if 'genres' in include_config:
+            include_genres = [g.lower() for g in include_config['genres']]
+            filtered_tracks = [
+                track for track in filtered_tracks
+                if any(g.tag.lower() in include_genres for g in track.genres)
+            ]
+
+        # Filter by years
+        if 'years' in include_config:
+            years_config = include_config['years']
+
+            if 'between' in years_config:
+                start_year, end_year = years_config['between']
+                filtered_tracks = [
+                    track for track in filtered_tracks
+                    if track.year is not None and start_year <= track.year <= end_year
+                ]
+
+        return filtered_tracks
+
     def generate_daily_discovery(self, lib, dd_config, plex_lookup, preferred_genres, similar_tracks):
         """Generate Daily Discovery playlist with improved track selection."""
         playlist_name = dd_config.get("name", "Daily Discovery")
         self._log.info("Generating {} playlist", playlist_name)
+
+        # Get base configuration
+        if "playlists" in config["plexsync"] and "defaults" in config["plexsync"]["playlists"]:
+            defaults_cfg = config["plexsync"]["playlists"]["defaults"].get({})
+        else:
+            defaults_cfg = {}
+
+        max_tracks = self.get_config_value(dd_config, defaults_cfg, "max_tracks", 20)
+        discovery_ratio = self.get_config_value(dd_config, defaults_cfg, "discovery_ratio", 30)
+
+        # Get filters from config
+        filters = dd_config.get("filters", {})
+
+        # Apply filters to similar tracks
+        if filters:
+            similar_tracks = self.apply_playlist_filters(similar_tracks, filters)
 
         self._log.debug(f"Using preferred genres: {preferred_genres}")
         self._log.debug(f"Processing {len(similar_tracks)} pre-filtered similar tracks")
@@ -2338,16 +2496,38 @@ class PlexSync(BeetsPlugin):
                 elif in_not_found_section and line.startswith("Not found:"):
                     try:
                         _, track_info = line.split("Not found:", 1)
-                        artist, album, title = [x.strip() for x in track_info.split(" - ")]
-                        if artist != "Unknown" and title != "Unknown":
-                            tracks_to_import.append({
-                                "artist": artist,
-                                "album": album if album != "Unknown" else None,
-                                "title": title,
-                                "line_num": i  # Store the line number
-                            })
+                        # First try to find the Unknown album marker as a separator
+                        parts = track_info.split(" - Unknown - ")
+                        if len(parts) == 2:
+                            artist = parts[0].strip()
+                            title = parts[1].strip()
+                            album = "Unknown"
+                        else:
+                            # Fallback to traditional parsing if no "Unknown" found
+                            parts = track_info.strip().split(" - ")
+                            if len(parts) >= 3:
+                                artist = parts[0]
+                                album = parts[1]
+                                # Join remaining parts as title (may contain dashes)
+                                title = " - ".join(parts[2:])
+                            else:
+                                return None
+
+                        # Clean up the title
+                        title = clean_title(title)
+
+                        # Clean up artist (handle cases like "Vishal - Shekhar")
+                        artist = re.sub(r'\s+-\s+', ' & ', artist)
+
+                        if artist != "Unknown" and title:
+                            return {
+                                "artist": artist.strip(),
+                                "album": album.strip() if album != "Unknown" else None,
+                                "title": title.strip()
+                            }
                     except ValueError:
-                        self._log.debug("Skipping malformed log line: {}", line.strip())
+                        pass
+                    return None
 
             if tracks_to_import:
                 self._log.info("Attempting to manually import {} tracks for {}",
