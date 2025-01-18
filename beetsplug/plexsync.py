@@ -2271,19 +2271,20 @@ class PlexSync(BeetsPlugin):
         max_tracks = self.get_config_value(ug_config, defaults_cfg, "max_tracks", 20)
         discovery_ratio = self.get_config_value(ug_config, defaults_cfg, "discovery_ratio", 30)  # Default 30%
 
-        # Fetch all tracks
-        all_tracks = self.music.searchTracks(libtype="track")
+        # Fetch tracks based on preferred genres and low play count
+        filters = {
+            "track.viewCount<<=": self.get_config_value(ug_config, defaults_cfg, "max_plays", 2)
+        }
+        tracks = self.music.searchTracks(**filters)
 
-        # Get filters from config
-        filters = ug_config.get("filters", {})
-
-        # Apply filters to all tracks
-        if filters:
-            self._log.debug("Applying filters to {} tracks...", len(all_tracks))
-            filtered_tracks = self.apply_playlist_filters(all_tracks, filters)
+        # Apply filters from config
+        config_filters = ug_config.get("filters", {})
+        if config_filters:
+            self._log.debug("Applying filters to {} tracks...", len(tracks))
+            filtered_tracks = self.apply_playlist_filters(tracks, config_filters)
             self._log.debug("After filtering: {} tracks", len(filtered_tracks))
         else:
-            filtered_tracks = all_tracks
+            filtered_tracks = tracks
 
         self._log.debug("Processing {} filtered tracks", len(filtered_tracks))
 
