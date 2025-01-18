@@ -1960,6 +1960,111 @@ class PlexSync(BeetsPlugin):
 
         return True, ""
 
+    def _apply_exclusion_filters(self, tracks, exclude_config):
+        """Apply exclusion filters to tracks."""
+        filtered_tracks = tracks[:]
+        original_count = len(filtered_tracks)
+
+        # Filter by genres
+        if 'genres' in exclude_config:
+            exclude_genres = [g.lower() for g in exclude_config['genres']]
+            filtered_tracks = [
+                track for track in filtered_tracks
+                if hasattr(track, 'genres') and not any(
+                    g.tag.lower() in exclude_genres
+                    for g in track.genres
+                )
+            ]
+            self._log.debug(
+                "Genre exclusion filter: {} -> {} tracks",
+                exclude_genres,
+                len(filtered_tracks)
+            )
+
+        # Filter by years
+        if 'years' in exclude_config:
+            years_config = exclude_config['years']
+
+            if 'before' in years_config:
+                year_before = years_config['before']
+                filtered_tracks = [
+                    track for track in filtered_tracks
+                    if not hasattr(track, 'year') or
+                    track.year is None or
+                    track.year >= year_before
+                ]
+                self._log.debug(
+                    "Year before {} filter: {} tracks",
+                    year_before,
+                    len(filtered_tracks)
+                )
+
+            if 'after' in years_config:
+                year_after = years_config['after']
+                filtered_tracks = [
+                    track for track in filtered_tracks
+                    if not hasattr(track, 'year') or
+                    track.year is None or
+                    track.year <= year_after
+                ]
+                self._log.debug(
+                    "Year after {} filter: {} tracks",
+                    year_after,
+                    len(filtered_tracks)
+                )
+
+        self._log.debug(
+            "Exclusion filters removed {} tracks",
+            original_count - len(filtered_tracks)
+        )
+        return filtered_tracks
+
+    def _apply_inclusion_filters(self, tracks, include_config):
+        """Apply inclusion filters to tracks."""
+        filtered_tracks = tracks[:]
+        original_count = len(filtered_tracks)
+
+        # Filter by genres
+        if 'genres' in include_config:
+            include_genres = [g.lower() for g in include_config['genres']]
+            filtered_tracks = [
+                track for track in filtered_tracks
+                if hasattr(track, 'genres') and any(
+                    g.tag.lower() in include_genres
+                    for g in track.genres
+                )
+            ]
+            self._log.debug(
+                "Genre inclusion filter: {} -> {} tracks",
+                include_genres,
+                len(filtered_tracks)
+            )
+
+        # Filter by years
+        if 'years' in include_config:
+            years_config = include_config['years']
+
+            if 'between' in years_config:
+                start_year, end_year = years_config['between']
+                filtered_tracks = [
+                    track for track in filtered_tracks
+                    if hasattr(track, 'year') and
+                    track.year is not None and
+                    start_year <= track.year <= end_year
+                ]
+                self._log.debug(
+                    "Year between {}-{} filter: {} tracks",
+                    start_year,
+                    end_year,
+                    len(filtered_tracks)
+                )
+
+        self._log.debug(
+            "Inclusion filters removed {} tracks",
+            original_count - len(filtered_tracks)
+        )
+        return filtered_tracks
+
     def apply_playlist_filters(self, tracks, filter_config):
         """Apply configured filters to a list of tracks.
 
@@ -1970,87 +2075,49 @@ class PlexSync(BeetsPlugin):
         Returns:
             list: Filtered track list
         """
+        if not tracks:
+            return tracks
+
         # Validate filter configuration
         is_valid, error = self.validate_filter_config(filter_config)
         if not is_valid:
             self._log.error("Invalid filter configuration: {}", error)
             return tracks
 
-        filtered_tracks = tracks[:]  # Create a copy to work with
+        self._log.debug("Applying filters to {} tracks", len(tracks))
+        filtered_tracks = tracks[:]
 
         # Apply exclusion filters first
         if 'exclude' in filter_config:
+            self._log.debug("Applying exclusion filters...")
             filtered_tracks = self._apply_exclusion_filters(filtered_tracks, filter_config['exclude'])
 
         # Then apply inclusion filters
         if 'include' in filter_config:
+            self._log.debug("Applying inclusion filters...")
             filtered_tracks = self._apply_inclusion_filters(filtered_tracks, filter_config['include'])
 
         # Apply rating filter if specified
         if 'min_rating' in filter_config:
             min_rating = filter_config['min_rating']
+            original_count = len(filtered_tracks)
             filtered_tracks = [
                 track for track in filtered_tracks
-                if float(getattr(track, 'plex_userrating', 0) or 0) >= min_rating
+                if hasattr(track, 'userRating') and
+                float(track.userRating or 0) >= min_rating
             ]
+            self._log.debug(
+                "Rating filter (>= {}): {} -> {} tracks",
+                min_rating,
+                original_count,
+                len(filtered_tracks)
+            )
 
-        return filtered_tracks
-
-    def _apply_exclusion_filters(self, tracks, exclude_config):
-        """Apply exclusion filters to tracks."""
-        filtered_tracks = tracks[:]
-
-        # Filter by genres
-        if 'genres' in exclude_config:
-            exclude_genres = [g.lower() for g in exclude_config['genres']]
-            filtered_tracks = [
-                track for track in filtered_tracks
-                if not any(g.tag.lower() in exclude_genres for g in track.genres)
-            ]
-
-        # Filter by years
-        if 'years' in exclude_config:
-            years_config = exclude_config['years']
-
-            if 'before' in years_config:
-                year_before = years_config['before']
-                filtered_tracks = [
-                    track for track in filtered_tracks
-                    if track.year is None or track.year >= year_before
-                ]
-
-            if 'after' in years_config:
-                year_after = years_config['after']
-                filtered_tracks = [
-                    track for track in filtered_tracks
-                    if track.year is None or track.year <= year_after
-                ]
-
-        return filtered_tracks
-
-    def _apply_inclusion_filters(self, tracks, include_config):
-        """Apply inclusion filters to tracks."""
-        filtered_tracks = tracks[:]
-
-        # Filter by genres
-        if 'genres' in include_config:
-            include_genres = [g.lower() for g in include_config['genres']]
-            filtered_tracks = [
-                track for track in filtered_tracks
-                if any(g.tag.lower() in include_genres for g in track.genres)
-            ]
-
-        # Filter by years
-        if 'years' in include_config:
-            years_config = include_config['years']
-
-            if 'between' in years_config:
-                start_year, end_year = years_config['between']
-                filtered_tracks = [
-                    track for track in filtered_tracks
-                    if track.year is not None and start_year <= track.year <= end_year
-                ]
-
+        self._log.debug(
+            "Filter application complete: {} -> {} tracks",
+            len(tracks),
+            len(filtered_tracks)
+        )
         return filtered_tracks
 
     def generate_daily_discovery(self, lib, dd_config, plex_lookup, preferred_genres, similar_tracks):
