@@ -2250,7 +2250,7 @@ class PlexSync(BeetsPlugin):
             )
         )
         popular_unrated.sort(
-            key=lambda x: -int(getattr(x, "spotify_track_popularity", 0))
+            key=lambda x: -int(getattr(track, "spotify_track_popularity", 0))
         )
 
         # Select tracks maintaining the ratio
@@ -2450,9 +2450,49 @@ class PlexSync(BeetsPlugin):
         Args:
             lib: The beets library instance
             specific_log: Optional filename to process only one log file
+
+        Returns:
+            tuple: (total_imported, total_failed)
         """
         total_imported = 0
         total_failed = 0
+
+        def parse_track_info(line):
+            """Helper function to parse track info from log line."""
+            try:
+                _, track_info = line.split("Not found:", 1)
+                # First try to find the Unknown album marker as a separator
+                parts = track_info.split(" - Unknown - ")
+                if len(parts) == 2:
+                    artist = parts[0].strip()
+                    title = parts[1].strip()
+                    album = "Unknown"
+                else:
+                    # Fallback to traditional parsing if no "Unknown" found
+                    parts = track_info.strip().split(" - ")
+                    if len(parts) >= 3:
+                        artist = parts[0]
+                        album = parts[1]
+                        # Join remaining parts as title (may contain dashes)
+                        title = " - ".join(parts[2:])
+                    else:
+                        return None
+
+                # Clean up the title
+                title = clean_title(title)
+
+                # Clean up artist (handle cases like "Vishal - Shekhar")
+                artist = re.sub(r'\s+-\s+', ' & ', artist)
+
+                if artist != "Unknown" and title:
+                    return {
+                        "artist": artist.strip(),
+                        "album": album.strip() if album != "Unknown" else None,
+                        "title": title.strip()
+                    }
+            except ValueError:
+                pass
+            return None
 
         if specific_log:
             # Process single log file
@@ -2474,11 +2514,11 @@ class PlexSync(BeetsPlugin):
                 log_content = f.readlines()
 
             tracks_to_import = []
-            track_lines_to_remove = set()  # Keep track of line numbers to remove
+            track_lines_to_remove = set()
             in_not_found_section = False
-            header_lines = []  # Store header content
-            summary_lines = []  # Store summary content
-            not_found_start = -1  # Track where "Not found" section starts
+            header_lines = []
+            summary_lines = []
+            not_found_start = -1
 
             # First pass: collect tracks and identify sections
             for i, line in enumerate(log_content):
@@ -2488,46 +2528,16 @@ class PlexSync(BeetsPlugin):
                     continue
                 elif "Import Summary:" in line:
                     in_not_found_section = False
-                    summary_lines = log_content[i:]  # Store summary section
+                    summary_lines = log_content[i:]
                     break
 
                 if i < not_found_start:
                     header_lines.append(line)
                 elif in_not_found_section and line.startswith("Not found:"):
-                    try:
-                        _, track_info = line.split("Not found:", 1)
-                        # First try to find the Unknown album marker as a separator
-                        parts = track_info.split(" - Unknown - ")
-                        if len(parts) == 2:
-                            artist = parts[0].strip()
-                            title = parts[1].strip()
-                            album = "Unknown"
-                        else:
-                            # Fallback to traditional parsing if no "Unknown" found
-                            parts = track_info.strip().split(" - ")
-                            if len(parts) >= 3:
-                                artist = parts[0]
-                                album = parts[1]
-                                # Join remaining parts as title (may contain dashes)
-                                title = " - ".join(parts[2:])
-                            else:
-                                return None
-
-                        # Clean up the title
-                        title = clean_title(title)
-
-                        # Clean up artist (handle cases like "Vishal - Shekhar")
-                        artist = re.sub(r'\s+-\s+', ' & ', artist)
-
-                        if artist != "Unknown" and title:
-                            return {
-                                "artist": artist.strip(),
-                                "album": album.strip() if album != "Unknown" else None,
-                                "title": title.strip()
-                            }
-                    except ValueError:
-                        pass
-                    return None
+                    track_info = parse_track_info(line)
+                    if track_info:
+                        track_info["line_num"] = i
+                        tracks_to_import.append(track_info)
 
             if tracks_to_import:
                 self._log.info("Attempting to manually import {} tracks for {}",
@@ -2548,13 +2558,13 @@ class PlexSync(BeetsPlugin):
                     self._log.info("Added {} tracks to playlist {}",
                                  len(matched_tracks), playlist_name)
 
-                    # Update the log file: remove matched tracks and update summary
+                    # Update the log file
                     remaining_not_found = [
                         line for i, line in enumerate(log_content)
                         if i not in track_lines_to_remove
                     ]
 
-                    # Update summary with new counts
+                    # Update summary
                     new_summary = []
                     for line in summary_lines:
                         if "Tracks not found in Plex" in line:
@@ -2568,11 +2578,11 @@ class PlexSync(BeetsPlugin):
 
                     # Write updated log file
                     with open(log_file, 'w', encoding='utf-8') as f:
-                        f.writelines(header_lines)  # Original header
-                        f.write("Tracks not found in Plex library:\n")  # Section header
+                        f.writelines(header_lines)
+                        f.write("Tracks not found in Plex library:\n")
                         f.writelines(l for l in remaining_not_found if l.startswith("Not found:"))
                         f.write("\nUpdated at: {}\n".format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-                        f.writelines(new_summary)  # Updated summary
+                        f.writelines(new_summary)
 
         return total_imported, total_failed
 
