@@ -2271,56 +2271,41 @@ class PlexSync(BeetsPlugin):
         max_tracks = self.get_config_value(ug_config, defaults_cfg, "max_tracks", 20)
         discovery_ratio = self.get_config_value(ug_config, defaults_cfg, "discovery_ratio", 30)  # Default 30%
 
-        # Use lookup dictionary to convert similar tracks to beets items first
-        matched_tracks = []
-        for plex_track in similar_tracks:
-            try:
-                beets_item = plex_lookup.get(plex_track.ratingKey)
-                if beets_item:
-                    matched_tracks.append(plex_track)  # Keep Plex track object for filtering
-            except Exception as e:
-                self._log.debug("Error processing track {}: {}", plex_track.title, e)
-                continue
-
-        self._log.debug("Found {} initial tracks", len(matched_tracks))
+        # Fetch all tracks
+        all_tracks = self.music.searchTracks(libtype="track")
 
         # Get filters from config
         filters = ug_config.get("filters", {})
 
-        # Apply filters to matched tracks
+        # Apply filters to all tracks
         if filters:
-            self._log.debug("Applying filters to {} tracks...", len(matched_tracks))
-            filtered_tracks = self.apply_playlist_filters(matched_tracks, filters)
+            self._log.debug("Applying filters to {} tracks...", len(all_tracks))
+            filtered_tracks = self.apply_playlist_filters(all_tracks, filters)
             self._log.debug("After filtering: {} tracks", len(filtered_tracks))
         else:
-            filtered_tracks = matched_tracks
+            filtered_tracks = all_tracks
 
         self._log.debug("Processing {} filtered tracks", len(filtered_tracks))
 
-        # Now convert filtered Plex tracks to beets items for final processing
-        final_tracks = []
-        for track in filtered_tracks:
-            try:
-                beets_item = plex_lookup.get(track.ratingKey)
-                if beets_item:
-                    final_tracks.append(beets_item)
-            except Exception as e:
-                self._log.debug("Error converting track {}: {}", track.title, e)
-
-        self._log.debug("Found {} tracks matching all criteria", len(final_tracks))
-
-        # Split tracks into rated and unrated
+        # Separate tracks into rated and unrated
         rated_tracks = []
         unrated_tracks = []
-        for track in final_tracks:
-            rating = float(getattr(track, 'plex_userrating', 0))
-            if rating > 0:  # Include all rated tracks
-                rated_tracks.append(track)
-            else:  # Only truly unrated tracks
-                unrated_tracks.append(track)
+        for track in filtered_tracks:
+            try:
+                track_genres = {str(g.tag).lower() for g in track.genres}
+                if any(genre in track_genres for genre in preferred_genres):
+                    beets_item = plex_lookup.get(track.ratingKey)
+                    if beets_item:
+                        rating = float(getattr(beets_item, "plex_userrating", 0))
+                        if rating > 0:
+                            rated_tracks.append(beets_item)
+                        else:
+                            unrated_tracks.append(beets_item)
+            except Exception as e:
+                self._log.debug("Error processing track {}: {}", track.title, e)
+                continue
 
-        self._log.debug("Split into {} rated and {} unrated tracks",
-                       len(rated_tracks), len(unrated_tracks))
+        self._log.debug("Found {} rated tracks and {} unrated tracks", len(rated_tracks), len(unrated_tracks))
 
         # Calculate proportions
         unrated_tracks_count, rated_tracks_count = self.calculate_playlist_proportions(
