@@ -2383,6 +2383,18 @@ class PlexSync(BeetsPlugin):
                 len(all_library_tracks), len(filtered_similar)
             )
 
+        # Convert to beets items
+        final_tracks = []
+        for track in all_library_tracks:
+            try:
+                beets_item = plex_lookup.get(track.ratingKey)
+                if beets_item:
+                    final_tracks.append(beets_item)
+            except Exception as e:
+                self._log.debug("Error converting track {}: {}", track.title, e)
+
+        self._log.debug("Converted {} tracks to beets items", len(final_tracks))
+
         # Rest of the method remains the same...
         # Split tracks into rated and unrated
         rated_tracks = []
@@ -2789,5 +2801,5 @@ def clean_title(title):
     # Remove redundant spaces
     cleaned = ' '.join(cleaned.split())
 
-    retucleaned.strip()
+    return cleaned.strip()
 
