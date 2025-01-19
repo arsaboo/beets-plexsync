@@ -2395,7 +2395,6 @@ class PlexSync(BeetsPlugin):
 
         self._log.debug("Converted {} tracks to beets items", len(final_tracks))
 
-        # Rest of the method remains the same...
         # Split tracks into rated and unrated
         rated_tracks = []
         unrated_tracks = []
@@ -2406,13 +2405,10 @@ class PlexSync(BeetsPlugin):
             else:  # Only truly unrated tracks
                 unrated_tracks.append(track)
 
-        self._log.debug("Split into {} rated and {} unrated tracks",
-                       len(rated_tracks), len(unrated_tracks))
+        self._log.debug("Split into {} rated and {} unrated tracks", len(rated_tracks), len(unrated_tracks))
 
         # Calculate proportions
-        unrated_tracks_count, rated_tracks_count = self.calculate_playlist_proportions(
-            max_tracks, discovery_ratio
-        )
+        unrated_tracks_count, rated_tracks_count = self.calculate_playlist_proportions(max_tracks, discovery_ratio)
 
         # Select tracks using weighted probability
         selected_rated = self.select_tracks_weighted(rated_tracks, rated_tracks_count)
@@ -2436,11 +2432,7 @@ class PlexSync(BeetsPlugin):
         import random
         random.shuffle(selected_tracks)
 
-        self._log.info(
-            "Selected {} rated tracks and {} unrated tracks",
-            len(selected_rated),
-            len(selected_unrated)
-        )
+        self._log.info("Selected {} rated tracks and {} unrated tracks", len(selected_rated), len(selected_unrated))
 
         if not selected_tracks:
             self._log.warning("No tracks matched criteria for Forgotten Gems playlist")
@@ -2455,11 +2447,7 @@ class PlexSync(BeetsPlugin):
 
         self._plex_add_playlist_item(selected_tracks, playlist_name)
 
-        self._log.info(
-            "Successfully updated {} playlist with {} tracks",
-            playlist_name,
-            len(selected_tracks)
-        )
+        self._log.info("Successfully updated {} playlist with {} tracks", playlist_name, len(selected_tracks))
 
     def generate_imported_playlist(self, lib, playlist_config):
         """Generate a playlist by importing from external sources."""
