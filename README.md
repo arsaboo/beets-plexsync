@@ -42,6 +42,8 @@ Use `beet plex_smartplaylists` to generate or manage custom playlists in Plex. T
         - `clear_playlist`: Clear existing playlist before adding new tracks
         - `max_tracks`: Limit the number of tracks in the playlist
 
+You can use config filters to finetune any playlist. You can specify the `genre`, `year`, and `UserRating` to be included and excluded from any of the playlists. See the extended example below.
+
 ### Library Sync
 - **Plex Library Sync**: `beet plexsync [-f]` imports all the data from your Plex library inside beets. Use the `-f` flag to force update the entire library with fresh information from Plex.
 - **Recent Sync**: `beet plexsyncrecent` updates the information for tracks listened in the last 7 days.
@@ -196,10 +198,26 @@ plexsync:
         max_tracks: 50      # Maximum number of tracks for playlist
         max_plays: 2        # Maximum number of plays for tracks to be included
         min_rating: 4       # Minimum rating for rated tracks
-        discovery_ratio: 30 # Percentage of unrated tracks (0-100)
-                            # Higher values = more discovery
-                            # Example: 30 = 30% unrated + 70% rated tracks
-                            #          70 = 70% unrated + 30% rated tracks
+        discovery_ratio: 30 # Percentage of unrated tracks (0-100); Higher values = more discovery
+        filters:
+          include:
+            genres:
+              - Filmi
+              - Indi Pop
+              - Punjabi
+              - Sufi
+              - Ghazals
+            years:
+              after: 1970
+          exclude:
+            genres:
+              - Religious
+              - Bollywood Unwind
+              - Bollywood Instrumental
+            years:
+              before: 1960
+          min_rating: 5
+
       - id: bollywood_hits
         name: "Bollywood Hits"
         type: imported
