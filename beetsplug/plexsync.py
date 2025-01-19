@@ -2253,16 +2253,7 @@ class PlexSync(BeetsPlugin):
         )
 
     def get_filtered_library_tracks(self, preferred_genres, config_filters, exclusion_days=30):
-        """Get filtered library tracks using Plex search capabilities.
-
-        Args:
-            preferred_genres: List of preferred genres from listening history
-            config_filters: Filter configuration from playlist config
-            exclusion_days: Days to exclude recently played tracks
-
-        Returns:
-            list: Filtered library tracks
-        """
+        """Get filtered library tracks using Plex search capabilities."""
         # Collect all relevant genres
         all_genres = set(preferred_genres)
 
@@ -2273,10 +2264,6 @@ class PlexSync(BeetsPlugin):
 
         # Convert config filters to Plex filters
         plex_filters = {"libtype": "track"}
-
-        # Handle exclusion period
-        if exclusion_days > 0:
-            plex_filters["track.lastViewedAt!>>"] = f"{exclusion_days}d"
 
         # Handle year filters
         if config_filters and 'include' in config_filters:
@@ -2299,6 +2286,18 @@ class PlexSync(BeetsPlugin):
 
         self._log.debug("Using Plex filters: {}", plex_filters)
 
+        # Get recently played tracks first
+        if exclusion_days > 0:
+            recent = set(
+                track.ratingKey
+                for track in self.music.search(
+                    filters={"lastViewedAt>>": f"{exclusion_days}d"},
+                    libtype="track"
+                )
+            )
+        else:
+            recent = set()
+
         # Perform the search
         all_tracks = []
 
@@ -2309,9 +2308,13 @@ class PlexSync(BeetsPlugin):
                 genre_filters["genre"] = genre
 
                 tracks = self.music.search(**genre_filters)
+
+                # Filter out recently played tracks in memory
+                tracks = [t for t in tracks if t.ratingKey not in recent]
                 all_tracks.extend(tracks)
 
-                self._log.debug("Found {} tracks for genre '{}'", len(tracks), genre)
+                self._log.debug("Found {} tracks for genre '{}' (after excluding recent)",
+                              len(tracks), genre)
             except Exception as e:
                 self._log.error("Error searching for genre '{}': {}", genre, e)
 
