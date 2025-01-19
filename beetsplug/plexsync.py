@@ -2252,63 +2252,135 @@ class PlexSync(BeetsPlugin):
             len(selected_tracks)
         )
 
+    def get_filtered_library_tracks(self, preferred_genres, config_filters, exclusion_days=30):
+        """Get filtered library tracks using Plex search capabilities.
+
+        Args:
+            preferred_genres: List of preferred genres from listening history
+            config_filters: Filter configuration from playlist config
+            exclusion_days: Days to exclude recently played tracks
+
+        Returns:
+            list: Filtered library tracks
+        """
+        # Collect all relevant genres
+        all_genres = set(preferred_genres)
+
+        # Add genres from inclusion filters if present
+        if config_filters and 'include' in config_filters:
+            if 'genres' in config_filters['include']:
+                all_genres.update(g.lower() for g in config_filters['include']['genres'])
+
+        # Convert config filters to Plex filters
+        plex_filters = {"libtype": "track"}
+
+        # Handle exclusion period
+        if exclusion_days > 0:
+            plex_filters["track.lastViewedAt!>>"] = f"{exclusion_days}d"
+
+        # Handle year filters
+        if config_filters and 'include' in config_filters:
+            years_config = config_filters['include'].get('years', {})
+            if 'between' in years_config:
+                start_year, end_year = years_config['between']
+                plex_filters["year>>="] = start_year
+                plex_filters["year<<="] = end_year
+
+        if config_filters and 'exclude' in config_filters:
+            years_config = config_filters['exclude'].get('years', {})
+            if 'before' in years_config:
+                plex_filters["year>>="] = years_config['before']
+            if 'after' in years_config:
+                plex_filters["year<<="] = years_config['after']
+
+        # Handle rating filter if specified
+        if config_filters and 'min_rating' in config_filters:
+            plex_filters["userRating>>="] = config_filters['min_rating']
+
+        self._log.debug("Using Plex filters: {}", plex_filters)
+
+        # Perform the search
+        all_tracks = []
+
+        # Search for each genre separately to avoid overly complex queries
+        for genre in all_genres:
+            try:
+                genre_filters = plex_filters.copy()
+                genre_filters["genre"] = genre
+
+                tracks = self.music.search(**genre_filters)
+                all_tracks.extend(tracks)
+
+                self._log.debug("Found {} tracks for genre '{}'", len(tracks), genre)
+            except Exception as e:
+                self._log.error("Error searching for genre '{}': {}", genre, e)
+
+        # Remove duplicates based on ratingKey
+        seen = set()
+        unique_tracks = []
+        for track in all_tracks:
+            if track.ratingKey not in seen:
+                seen.add(track.ratingKey)
+                unique_tracks.append(track)
+
+        self._log.debug(
+            "Found {} unique tracks after filtering from {} total matches",
+            len(unique_tracks), len(all_tracks)
+        )
+        return unique_tracks
+
     def generate_forgotten_gems(self, lib, ug_config, plex_lookup, preferred_genres, similar_tracks):
         """Generate a Forgotten Gems playlist with improved discovery."""
         playlist_name = ug_config.get("name", "Forgotten Gems")
         self._log.info("Generating {} playlist", playlist_name)
 
-        self._log.debug(f"Using preferred genres: {preferred_genres}")
-
         # Get configuration
-        if (
-            "playlists" in config["plexsync"]
-            and "defaults" in config["plexsync"]["playlists"]
-        ):
+        if "playlists" in config["plexsync"] and "defaults" in config["plexsync"]["playlists"]:
             defaults_cfg = config["plexsync"]["playlists"]["defaults"].get({})
         else:
             defaults_cfg = {}
 
         max_tracks = self.get_config_value(ug_config, defaults_cfg, "max_tracks", 20)
-        discovery_ratio = self.get_config_value(ug_config, defaults_cfg, "discovery_ratio", 30)  # Default 30%
-
-        # Use lookup dictionary to convert similar tracks to beets items first
-        matched_tracks = []
-        for plex_track in similar_tracks:
-            try:
-                beets_item = plex_lookup.get(plex_track.ratingKey)
-                if beets_item:
-                    matched_tracks.append(plex_track)  # Keep Plex track object for filtering
-            except Exception as e:
-                self._log.debug("Error processing track {}: {}", plex_track.title, e)
-                continue
-
-        self._log.debug("Found {} initial tracks", len(matched_tracks))
+        discovery_ratio = self.get_config_value(ug_config, defaults_cfg, "discovery_ratio", 30)
+        exclusion_days = self.get_config_value(ug_config, defaults_cfg, "exclusion_days", 30)
 
         # Get filters from config
         filters = ug_config.get("filters", {})
 
-        # Apply filters to matched tracks
-        if filters:
-            self._log.debug("Applying filters to {} tracks...", len(matched_tracks))
-            filtered_tracks = self.apply_playlist_filters(matched_tracks, filters)
-            self._log.debug("After filtering: {} tracks", len(filtered_tracks))
-        else:
-            filtered_tracks = matched_tracks
+        # If no genres configured in filters, use preferred_genres
+        if not filters:
+            filters = {'include': {'genres': preferred_genres}}
+        elif 'include' not in filters or 'genres' not in filters['include']:
+            if 'include' not in filters:
+                filters['include'] = {}
+            filters['include']['genres'] = preferred_genres
+            self._log.debug("Using preferred genres as no genres configured: {}", preferred_genres)
 
-        self._log.debug("Processing {} filtered tracks", len(filtered_tracks))
+        # Get initial track pool using configured or preferred genres and filters
+        self._log.info("Searching library with filters...")
+        all_library_tracks = self.get_filtered_library_tracks(
+            [], # No need to pass preferred_genres since they're now in filters if needed
+            filters,
+            exclusion_days
+        )
 
-        # Now convert filtered Plex tracks to beets items for final processing
-        final_tracks = []
-        for track in filtered_tracks:
-            try:
-                beets_item = plex_lookup.get(track.ratingKey)
-                if beets_item:
-                    final_tracks.append(beets_item)
-            except Exception as e:
-                self._log.debug("Error converting track {}: {}", track.title, e)
+        # Add similar tracks if they match the filter criteria
+        if len(similar_tracks) > 0:
+            filtered_similar = self.apply_playlist_filters(similar_tracks, filters)
 
-        self._log.debug("Found {} tracks matching all criteria", len(final_tracks))
+            # Add filtered similar tracks if not already included
+            seen_keys = set(track.ratingKey for track in all_library_tracks)
+            for track in filtered_similar:
+                if track.ratingKey not in seen_keys:
+                    all_library_tracks.append(track)
+                    seen_keys.add(track.ratingKey)
 
+            self._log.debug(
+                "Combined {} library tracks with {} filtered similar tracks",
+                len(all_library_tracks), len(filtered_similar)
+            )
+
+        # Rest of the method remains the same...
         # Split tracks into rated and unrated
         rated_tracks = []
         unrated_tracks = []
@@ -2714,5 +2786,5 @@ def clean_title(title):
     # Remove redundant spaces
     cleaned = ' '.join(cleaned.split())
 
-    return cleaned.strip()
+    retucleaned.strip()
 
