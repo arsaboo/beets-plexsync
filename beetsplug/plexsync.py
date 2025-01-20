@@ -1831,9 +1831,18 @@ class PlexSync(BeetsPlugin):
         if base_time is None:
             base_time = datetime.now()
 
-        # Rating score (60% weight)
+        # Rating score
         rating = float(getattr(track, 'plex_userrating', 0))
-        rating_score = (rating / 10) * 60 if rating > 0 else 0
+        is_rated = rating > 0
+
+        if is_rated:
+            # For rated tracks: rating=60%, recency=20%, popularity=20%
+            rating_score = (rating / 10) * 60
+            popularity_weight = 20
+        else:
+            # For unrated tracks: rating=0%, recency=20%, popularity=60%
+            rating_score = 0
+            popularity_weight = 60
 
         # Recency score (20% weight)
         last_played = getattr(track, 'plex_lastviewedat', None)
@@ -1843,9 +1852,9 @@ class PlexSync(BeetsPlugin):
             days_since_played = (base_time - datetime.fromtimestamp(last_played)).days
             recency_score = max(0, 20 - (days_since_played / 30) * 20)  # Decay over 30 days
 
-        # Popularity score (20% weight)
+        # Popularity score (weight varies based on rating status)
         popularity = int(getattr(track, 'spotify_track_popularity', 0))
-        popularity_score = (popularity / 100) * 20
+        popularity_score = (popularity / 100) * popularity_weight
 
         # Calculate base score
         base_score = rating_score + recency_score + popularity_score
@@ -1855,6 +1864,18 @@ class PlexSync(BeetsPlugin):
 
         # Calculate final score
         final_score = base_score + gaussian_noise
+
+        # Log the scoring breakdown for debugging
+        self._log.debug(
+            "Score breakdown for {}: rating={} ({}%), recency={} (20%), popularity={} ({}%), final={}",
+            track.title,
+            rating_score,
+            60 if is_rated else 0,
+            recency_score,
+            popularity_score,
+            popularity_weight,
+            final_score
+        )
 
         return max(0, min(100, final_score))  # Clamp between 0 and 100
 
