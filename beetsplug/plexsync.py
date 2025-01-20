@@ -1822,50 +1822,90 @@ class PlexSync(BeetsPlugin):
         else:
             return 20 * 0.2
 
-    def calculate_track_score(self, track, base_time=None):
-        """Calculate comprehensive score for a track."""
-        import random
+    def calculate_track_score(self, track, base_time=None, tracks_context=None):
+        """Calculate comprehensive score for a track using standardized variables.
 
+        Args:
+            track: The track to score
+            base_time: Reference time for recency calculations
+            tracks_context: Optional list of tracks to use for standardization stats.
+                        If None, will use population means/stds.
+        """
         import numpy as np
+        from scipy import stats
 
         if base_time is None:
             base_time = datetime.now()
 
-        # Rating score
+        # Get raw values
         rating = float(getattr(track, 'plex_userrating', 0))
+        last_played = getattr(track, 'plex_lastviewedat', None)
+        popularity = float(getattr(track, 'spotify_track_popularity', 0))
+
+        # Calculate days since played
+        if last_played:
+            days_since_played = (base_time - datetime.fromtimestamp(last_played)).days
+        else:
+            days_since_played = 365  # Use 1 year as default for never played
+
+        # If we have context tracks, calculate means and stds
+        if tracks_context:
+            # Get values for all tracks
+            all_ratings = [float(getattr(t, 'plex_userrating', 0)) for t in tracks_context]
+            all_days = [
+                (base_time - datetime.fromtimestamp(getattr(t, 'plex_lastviewedat', base_time - timedelta(days=365)))).days
+                for t in tracks_context
+            ]
+            all_popularity = [float(getattr(t, 'spotify_track_popularity', 0)) for t in tracks_context]
+
+            # Calculate means and stds
+            rating_mean, rating_std = np.mean(all_ratings), np.std(all_ratings) or 1
+            days_mean, days_std = np.mean(all_days), np.std(all_days) or 1
+            popularity_mean, popularity_std = np.mean(all_popularity), np.std(all_popularity) or 1
+        else:
+            # Use population estimates if no context
+            rating_mean, rating_std = 5, 2.5  # Assuming ratings 0-10
+            days_mean, days_std = 180, 90     # Assuming ~6 months average
+            popularity_mean, popularity_std = 50, 25  # Spotify popularity 0-100
+
+        # Calculate z-scores
+        z_rating = (rating - rating_mean) / rating_std if rating > 0 else 0
+        z_recency = -(days_since_played - days_mean) / days_std  # Negative because fewer days = more recent
+        z_popularity = (popularity - popularity_mean) / popularity_std
+
+        # Determine if track is rated
         is_rated = rating > 0
 
+        # Apply weights based on rating status
         if is_rated:
             # For rated tracks: rating=60%, recency=20%, popularity=20%
-            rating_score = (rating / 10) * 60
-            popularity_weight = 20
+            weighted_score = (z_rating * 0.6) + (z_recency * 0.2) + (z_popularity * 0.2)
         else:
             # For unrated tracks: rating=0%, recency=20%, popularity=60%
-            rating_score = 0
-            popularity_weight = 60
+            weighted_score = (z_recency * 0.2) + (z_popularity * 0.6)
 
-        # Recency score (20% weight)
-        last_played = getattr(track, 'plex_lastviewedat', None)
-        if not last_played:
-            recency_score = 20  # Never played gets full recency score
-        else:
-            days_since_played = (base_time - datetime.fromtimestamp(last_played)).days
-            recency_score = max(0, 20 - (days_since_played / 30) * 20)  # Decay over 30 days
+        # Convert to 0-100 scale using percentile
+        final_score = stats.norm.cdf(weighted_score) * 100
 
-        # Popularity score (weight varies based on rating status)
-        popularity = int(getattr(track, 'spotify_track_popularity', 0))
-        popularity_score = (popularity / 100) * popularity_weight
+        # Add small gaussian noise for variety (scaled appropriately)
+        noise = np.random.normal(0, 2)
+        final_score = final_score + noise
 
-        # Calculate base score
-        base_score = rating_score + recency_score + popularity_score
+        # Debug logging
+        self._log.debug(
+            "Score components for {}: rating={:.2f} (z={:.2f}), days={} (z={:.2f}), "
+            "popularity={:.2f} (z={:.2f}), final={:.2f}",
+            track.title,
+            rating,
+            z_rating,
+            days_since_played,
+            z_recency,
+            popularity,
+            z_popularity,
+            final_score
+        )
 
-        # Add gaussian noise (mean=0, std=2.5) for variety
-        gaussian_noise = np.random.normal(0, 2.5)
-
-        # Calculate final score
-        final_score = base_score + gaussian_noise
-
-        return max(0, min(100, final_score))  # Clamp between 0 and 100
+        return max(0, min(100, final_score))
 
     def select_tracks_weighted(self, tracks, num_tracks):
         """Select tracks using weighted probability based on scores."""
