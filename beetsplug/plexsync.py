@@ -1865,18 +1865,6 @@ class PlexSync(BeetsPlugin):
         # Calculate final score
         final_score = base_score + gaussian_noise
 
-        # Log the scoring breakdown for debugging
-        self._log.debug(
-            "Score breakdown for {}: rating={} ({}%), recency={} (20%), popularity={} ({}%), final={}",
-            track.title,
-            rating_score,
-            60 if is_rated else 0,
-            recency_score,
-            popularity_score,
-            popularity_weight,
-            final_score
-        )
-
         return max(0, min(100, final_score))  # Clamp between 0 and 100
 
     def select_tracks_weighted(self, tracks, num_tracks):
