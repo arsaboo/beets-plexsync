@@ -1835,11 +1835,13 @@ class PlexSync(BeetsPlugin):
         last_played = getattr(track, 'plex_lastviewedat', None)
         popularity = float(getattr(track, 'spotify_track_popularity', 0))
 
-        # For never played tracks, add some randomness to days_since_played
+        # Cap days_since_played at 365 days for never played tracks with randomness
         if last_played is None:
             days_since_played = 365 + np.random.normal(0, 30)  # Mean 365 days with 30 day std
         else:
-            days_since_played = (base_time - datetime.fromtimestamp(last_played)).days
+            days = (base_time - datetime.fromtimestamp(last_played)).days
+            # Cap at 730 days (2 years) to avoid extreme values
+            days_since_played = min(days, 730)
 
         # If we have context tracks, calculate means and stds
         if tracks_context:
@@ -1858,7 +1860,7 @@ class PlexSync(BeetsPlugin):
         else:
             # Use better population estimates
             rating_mean, rating_std = 5, 2.5        # Ratings 0-10
-            days_mean, days_std = 180, 90          # ~6 months average
+            days_mean, days_std = 180, 120         # ~6 months mean, 4 months std
             popularity_mean, popularity_std = 30, 20  # Spotify popularity 0-100, adjusted mean
 
         # Calculate z-scores with bounds
