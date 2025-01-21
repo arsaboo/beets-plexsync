@@ -1822,39 +1822,108 @@ class PlexSync(BeetsPlugin):
         else:
             return 20 * 0.2
 
-    def calculate_track_score(self, track, base_time=None):
-        """Calculate comprehensive score for a track."""
-        import random
-
+    def calculate_track_score(self, track, base_time=None, tracks_context=None):
+        """Calculate comprehensive score for a track using standardized variables."""
         import numpy as np
+        from scipy import stats
 
         if base_time is None:
             base_time = datetime.now()
 
-        # Rating score (60% weight)
+        # Get raw values with better defaults for never played/rated tracks
         rating = float(getattr(track, 'plex_userrating', 0))
-        rating_score = (rating / 10) * 60 if rating > 0 else 0
-
-        # Recency score (20% weight)
         last_played = getattr(track, 'plex_lastviewedat', None)
-        if not last_played:
-            recency_score = 20  # Never played gets full recency score
+        popularity = float(getattr(track, 'spotify_track_popularity', 0))
+        release_year = getattr(track, 'year', None)
+
+        # Convert release year to age
+        if release_year:
+            try:
+                release_year = int(release_year)
+                age = base_time.year - release_year
+            except ValueError:
+                age = 0  # Default to 0 if year is invalid
         else:
-            days_since_played = (base_time - datetime.fromtimestamp(last_played)).days
-            recency_score = max(0, 20 - (days_since_played / 30) * 20)  # Decay over 30 days
+            age = 0  # Default to 0 if year is missing
 
-        # Popularity score (20% weight)
-        popularity = int(getattr(track, 'spotify_track_popularity', 0))
-        popularity_score = (popularity / 100) * 20
+        # For never played tracks, use exponential random distribution
+        if last_played is None:
+            # Use exponential distribution with mean=365 days
+            days_since_played = np.random.exponential(365)
+        else:
+            days = (base_time - datetime.fromtimestamp(last_played)).days
+            # Use exponential decay instead of hard cap
+            days_since_played = min(days, 1095)  # Cap at 3 years
 
-        # Calculate base score
-        base_score = rating_score + recency_score + popularity_score
+        # If we have context tracks, calculate means and stds
+        if tracks_context:
+            # Get values for all tracks
+            all_ratings = [float(getattr(t, 'plex_userrating', 0)) for t in tracks_context]
+            all_days = [
+                (base_time - datetime.fromtimestamp(getattr(t, 'plex_lastviewedat', base_time - timedelta(days=365)))).days
+                for t in tracks_context
+            ]
+            all_popularity = [float(getattr(t, 'spotify_track_popularity', 0)) for t in tracks_context]
+            all_ages = [base_time.year - int(getattr(t, 'year', base_time.year)) for t in tracks_context]
 
-        # Add gaussian noise (mean=0, std=2.5) for variety
-        gaussian_noise = np.random.normal(0, 2.5)
+            # Calculate means and stds
+            rating_mean, rating_std = np.mean(all_ratings), np.std(all_ratings) or 1
+            days_mean, days_std = np.mean(all_days), np.std(all_days) or 1
+            popularity_mean, popularity_std = np.mean(all_popularity), np.std(all_popularity) or 1
+            age_mean, age_std = np.mean(all_ages), np.std(all_ages) or 1
+        else:
+            # Use better population estimates
+            rating_mean, rating_std = 5, 2.5        # Ratings 0-10
+            days_mean, days_std = 365, 180         # ~1 year mean, 6 months std
+            popularity_mean, popularity_std = 30, 20  # Spotify popularity 0-100, adjusted mean
+            age_mean, age_std = 30, 10              # Age mean 10 years, std 5 years
 
-        # Calculate final score
-        final_score = base_score + gaussian_noise
+        # Calculate z-scores with bounds
+        z_rating = (rating - rating_mean) / rating_std if rating > 0 else -2.0
+        z_recency = -(days_since_played - days_mean) / days_std  # Negative because fewer days = more recent
+        z_popularity = (popularity - popularity_mean) / popularity_std
+        z_age = -(age - age_mean) / age_std  # Negative because fewer years = more recent
+
+        # Bound z-scores to avoid extreme values
+        z_rating = np.clip(z_rating, -3, 3)
+        z_recency = np.clip(z_recency, -3, 3)
+        z_popularity = np.clip(z_popularity, -3, 3)
+        z_age = np.clip(z_age, -3, 3)
+
+        # Determine if track is rated
+        is_rated = rating > 0
+
+        # Apply weights based on rating status
+        if is_rated:
+            # For rated tracks: rating=50%, recency=10%, popularity=10%, age=20%
+            weighted_score = (z_rating * 0.5) + (z_recency * 0.1) + (z_popularity * 0.1) + (z_age * 0.2)
+        else:
+            # For unrated tracks: popularity=50%, recency=20%, age=30%
+            weighted_score = (z_recency * 0.2) + (z_popularity * 0.5) + (z_age * 0.3)
+
+        # Convert to 0-100 scale using modified percentile calculation
+        # This ensures better spread across the range
+        final_score = (stats.norm.cdf(weighted_score / 2) * 100)  # Divide by 2 to spread scores more
+
+        # Add small gaussian noise for variety (scaled appropriately)
+        noise = np.random.normal(0, 2)
+        final_score = final_score + noise
+
+        # Debug logging
+        self._log.debug(
+            "Score components for {}: rating={:.2f} (z={:.2f}), days={:.0f} (z={:.2f}), "
+            "popularity={:.2f} (z={:.2f}), age={:.0f} (z={:.2f}), final={:.2f}",
+            track.title,
+            rating,
+            z_rating,
+            days_since_played,
+            z_recency,
+            popularity,
+            z_popularity,
+            age,
+            z_age,
+            final_score
+        )
 
         return max(0, min(100, final_score))  # Clamp between 0 and 100
 
@@ -2789,5 +2858,5 @@ def clean_title(title):
     # Remove redundant spaces
     cleaned = ' '.join(cleaned.split())
 
-    return cleaned.strip()
+    return cleaned
 
