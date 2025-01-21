@@ -1835,13 +1835,14 @@ class PlexSync(BeetsPlugin):
         last_played = getattr(track, 'plex_lastviewedat', None)
         popularity = float(getattr(track, 'spotify_track_popularity', 0))
 
-        # Cap days_since_played at 365 days for never played tracks with randomness
+        # For never played tracks, use exponential random distribution
         if last_played is None:
-            days_since_played = 365 + np.random.normal(0, 30)  # Mean 365 days with 30 day std
+            # Use exponential distribution with mean=365 days
+            days_since_played = np.random.exponential(365)
         else:
             days = (base_time - datetime.fromtimestamp(last_played)).days
-            # Cap at 730 days (2 years) to avoid extreme values
-            days_since_played = min(days, 730)
+            # Use exponential decay instead of hard cap
+            days_since_played = min(days, 1095)  # Cap at 3 years
 
         # If we have context tracks, calculate means and stds
         if tracks_context:
@@ -1860,11 +1861,11 @@ class PlexSync(BeetsPlugin):
         else:
             # Use better population estimates
             rating_mean, rating_std = 5, 2.5        # Ratings 0-10
-            days_mean, days_std = 180, 120         # ~6 months mean, 4 months std
+            days_mean, days_std = 180, 180         # ~6 months mean, 6 months std
             popularity_mean, popularity_std = 30, 20  # Spotify popularity 0-100, adjusted mean
 
         # Calculate z-scores with bounds
-        z_rating = (rating - rating_mean) / rating_std if rating > 0 else -2.0  # Unrated tracks get low z-score
+        z_rating = (rating - rating_mean) / rating_std if rating > 0 else -2.0
         z_recency = -(days_since_played - days_mean) / days_std  # Negative because fewer days = more recent
         z_popularity = (popularity - popularity_mean) / popularity_std
 
@@ -2839,5 +2840,5 @@ def clean_title(title):
     # Remove redundant spaces
     cleaned = ' '.join(cleaned.split())
 
-    return cleaned.strip()
+    return cleaned
 
