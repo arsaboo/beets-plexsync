@@ -96,7 +96,7 @@ class Cache:
                 cursor.execute('''
                     CREATE TABLE IF NOT EXISTS spotify_api_cache (
                         playlist_id TEXT PRIMARY KEY,
-                        response_data TEXT,
+                        data TEXT,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 ''')
@@ -105,7 +105,7 @@ class Cache:
                 cursor.execute('''
                     CREATE TABLE IF NOT EXISTS spotify_web_cache (
                         playlist_id TEXT PRIMARY KEY,
-                        html_data TEXT,
+                        data TEXT,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 ''')
@@ -114,7 +114,7 @@ class Cache:
                 cursor.execute('''
                     CREATE TABLE IF NOT EXISTS spotify_tracks_cache (
                         playlist_id TEXT PRIMARY KEY,
-                        tracks_data TEXT,
+                        data TEXT,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 ''')
@@ -302,7 +302,7 @@ class Cache:
 
                 # Get cached data
                 cursor.execute(
-                    f'SELECT response_data FROM {table_name} WHERE playlist_id = ?',
+                    f'SELECT data FROM {table_name} WHERE playlist_id = ?',
                     (playlist_id,)
                 )
                 row = cursor.fetchone()
@@ -327,9 +327,18 @@ class Cache:
                 cursor = conn.cursor()
                 table_name = f'spotify_{cache_type}_cache'
 
+                # Convert datetime objects to ISO format strings
+                def datetime_handler(obj):
+                    if isinstance(obj, datetime):
+                        return obj.isoformat()
+                    return str(obj)
+
+                # Store data as JSON string
+                json_data = json.dumps(data, default=datetime_handler)
+
                 cursor.execute(
-                    f'REPLACE INTO {table_name} (playlist_id, response_data) VALUES (?, ?)',
-                    (playlist_id, json.dumps(data))
+                    f'REPLACE INTO {table_name} (playlist_id, data) VALUES (?, ?)',
+                    (playlist_id, json_data)
                 )
                 conn.commit()
                 logger.debug('Cached Spotify {} data for playlist: {}',
