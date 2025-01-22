@@ -47,6 +47,7 @@ class Cache:
         self.plugin = plugin_instance  # Store reference to plugin instance
         logger.debug('Initializing cache at: {}', db_path)
         self._initialize_db()
+        self._migrate_spotify_tables()  # Add migration check before initialization
         self._initialize_spotify_cache()
 
     def _initialize_db(self):
@@ -86,56 +87,65 @@ class Cache:
             logger.error('Failed to initialize cache database: {}', e)
             raise
 
+    def _migrate_spotify_tables(self):
+        """Migrate Spotify cache tables to new schema if needed."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+
+                # Check if old tables exist and their schema
+                tables = ['spotify_api_cache', 'spotify_web_cache', 'spotify_tracks_cache']
+                for table in tables:
+                    try:
+                        cursor.execute(f"PRAGMA table_info({table})")
+                        columns = {col[1] for col in cursor.fetchall()}
+
+                        # If table exists but has old schema (response_data), drop it
+                        if 'response_data' in columns:
+                            logger.debug('Dropping old {} table for migration', table)
+                            cursor.execute(f"DROP TABLE {table}")
+                            conn.commit()
+
+                    except sqlite3.OperationalError:
+                        # Table doesn't exist, which is fine
+                        pass
+
+                conn.commit()
+                logger.debug('Completed Spotify tables migration check')
+
+        except Exception as e:
+            logger.error('Failed to migrate Spotify cache tables: {}', e)
+
     def _initialize_spotify_cache(self):
         """Initialize Spotify-specific cache tables."""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
 
-                # Create table for API responses
-                cursor.execute('''
-                    CREATE TABLE IF NOT EXISTS spotify_api_cache (
-                        playlist_id TEXT PRIMARY KEY,
-                        data TEXT,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    )
-                ''')
+                # Create tables with new schema
+                for table_type in ['api', 'web', 'tracks']:
+                    table_name = f'spotify_{table_type}_cache'
+                    cursor.execute(f'''
+                        CREATE TABLE IF NOT EXISTS {table_name} (
+                            playlist_id TEXT PRIMARY KEY,
+                            data TEXT,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            UNIQUE(playlist_id)
+                        )
+                    ''')
 
-                # Create table for web scraping results
-                cursor.execute('''
-                    CREATE TABLE IF NOT EXISTS spotify_web_cache (
-                        playlist_id TEXT PRIMARY KEY,
-                        data TEXT,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    )
-                ''')
-
-                # Create table for processed tracks
-                cursor.execute('''
-                    CREATE TABLE IF NOT EXISTS spotify_tracks_cache (
-                        playlist_id TEXT PRIMARY KEY,
-                        data TEXT,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    )
-                ''')
-
-                cursor.execute('''
-                    CREATE INDEX IF NOT EXISTS idx_spotify_api_created
-                    ON spotify_api_cache(created_at)
-                ''')
-                cursor.execute('''
-                    CREATE INDEX IF NOT EXISTS idx_spotify_web_created
-                    ON spotify_web_cache(created_at)
-                ''')
-                cursor.execute('''
-                    CREATE INDEX IF NOT EXISTS idx_spotify_tracks_created
-                    ON spotify_tracks_cache(created_at)
-                ''')
+                    # Create index for each table
+                    cursor.execute(f'''
+                        CREATE INDEX IF NOT EXISTS idx_{table_name}_created
+                        ON {table_name}(created_at)
+                    ''')
 
                 conn.commit()
                 logger.debug('Spotify cache tables initialized successfully')
+
         except Exception as e:
             logger.error('Failed to initialize Spotify cache tables: {}', e)
+            raise
 
     def _cleanup_expired(self, days=7):
         """Remove negative cache entries older than specified days."""
