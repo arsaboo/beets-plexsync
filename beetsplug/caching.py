@@ -47,6 +47,7 @@ class Cache:
         self.plugin = plugin_instance  # Store reference to plugin instance
         logger.debug('Initializing cache at: {}', db_path)
         self._initialize_db()
+        self._initialize_spotify_cache()
 
     def _initialize_db(self):
         """Initialize the SQLite database."""
@@ -84,6 +85,57 @@ class Cache:
         except Exception as e:
             logger.error('Failed to initialize cache database: {}', e)
             raise
+
+    def _initialize_spotify_cache(self):
+        """Initialize Spotify-specific cache tables."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+
+                # Create table for API responses
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS spotify_api_cache (
+                        playlist_id TEXT PRIMARY KEY,
+                        response_data TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                ''')
+
+                # Create table for web scraping results
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS spotify_web_cache (
+                        playlist_id TEXT PRIMARY KEY,
+                        html_data TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                ''')
+
+                # Create table for processed tracks
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS spotify_tracks_cache (
+                        playlist_id TEXT PRIMARY KEY,
+                        tracks_data TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                ''')
+
+                cursor.execute('''
+                    CREATE INDEX IF NOT EXISTS idx_spotify_api_created
+                    ON spotify_api_cache(created_at)
+                ''')
+                cursor.execute('''
+                    CREATE INDEX IF NOT EXISTS idx_spotify_web_created
+                    ON spotify_web_cache(created_at)
+                ''')
+                cursor.execute('''
+                    CREATE INDEX IF NOT EXISTS idx_spotify_tracks_created
+                    ON spotify_tracks_cache(created_at)
+                ''')
+
+                conn.commit()
+                logger.debug('Spotify cache tables initialized successfully')
+        except Exception as e:
+            logger.error('Failed to initialize Spotify cache tables: {}', e)
 
     def _cleanup_expired(self, days=7):
         """Remove negative cache entries older than specified days."""
@@ -232,6 +284,59 @@ class Cache:
             logger.error('Cache storage failed for query {}: {}',
                         self._sanitize_query_for_log(cache_key), str(e))
             return None
+
+    def get_spotify_cache(self, playlist_id, cache_type='api'):
+        """Get cached Spotify data."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                table_name = f'spotify_{cache_type}_cache'
+
+                # Check for expired entries (48 hours)
+                expiry = datetime.now() - timedelta(hours=48)
+                cursor.execute(
+                    f'DELETE FROM {table_name} WHERE created_at < ?',
+                    (expiry.isoformat(),)
+                )
+                conn.commit()
+
+                # Get cached data
+                cursor.execute(
+                    f'SELECT response_data FROM {table_name} WHERE playlist_id = ?',
+                    (playlist_id,)
+                )
+                row = cursor.fetchone()
+
+                if row:
+                    logger.debug('Cache hit for Spotify {} cache: {}',
+                               cache_type, playlist_id)
+                    return json.loads(row[0])
+
+                logger.debug('Cache miss for Spotify {} cache: {}',
+                           cache_type, playlist_id)
+                return None
+
+        except Exception as e:
+            logger.error('Spotify cache lookup failed: {}', e)
+            return None
+
+    def set_spotify_cache(self, playlist_id, data, cache_type='api'):
+        """Store Spotify data in cache."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                table_name = f'spotify_{cache_type}_cache'
+
+                cursor.execute(
+                    f'REPLACE INTO {table_name} (playlist_id, response_data) VALUES (?, ?)',
+                    (playlist_id, json.dumps(data))
+                )
+                conn.commit()
+                logger.debug('Cached Spotify {} data for playlist: {}',
+                           cache_type, playlist_id)
+
+        except Exception as e:
+            logger.error('Spotify cache storage failed: {}', e)
 
     def clear(self):
         """Clear all cached entries."""

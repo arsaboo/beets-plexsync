@@ -248,10 +248,23 @@ class PlexSync(BeetsPlugin):
         """Import a Spotify playlist using API first, then fallback to scraping."""
         song_list = []
 
+        # Check cache for processed tracks first
+        cached_tracks = self.cache.get_spotify_cache(playlist_id, 'tracks')
+        if cached_tracks:
+            self._log.info("Using cached track list for playlist {}", playlist_id)
+            return cached_tracks
+
         # First try the API method
         try:
-            self.authenticate_spotify()
-            songs = self.get_playlist_tracks(playlist_id)
+            # Check API cache
+            cached_api_data = self.cache.get_spotify_cache(playlist_id, 'api')
+            if cached_api_data:
+                songs = cached_api_data
+            else:
+                self.authenticate_spotify()
+                songs = self.get_playlist_tracks(playlist_id)
+                if songs:
+                    self.cache.set_spotify_cache(playlist_id, songs, 'api')
 
             if songs:
                 for song in songs:
@@ -259,11 +272,16 @@ class PlexSync(BeetsPlugin):
                         if track_data := self.process_spotify_track(song["track"]):
                             song_list.append(track_data)
                     except Exception as e:
-                        self._log.debug("Error processing track {}: {}", song.get("track", {}).get("name"), e)
+                        self._log.debug("Error processing track {}: {}",
+                                      song.get("track", {}).get("name"), e)
 
                 if song_list:
-                    self._log.info("Successfully imported {} tracks via Spotify API", len(song_list))
+                    self._log.info("Successfully imported {} tracks via Spotify API",
+                                 len(song_list))
+                    # Cache processed tracks
+                    self.cache.set_spotify_cache(playlist_id, song_list, 'tracks')
                     return song_list
+
         except Exception as e:
             self._log.warning("Spotify API import failed: {}. Falling back to scraping.", e)
 
@@ -272,13 +290,19 @@ class PlexSync(BeetsPlugin):
         playlist_url = f"https://open.spotify.com/playlist/{playlist_id}"
 
         try:
-            # Scrape the playlist page
-            response = requests.get(playlist_url, headers=self.headers)
-            if response.status_code != 200:
-                self._log.error("Failed to fetch playlist page: {}", response.status_code)
-                return song_list
+            # Check web scraping cache
+            cached_html = self.cache.get_spotify_cache(playlist_id, 'web')
+            if cached_html:
+                soup = BeautifulSoup(cached_html, "html.parser")
+            else:
+                response = requests.get(playlist_url, headers=self.headers)
+                if response.status_code != 200:
+                    self._log.error("Failed to fetch playlist page: {}", response.status_code)
+                    return song_list
 
-            soup = BeautifulSoup(response.text, "html.parser")
+                soup = BeautifulSoup(response.text, "html.parser")
+                self.cache.set_spotify_cache(playlist_id, response.text, 'web')
+
             track_metas = soup.find_all("meta", {"name": "music:song"})
 
             # Extract track IDs
@@ -328,6 +352,10 @@ class PlexSync(BeetsPlugin):
 
                 except Exception as e:
                     self._log.debug("Error processing batch: {}", e)
+
+            # Cache final processed tracks if successful
+            if song_list:
+                self.cache.set_spotify_cache(playlist_id, song_list, 'tracks')
 
         except Exception as e:
             self._log.error("Error during web scraping import: {}", e)
@@ -2967,4 +2995,5 @@ def clean_title(title):
     cleaned = ' '.join(cleaned.split())
 
     return cleaned
+```
 
