@@ -2995,5 +2995,3 @@ def clean_title(title):
     cleaned = ' '.join(cleaned.split())
 
     return cleaned
-```
-
