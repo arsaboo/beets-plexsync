@@ -79,6 +79,16 @@ class PlexSync(BeetsPlugin):
         """Initialize plexsync plugin."""
         super().__init__()
 
+        self.headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
+            "DNT": "1",  # Do Not Track Request Header
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
+        }
+
         # Add event loop initialization
         self.loop = None
 
@@ -202,38 +212,155 @@ class PlexSync(BeetsPlugin):
         # Create a Spotify object with the auth_manager
         self.sp = spotipy.Spotify(auth=self.token_info.get("access_token"))
 
-    def import_spotify_playlist(self, playlist_id):
-        """This function returns a list of tracks in a Spotify playlist."""
-        self.authenticate_spotify()
-        songs = self.get_playlist_tracks(playlist_id)
-        song_list = []
-        for song in songs:
+    def process_spotify_track(self, track):
+        """Process a single Spotify track into a standardized format."""
+        try:
             # Find and store the song title
-            if ('From "' in song["track"]["name"]) or (
-                "From &quot" in song["track"]["name"]
-            ):
-                title_orig = song["track"]["name"].replace("&quot;", '"')
+            if ('From "' in track['name']) or ("From &quot" in track['name']):
+                title_orig = track['name'].replace("&quot;", '"')
                 title, album = self.parse_title(title_orig)
             else:
-                title = song["track"]["name"]
-                album = self.clean_album_name(song["track"]["album"]["name"])
+                title = track['name']
+                album = self.clean_album_name(track['album']['name'])
+
+            # Get year if available
             try:
-                year = dateutil.parser.parse(
-                    song["track"]["album"]["release_date"], ignoretz=True
-                )
-            except ValueError:
+                year = track['album'].get('release_date')
+                if year:
+                    year = dateutil.parser.parse(year, ignoretz=True)
+            except (ValueError, KeyError, AttributeError):
                 year = None
-            # Find and store the song artist
-            artist = song["track"]["artists"][0]["name"]
-            # Create a dictionary with the song information
-            song_dict = {
+
+            # Get primary artist
+            artist = track['artists'][0]['name'] if track['artists'] else "Unknown"
+
+            return {
                 "title": title.strip(),
                 "album": album.strip(),
                 "artist": artist.strip(),
-                "year": year,
+                "year": year
             }
-            # Append the dictionary to the list of songs
-            song_list.append(song_dict)
+        except Exception as e:
+            self._log.debug("Error processing Spotify track: {}", e)
+            return None
+
+    def import_spotify_playlist(self, playlist_id):
+        """Import a Spotify playlist using API first, then fallback to scraping."""
+        song_list = []
+
+        # Check cache for processed tracks first
+        cached_tracks = self.cache.get_spotify_cache(playlist_id, 'tracks')
+        if cached_tracks:
+            self._log.info("Using cached track list for playlist {}", playlist_id)
+            return cached_tracks
+
+        # First try the API method
+        try:
+            # Check API cache
+            cached_api_data = self.cache.get_spotify_cache(playlist_id, 'api')
+            if cached_api_data:
+                songs = cached_api_data
+            else:
+                self.authenticate_spotify()
+                songs = self.get_playlist_tracks(playlist_id)
+                if songs:
+                    self.cache.set_spotify_cache(playlist_id, songs, 'api')
+
+            if songs:
+                for song in songs:
+                    try:
+                        if track_data := self.process_spotify_track(song["track"]):
+                            song_list.append(track_data)
+                    except Exception as e:
+                        self._log.debug("Error processing track {}: {}",
+                                      song.get("track", {}).get("name"), e)
+
+                if song_list:
+                    self._log.info("Successfully imported {} tracks via Spotify API",
+                                 len(song_list))
+                    # Cache processed tracks
+                    self.cache.set_spotify_cache(playlist_id, song_list, 'tracks')
+                    return song_list
+
+        except Exception as e:
+            self._log.warning("Spotify API import failed: {}. Falling back to scraping.", e)
+
+        # Fallback to scraping method
+        self._log.info("Attempting playlist import via web scraping")
+        playlist_url = f"https://open.spotify.com/playlist/{playlist_id}"
+
+        try:
+            # Check web scraping cache
+            cached_html = self.cache.get_spotify_cache(playlist_id, 'web')
+            if cached_html:
+                soup = BeautifulSoup(cached_html, "html.parser")
+            else:
+                response = requests.get(playlist_url, headers=self.headers)
+                if response.status_code != 200:
+                    self._log.error("Failed to fetch playlist page: {}", response.status_code)
+                    return song_list
+
+                soup = BeautifulSoup(response.text, "html.parser")
+                self.cache.set_spotify_cache(playlist_id, response.text, 'web')
+
+            track_metas = soup.find_all("meta", {"name": "music:song"})
+
+            # Extract track IDs
+            track_ids = []
+            for meta in track_metas:
+                if "content" in meta.attrs:
+                    track_id = re.search(r'track/([a-zA-Z0-9]+)', meta["content"])
+                    if track_id:
+                        track_ids.append(track_id.group(1))
+
+            if not track_ids:
+                self._log.warning("No track IDs found in playlist page")
+                return song_list
+
+            # Process tracks in batches of 50
+            for i in range(0, len(track_ids), 50):
+                batch = track_ids[i:i + 50]
+                try:
+                    # Try API first for the batch
+                    if hasattr(self, 'sp'):
+                        tracks = self.sp.tracks(batch)
+                        if tracks and tracks.get('tracks'):
+                            for track in tracks['tracks']:
+                                if track_data := self.process_spotify_track(track):
+                                    song_list.append(track_data)
+                            continue
+
+                    # Fallback to individual track scraping if API fails
+                    for track_id in batch:
+                        track_url = f"https://open.spotify.com/track/{track_id}"
+                        track_response = requests.get(track_url, headers=self.headers)
+
+                        if track_response.status_code == 200:
+                            track_soup = BeautifulSoup(track_response.text, 'html.parser')
+                            title = track_soup.find('meta', {'property': 'og:title'})
+                            description = track_soup.find('meta', {'property': 'og:description'})
+
+                            if description and description['content']:
+                                desc_parts = description['content'].split(' · ')
+                                song_dict = {
+                                    "title": title['content'].strip() if title else "Unknown",
+                                    "artist": desc_parts[0].strip() if len(desc_parts) > 0 else "Unknown",
+                                    "album": desc_parts[1].strip() if len(desc_parts) > 1 else "Unknown",
+                                    "year": None
+                                }
+                                song_list.append(song_dict)
+
+                except Exception as e:
+                    self._log.debug("Error processing batch: {}", e)
+
+            # Cache final processed tracks if successful
+            if song_list:
+                self.cache.set_spotify_cache(playlist_id, song_list, 'tracks')
+
+        except Exception as e:
+            self._log.error("Error during web scraping import: {}", e)
+
+        self._log.info("Imported {} tracks via scraping", len(song_list))
         return song_list
 
     def get_playlist_id(self, url):
@@ -833,6 +960,10 @@ class PlexSync(BeetsPlugin):
 
     def _plex_add_playlist_item(self, items, playlist):
         """Add items to Plex playlist."""
+        if not items:
+            self._log.warning("No items to add to playlist {}", playlist)
+            return
+
         plex_set = set()
         try:
             plst = self.plex.playlist(playlist)
@@ -1231,6 +1362,11 @@ class PlexSync(BeetsPlugin):
                 found = self.search_plex_song(song, manual_search)
                 if found is not None:
                     song_list.append(found)
+
+        if not song_list:
+            self._log.warning("No songs found to add to playlist {}", playlist)
+            return
+
         self._plex_add_playlist_item(song_list, playlist)
 
     def _plex_import_search(self, playlist, search, limit=10):
@@ -2859,4 +2995,3 @@ def clean_title(title):
     cleaned = ' '.join(cleaned.split())
 
     return cleaned
-
