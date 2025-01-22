@@ -92,33 +92,56 @@ class Cache:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
 
-                # Drop existing tables if they exist
-                for table_type in ['api', 'web', 'tracks']:
-                    try:
-                        cursor.execute(f'DROP TABLE IF EXISTS spotify_{table_type}_cache')
-                    except sqlite3.OperationalError as e:
-                        logger.debug('Error dropping table: {}', e)
+                # Check if tables exist
+                existing_tables = set()
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                for row in cursor.fetchall():
+                    existing_tables.add(row[0])
 
-                # Create fresh tables with correct schema
+                # Create tables only if they don't exist
                 for table_type in ['api', 'web', 'tracks']:
                     table_name = f'spotify_{table_type}_cache'
-                    cursor.execute(f'''
-                        CREATE TABLE {table_name} (
-                            playlist_id TEXT PRIMARY KEY,
-                            data TEXT,
-                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                        )
-                    ''')
-                    cursor.execute(f'''
-                        CREATE INDEX IF NOT EXISTS idx_{table_name}_created
-                        ON {table_name}(created_at)
-                    ''')
+                    if table_name not in existing_tables:
+                        cursor.execute(f'''
+                            CREATE TABLE {table_name} (
+                                playlist_id TEXT PRIMARY KEY,
+                                data TEXT,
+                                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                            )
+                        ''')
+                        cursor.execute(f'''
+                            CREATE INDEX IF NOT EXISTS idx_{table_name}_created
+                            ON {table_name}(created_at)
+                        ''')
+                        logger.debug('Created new {} table', table_name)
 
                 conn.commit()
-                logger.debug('Created fresh Spotify cache tables')
+                logger.debug('Spotify cache tables verified')
 
         except Exception as e:
             logger.error('Failed to initialize Spotify cache tables: {}', e)
+            raise
+
+    def clear_expired_spotify_cache(self):
+        """Clear expired Spotify cache entries."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                expiry = datetime.now() - timedelta(hours=48)
+
+                for table_type in ['api', 'web', 'tracks']:
+                    table_name = f'spotify_{table_type}_cache'
+                    cursor.execute(
+                        f'DELETE FROM {table_name} WHERE created_at < ?',
+                        (expiry.isoformat(),)
+                    )
+                    if cursor.rowcount:
+                        logger.debug('Cleaned {} expired entries from {}',
+                                   cursor.rowcount, table_name)
+
+                conn.commit()
+        except Exception as e:
+            logger.error('Failed to clear expired Spotify cache: {}', e)
 
     def _cleanup_expired(self, days=7):
         """Remove negative cache entries older than specified days."""
@@ -271,19 +294,13 @@ class Cache:
     def get_spotify_cache(self, playlist_id, cache_type='api'):
         """Get cached Spotify data."""
         try:
+            # Clear expired entries first
+            self.clear_expired_spotify_cache()
+
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 table_name = f'spotify_{cache_type}_cache'
 
-                # Check for expired entries (48 hours)
-                expiry = datetime.now() - timedelta(hours=48)
-                cursor.execute(
-                    f'DELETE FROM {table_name} WHERE created_at < ?',
-                    (expiry.isoformat(),)
-                )
-                conn.commit()
-
-                # Get cached data
                 cursor.execute(
                     f'SELECT data FROM {table_name} WHERE playlist_id = ?',
                     (playlist_id,)
