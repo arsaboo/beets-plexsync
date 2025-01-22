@@ -230,14 +230,19 @@ class PlexSync(BeetsPlugin):
                 # Now use Spotify API to get track details in batches
                 if track_ids:
                     try:
-                        self.authenticate_spotify()
                         # Process track IDs in batches of 50 (Spotify API limit)
                         for i in range(0, len(track_ids), 50):
                             batch = track_ids[i:i + 50]
-                            tracks = self.sp.tracks(batch)
+                            try:
+                                tracks = self.sp.tracks(batch)
+                                if not tracks or not tracks.get('tracks'):
+                                    self._log.error("No track data returned from Spotify API for batch")
+                                    continue
 
-                            for track in tracks['tracks']:
-                                if track:  # Check if track exists
+                                for track in tracks['tracks']:
+                                    if not track:  # Skip if track is None or empty
+                                        continue
+
                                     # Find and store the song title
                                     if ('From "' in track['name']) or ("From &quot" in track['name']):
                                         title_orig = track['name'].replace("&quot;", '"')
@@ -262,6 +267,11 @@ class PlexSync(BeetsPlugin):
                                         "year": year
                                     }
                                     song_list.append(song_dict)
+                                    self._log.debug("Added track: {} - {} - {}", title, artist, album)
+
+                            except Exception as e:
+                                self._log.error("Error processing batch of tracks: {}", e)
+                                continue
 
                     except Exception as e:
                         self._log.error("Error using Spotify API: {}. Falling back to basic scraping.", e)
@@ -283,7 +293,7 @@ class PlexSync(BeetsPlugin):
                                     }
                                     song_list.append(song_dict)
 
-            return song_list
+                return song_list
 
         except Exception as e:
             self._log.error("Error importing Spotify playlist: {}", str(e))
