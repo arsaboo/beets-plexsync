@@ -294,6 +294,10 @@ class PlexSync(BeetsPlugin):
         try:
             self.authenticate_spotify()
             songs = self.get_playlist_tracks(playlist_id)
+            if not songs:  # If get_playlist_tracks returns empty list, fall back immediately
+                self._log.info("No tracks returned from Spotify API, falling back to scraping method")
+                return self.import_spotify_playlist_scrape(playlist_id)
+
             song_list = []
             for song in songs:
                 # Find and store the song title
@@ -925,6 +929,10 @@ class PlexSync(BeetsPlugin):
 
     def _plex_add_playlist_item(self, items, playlist):
         """Add items to Plex playlist."""
+        if not items:
+            self._log.warning("No items to add to playlist {}", playlist)
+            return
+
         plex_set = set()
         try:
             plst = self.plex.playlist(playlist)
@@ -1323,6 +1331,11 @@ class PlexSync(BeetsPlugin):
                 found = self.search_plex_song(song, manual_search)
                 if found is not None:
                     song_list.append(found)
+
+        if not song_list:
+            self._log.warning("No songs found to add to playlist {}", playlist)
+            return
+
         self._plex_add_playlist_item(song_list, playlist)
 
     def _plex_import_search(self, playlist, search, limit=10):
