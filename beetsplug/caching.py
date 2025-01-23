@@ -331,12 +331,13 @@ class Cache:
                         (str(key), rating_key, cleaned_json)
                     )
                 conn.commit()
-                logger.debug('Cached result for query: {} (rating_key: {}, cleaned: {})',
+                # Use proper string formatting instead of %s
+                logger.debug('Cached result for query: "{}" (rating_key: {}, cleaned: {})',
                            self._sanitize_query_for_log(cache_key),
                            rating_key,
                            cleaned_metadata)
         except Exception as e:
-            logger.error('Cache storage failed for query {}: {}',
+            logger.error('Cache storage failed for query "{}": {}',
                         self._sanitize_query_for_log(cache_key), str(e))
             return None
 
