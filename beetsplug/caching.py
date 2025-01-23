@@ -123,21 +123,39 @@ class Cache:
             raise
 
     def clear_expired_spotify_cache(self):
-        """Clear expired Spotify cache entries."""
+        """Clear expired Spotify cache entries with randomized expiration."""
         try:
+            import random
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                expiry = datetime.now() - timedelta(hours=48)
 
+                # Get all entries
                 for table_type in ['api', 'web', 'tracks']:
                     table_name = f'spotify_{table_type}_cache'
                     cursor.execute(
-                        f'DELETE FROM {table_name} WHERE created_at < ?',
-                        (expiry.isoformat(),)
+                        f'SELECT playlist_id, created_at FROM {table_name}'
                     )
-                    if cursor.rowcount:
-                        logger.debug('Cleaned {} expired entries from {}',
-                                   cursor.rowcount, table_name)
+                    rows = cursor.fetchall()
+
+                    for playlist_id, created_at in rows:
+                        if created_at:
+                            # Generate random expiration between 36 and 60 hours
+                            expiry_hours = random.uniform(36, 60)
+                            created_dt = datetime.fromisoformat(created_at)
+                            expiry = created_dt + timedelta(hours=expiry_hours)
+
+                            # Check if expired
+                            if datetime.now() > expiry:
+                                cursor.execute(
+                                    f'DELETE FROM {table_name} WHERE playlist_id = ?',
+                                    (playlist_id,)
+                                )
+                                if cursor.rowcount:
+                                    logger.debug(
+                                        'Cleaned expired entry from {} (age: {:.1f}h)',
+                                        table_name,
+                                        expiry_hours
+                                    )
 
                 conn.commit()
         except Exception as e:
