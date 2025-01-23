@@ -1,11 +1,13 @@
-import sqlite3
 import json
-import os
 import logging
+import os
+import re
+import sqlite3
 from datetime import datetime, timedelta
-from plexapi.video import Video
+
 from plexapi.audio import Track
 from plexapi.server import PlexServer
+from plexapi.video import Video
 
 # Initialize logger with plexsync prefix
 logger = logging.getLogger('beets')
