@@ -184,16 +184,30 @@ class Cache:
         except Exception:
             return "<unserializable query>"
 
+    def normalize_text(self, text):
+        """Normalize text for consistent cache keys."""
+        if not text:
+            return ""
+        # Convert to lowercase
+        text = text.lower()
+        # Remove featuring artists
+        text = re.sub(r'\s*[\(\[]?(?:feat\.?|ft\.?|featuring)\s+[^\]\)]+[\]\)]?\s*$', '', text)
+        # Remove any remaining parentheses or brackets at the end
+        text = re.sub(r'\s*[\(\[][^\]\)]*[\]\)]\s*$', '', text)
+        # Remove extra whitespace
+        text = ' '.join(text.split())
+        return text
+
     def _make_cache_key(self, query_data):
         """Create a consistent cache key regardless of input type."""
         if isinstance(query_data, str):
             return query_data
         elif isinstance(query_data, dict):
-            # Only use essential fields for the key
+            # Normalize and clean the key fields
             key_data = {
-                "title": (query_data.get("title") or "").strip().lower(),
-                "artist": (query_data.get("artist") or "").strip().lower(),
-                "album": (query_data.get("album") or "").strip().lower()
+                "title": self.normalize_text(query_data.get("title", "")),
+                "artist": self.normalize_text(query_data.get("artist", "")),
+                "album": self.normalize_text(query_data.get("album", ""))
             }
             # Sort to ensure consistent order
             return json.dumps(sorted(key_data.items()))
@@ -252,19 +266,28 @@ class Cache:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
+                # Normalize the query for lookup
                 cache_key = self._make_cache_key(query)
 
+                # Try exact match first
                 cursor.execute(
                     'SELECT plex_ratingkey, cleaned_query FROM cache WHERE query = ?',
-                    (cache_key,)
+                    (json.dumps(query) if isinstance(query, dict) else query,)
                 )
                 row = cursor.fetchone()
+
+                if not row:
+                    # Try normalized match if exact match fails
+                    cursor.execute(
+                        'SELECT plex_ratingkey, cleaned_query FROM cache WHERE query = ?',
+                        (cache_key,)
+                    )
+                    row = cursor.fetchone()
 
                 if row:
                     plex_ratingkey, cleaned_metadata_json = row
                     cleaned_metadata = json.loads(cleaned_metadata_json) if cleaned_metadata_json else None
 
-                    # Return tuple of rating key and cleaned metadata
                     logger.debug('Cache hit for query: {} (rating_key: {}, cleaned: {})',
                                self._sanitize_query_for_log(cache_key),
                                plex_ratingkey,
@@ -282,10 +305,14 @@ class Cache:
     def set(self, query, plex_ratingkey, cleaned_metadata=None):
         """Store both original and cleaned metadata in cache."""
         try:
-            cache_key = self._make_cache_key(query)
+            # Store the original query as-is
+            cache_key = json.dumps(query) if isinstance(query, dict) else query
             if not cache_key:
                 logger.debug('Skipping cache for empty query')
                 return None
+
+            # Also store normalized version
+            normalized_key = self._make_cache_key(query)
 
             # Use -1 for negative cache entries (when plex_ratingkey is None)
             rating_key = -1 if plex_ratingkey is None else int(plex_ratingkey)
@@ -295,10 +322,12 @@ class Cache:
 
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                cursor.execute(
-                    'REPLACE INTO cache (query, plex_ratingkey, cleaned_query) VALUES (?, ?, ?)',
-                    (str(cache_key), rating_key, cleaned_json)
-                )
+                # Store both original and normalized versions
+                for key in [cache_key, normalized_key]:
+                    cursor.execute(
+                        'REPLACE INTO cache (query, plex_ratingkey, cleaned_query) VALUES (?, ?, ?)',
+                        (str(key), rating_key, cleaned_json)
+                    )
                 conn.commit()
                 logger.debug('Cached result for query: {} (rating_key: {}, cleaned: {})',
                            self._sanitize_query_for_log(cache_key),
