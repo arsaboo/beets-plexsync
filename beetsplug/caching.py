@@ -307,8 +307,13 @@ class Cache:
     def set(self, query, plex_ratingkey, cleaned_metadata=None):
         """Store both original and cleaned metadata in cache."""
         try:
+            def datetime_handler(obj):
+                if isinstance(obj, datetime):
+                    return obj.isoformat()
+                raise TypeError(f'Object of type {type(obj)} is not JSON serializable')
+
             # Store the original query as-is
-            cache_key = json.dumps(query) if isinstance(query, dict) else query
+            cache_key = json.dumps(query, default=datetime_handler) if isinstance(query, dict) else query
             if not cache_key:
                 logger.debug('Skipping cache for empty query')
                 return None
@@ -320,7 +325,7 @@ class Cache:
             rating_key = -1 if plex_ratingkey is None else int(plex_ratingkey)
 
             # Store cleaned metadata as JSON string
-            cleaned_json = json.dumps(cleaned_metadata) if cleaned_metadata else None
+            cleaned_json = json.dumps(cleaned_metadata, default=datetime_handler) if cleaned_metadata else None
 
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
@@ -331,14 +336,13 @@ class Cache:
                         (str(key), rating_key, cleaned_json)
                     )
                 conn.commit()
-                # Use proper string formatting instead of %s
                 logger.debug('Cached result for query: "{}" (rating_key: {}, cleaned: {})',
                            self._sanitize_query_for_log(cache_key),
                            rating_key,
                            cleaned_metadata)
         except Exception as e:
             logger.error('Cache storage failed for query "{}": {}',
-                        self._sanitize_query_for_log(cache_key), str(e))
+                        self._sanitize_query_for_log(query), str(e))
             return None
 
     def get_spotify_cache(self, playlist_id, cache_type='api'):
