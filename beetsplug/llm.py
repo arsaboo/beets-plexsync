@@ -1,12 +1,13 @@
 """LLM integration for beets plugins."""
 
-import logging
-from typing import Optional
-import requests
-import re
 import json
-from json_repair import repair_json  # New import for JSON repair
+import logging
+import re
+from typing import Optional
+
+import requests
 from beets import config
+from json_repair import repair_json  # New import for JSON repair
 from pydantic import ValidationError
 
 # Simple logger for standalone use
