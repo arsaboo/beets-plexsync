@@ -32,7 +32,7 @@ Use `beet plex_smartplaylists` to generate or manage custom playlists in Plex. T
       - Limits the playlist size (configurable via `max_tracks`, default 20)
       - Controls maximum play count (configurable via `max_plays`, default 2)
       - Minimum rating for rated tracks to be included (configurable via `min_rating`, default 4)
-      - Percentage of playlist to fill with unrated but popular tracks (configurable via `discovery_ratio`, default 30)
+      - Percentage of playlist to fill with unrated but popular tracks (configurable via `discovery_ratio`, default 30%)
 
   3. **Imported Playlists**:
       - Import playlists from external services (Spotify, Apple Music, YouTube, etc.)
@@ -41,6 +41,8 @@ Use `beet plex_smartplaylists` to generate or manage custom playlists in Plex. T
         - `manual_search`: Enable/disable manual matching for unmatched tracks
         - `clear_playlist`: Clear existing playlist before adding new tracks
         - `max_tracks`: Limit the number of tracks in the playlist
+
+You can use config filters to finetune any playlist. You can specify the `genre`, `year`, and `UserRating` to be included and excluded from any of the playlists. See the extended example below.
 
 ### Library Sync
 - **Plex Library Sync**: `beet plexsync [-f]` imports all the data from your Plex library inside beets. Use the `-f` flag to force update the entire library with fresh information from Plex.
@@ -62,6 +64,17 @@ Use `beet plex_smartplaylists` to generate or manage custom playlists in Plex. T
 - **Plex to Spotify**: `beet plex2spotify` copies a Plex playlist to Spotify. Use the `-m` flag to specify the playlist name.
 - **Playlist to Collection**: `beet plexplaylist2collection` converts a Plex playlist to a collection. Use the `-m` flag to specify the playlist name.
 - **Album Collage**: `beet plexcollage` creates a collage of most played albums. Use the `-i` flag to specify the number of days and `-g` flag to specify the grid size.
+
+### Manual Import for Failed Tracks
+The plugin creates detailed import logs for each playlist import session. You can manually process failed imports using:
+
+- `beet plex_smartplaylists --import-failed`: Process all import logs and attempt manual matching for failed tracks
+- `beet plex_smartplaylists --import-failed --log-file playlist_name_import.log`: Process a specific log file
+
+This is especially useful when:
+- You've added new music to your library and want to retry matching previously failed tracks
+- You want to manually match specific tracks from a particular playlist's import log
+- You need to clean up import logs by removing successfully matched tracks
 
 ## Introduction
 
@@ -114,6 +127,11 @@ spotify:
       api_key: API_KEY
       model: "gpt-3.5-turbo"
       base_url: "https://api.openai.com/v1"  # Optional, for other providers
+      search:
+        api_key: "ollama"  # optional for local models; will use base key if empty
+        base_url: "http://192.168.2.162:3006/api/search"  # Override base_url for search
+        model: "qwen2.5:latest"  # Override model for search
+        embedding_model: "snowflake-arctic-embed2:latest"  # Embedding model
   ```
 
   You can get started with `beet plexsonic -p "YOUR_PROMPT"` to create the playlist based on YOUR_PROMPT. The default playlist name is `SonicSage` (wink wink), you can modify it using `-m` flag. By default, it requests 10 tracks from the AI model. Use the `-n` flag to change the number of tracks requested. Finally, if you prefer to clear the playlist before adding the new songs, you can add `-c` flag. So, to create a new classical music playlist, you can use something like `beet plexsonic -c -n 10 -p "classical music, romanticism era, like Schubert, Chopin, Liszt"`.
@@ -153,11 +171,14 @@ spotify:
 </p>
 
 ## Advanced
-Plex matching may be less than perfect and it can miss tracks if the tags don't match perfectly. You can enable manual search to improve the matching by enabling `manual_search` in your config (default: `False`):
+Plex matching may be less than perfect and it can miss tracks if the tags don't match perfectly. There are few tools you can use to improve searching:
+* You can enable manual search to improve the matching by enabling `manual_search` in your config (default: `False`).
+* You can enable a Perplexity-style LLM search. This is currently tested on [Perplexica](https://github.com/ItzCrazyKns/Perplexica). See `llm config above.
 
 ```yaml
 plexsync:
   manual_search: yes
+  use_llm_search: yes  # Enable LLM searching; see llm config
   playlists:
     defaults:
       max_tracks: 20
@@ -177,10 +198,26 @@ plexsync:
         max_tracks: 50      # Maximum number of tracks for playlist
         max_plays: 2        # Maximum number of plays for tracks to be included
         min_rating: 4       # Minimum rating for rated tracks
-        discovery_ratio: 30 # Percentage of unrated tracks (0-100)
-                            # Higher values = more discovery
-                            # Example: 30 = 30% unrated + 70% rated tracks
-                            #          70 = 70% unrated + 30% rated tracks
+        discovery_ratio: 30 # Percentage of unrated tracks (0-100); Higher values = more discovery
+        filters:
+          include:
+            genres:
+              - Filmi
+              - Indi Pop
+              - Punjabi
+              - Sufi
+              - Ghazals
+            years:
+              after: 1970
+          exclude:
+            genres:
+              - Religious
+              - Bollywood Unwind
+              - Bollywood Instrumental
+            years:
+              before: 1960
+          min_rating: 5
+
       - id: bollywood_hits
         name: "Bollywood Hits"
         type: imported

@@ -30,12 +30,15 @@ from beets.plugins import BeetsPlugin
 from beets.ui import input_, print_
 from bs4 import BeautifulSoup
 from jiosaavn import JioSaavn
+from beetsplug.llm import search_track_info
 from openai import OpenAI
 from plexapi import exceptions
 from plexapi.server import PlexServer
 from pydantic import BaseModel, Field
 from requests.exceptions import ConnectionError, ContentDecodingError
 from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
+from beetsplug.caching import Cache
+from pathlib import Path
 
 
 class Song(BaseModel):
@@ -76,18 +79,36 @@ class PlexSync(BeetsPlugin):
         """Initialize plexsync plugin."""
         super().__init__()
 
+        self.headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
+            "DNT": "1",  # Do Not Track Request Header
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
+        }
+
         # Add event loop initialization
         self.loop = None
 
         self.config_dir = config.config_dir()
         self.llm_client = None
+        self.search_llm = None
+
+        # Initialize cache with plugin instance reference
+        cache_path = os.path.join(self.config_dir, 'plexsync_cache.db')
+        self.cache = Cache(cache_path, self)
 
         # Call the setup methods
         try:
             self.setup_llm()
+            if config["plexsync"]["use_llm_search"].get(bool):
+                self.search_llm = self.llm_client  # Use llm_client directly
         except Exception as e:
             self._log.error("Failed to set up LLM client: {}", e)
             self.llm_client = None
+            self.search_llm = None
 
         # Adding defaults.
         config["plex"].add(
@@ -109,6 +130,7 @@ class PlexSync(BeetsPlugin):
                 "exclusion_days": 30,  # Days to exclude recently played tracks
                 "history_days": 15,  # Days to look back for base tracks
                 "discovery_ratio": 30,  # Percentage of discovery tracks (0-100)
+                "use_llm_search": False,  # Enable/disable LLM search cleaning
             }
         )
         self.plexsync_token = config["plexsync"]["tokenfile"].get(
@@ -121,6 +143,13 @@ class PlexSync(BeetsPlugin):
                 "api_key": "",
                 "model": "gpt-3.5-turbo",
                 "base_url": "",  # Optional, for other providers
+                "search": {
+                    "provider": "ollama",
+                    "api_key": "",  # Will use base key if empty
+                    "base_url": "http://192.168.2.162:3006/api/search",  # Override base_url for search
+                    "model": "qwen2.5:72b-instruct",  # Override model for search
+                    "embedding_model": "snowflake-arctic-embed2:latest"  # Embedding model
+                }
             }
         )
 
@@ -183,38 +212,155 @@ class PlexSync(BeetsPlugin):
         # Create a Spotify object with the auth_manager
         self.sp = spotipy.Spotify(auth=self.token_info.get("access_token"))
 
-    def import_spotify_playlist(self, playlist_id):
-        """This function returns a list of tracks in a Spotify playlist."""
-        self.authenticate_spotify()
-        songs = self.get_playlist_tracks(playlist_id)
-        song_list = []
-        for song in songs:
+    def process_spotify_track(self, track):
+        """Process a single Spotify track into a standardized format."""
+        try:
             # Find and store the song title
-            if ('From "' in song["track"]["name"]) or (
-                "From &quot" in song["track"]["name"]
-            ):
-                title_orig = song["track"]["name"].replace("&quot;", '"')
+            if ('From "' in track['name']) or ("From &quot" in track['name']):
+                title_orig = track['name'].replace("&quot;", '"')
                 title, album = self.parse_title(title_orig)
             else:
-                title = song["track"]["name"]
-                album = self.clean_album_name(song["track"]["album"]["name"])
+                title = track['name']
+                album = self.clean_album_name(track['album']['name'])
+
+            # Get year if available
             try:
-                year = dateutil.parser.parse(
-                    song["track"]["album"]["release_date"], ignoretz=True
-                )
-            except ValueError:
+                year = track['album'].get('release_date')
+                if year:
+                    year = dateutil.parser.parse(year, ignoretz=True)
+            except (ValueError, KeyError, AttributeError):
                 year = None
-            # Find and store the song artist
-            artist = song["track"]["artists"][0]["name"]
-            # Create a dictionary with the song information
-            song_dict = {
+
+            # Get primary artist
+            artist = track['artists'][0]['name'] if track['artists'] else "Unknown"
+
+            return {
                 "title": title.strip(),
                 "album": album.strip(),
                 "artist": artist.strip(),
-                "year": year,
+                "year": year
             }
-            # Append the dictionary to the list of songs
-            song_list.append(song_dict)
+        except Exception as e:
+            self._log.debug("Error processing Spotify track: {}", e)
+            return None
+
+    def import_spotify_playlist(self, playlist_id):
+        """Import a Spotify playlist using API first, then fallback to scraping."""
+        song_list = []
+
+        # Check cache for processed tracks first
+        cached_tracks = self.cache.get_spotify_cache(playlist_id, 'tracks')
+        if cached_tracks:
+            self._log.info("Using cached track list for playlist {}", playlist_id)
+            return cached_tracks
+
+        # First try the API method
+        try:
+            # Check API cache
+            cached_api_data = self.cache.get_spotify_cache(playlist_id, 'api')
+            if cached_api_data:
+                songs = cached_api_data
+            else:
+                self.authenticate_spotify()
+                songs = self.get_playlist_tracks(playlist_id)
+                if songs:
+                    self.cache.set_spotify_cache(playlist_id, songs, 'api')
+
+            if songs:
+                for song in songs:
+                    try:
+                        if track_data := self.process_spotify_track(song["track"]):
+                            song_list.append(track_data)
+                    except Exception as e:
+                        self._log.debug("Error processing track {}: {}",
+                                      song.get("track", {}).get("name"), e)
+
+                if song_list:
+                    self._log.info("Successfully imported {} tracks via Spotify API",
+                                 len(song_list))
+                    # Cache processed tracks
+                    self.cache.set_spotify_cache(playlist_id, song_list, 'tracks')
+                    return song_list
+
+        except Exception as e:
+            self._log.warning("Spotify API import failed: {}. Falling back to scraping.", e)
+
+        # Fallback to scraping method
+        self._log.info("Attempting playlist import via web scraping")
+        playlist_url = f"https://open.spotify.com/playlist/{playlist_id}"
+
+        try:
+            # Check web scraping cache
+            cached_html = self.cache.get_spotify_cache(playlist_id, 'web')
+            if cached_html:
+                soup = BeautifulSoup(cached_html, "html.parser")
+            else:
+                response = requests.get(playlist_url, headers=self.headers)
+                if response.status_code != 200:
+                    self._log.error("Failed to fetch playlist page: {}", response.status_code)
+                    return song_list
+
+                soup = BeautifulSoup(response.text, "html.parser")
+                self.cache.set_spotify_cache(playlist_id, response.text, 'web')
+
+            track_metas = soup.find_all("meta", {"name": "music:song"})
+
+            # Extract track IDs
+            track_ids = []
+            for meta in track_metas:
+                if "content" in meta.attrs:
+                    track_id = re.search(r'track/([a-zA-Z0-9]+)', meta["content"])
+                    if track_id:
+                        track_ids.append(track_id.group(1))
+
+            if not track_ids:
+                self._log.warning("No track IDs found in playlist page")
+                return song_list
+
+            # Process tracks in batches of 50
+            for i in range(0, len(track_ids), 50):
+                batch = track_ids[i:i + 50]
+                try:
+                    # Try API first for the batch
+                    if hasattr(self, 'sp'):
+                        tracks = self.sp.tracks(batch)
+                        if tracks and tracks.get('tracks'):
+                            for track in tracks['tracks']:
+                                if track_data := self.process_spotify_track(track):
+                                    song_list.append(track_data)
+                            continue
+
+                    # Fallback to individual track scraping if API fails
+                    for track_id in batch:
+                        track_url = f"https://open.spotify.com/track/{track_id}"
+                        track_response = requests.get(track_url, headers=self.headers)
+
+                        if track_response.status_code == 200:
+                            track_soup = BeautifulSoup(track_response.text, 'html.parser')
+                            title = track_soup.find('meta', {'property': 'og:title'})
+                            description = track_soup.find('meta', {'property': 'og:description'})
+
+                            if description and description['content']:
+                                desc_parts = description['content'].split(' · ')
+                                song_dict = {
+                                    "title": title['content'].strip() if title else "Unknown",
+                                    "artist": desc_parts[0].strip() if len(desc_parts) > 0 else "Unknown",
+                                    "album": desc_parts[1].strip() if len(desc_parts) > 1 else "Unknown",
+                                    "year": None
+                                }
+                                song_list.append(song_dict)
+
+                except Exception as e:
+                    self._log.debug("Error processing batch: {}", e)
+
+            # Cache final processed tracks if successful
+            if song_list:
+                self.cache.set_spotify_cache(playlist_id, song_list, 'tracks')
+
+        except Exception as e:
+            self._log.error("Error during web scraping import: {}", e)
+
+        self._log.info("Imported {} tracks via scraping", len(song_list))
         return song_list
 
     def get_playlist_id(self, url):
@@ -486,7 +632,30 @@ class PlexSync(BeetsPlugin):
             help="Generate system-defined or custom smart playlists",
         )
 
+        # Add import-failed option and log-file option
+        plex_smartplaylists_cmd.parser.add_option(
+            "-i",
+            "--import-failed",
+            action="store_true",
+            default=False,
+            help="import previously failed tracks from log files using manual search",
+        )
+        plex_smartplaylists_cmd.parser.add_option(
+            "-l",
+            "--log-file",
+            default=None,
+            help="specific log file to process (default: process all logs)",
+        )
+
         def func_plex_smartplaylists(lib, opts, args):
+            if opts.import_failed:
+                total_imported, total_failed = self.process_import_logs(lib, opts.log_file)
+                self._log.info(
+                    "Manual import complete - Successfully imported: {}, Failed: {}",
+                    total_imported, total_failed
+                )
+                return
+
             # Retrieve playlists from config
             playlists_config = config["plexsync"]["playlists"]["items"].get(list)
             if not playlists_config:
@@ -750,7 +919,7 @@ class PlexSync(BeetsPlugin):
     def search_plex_track(self, item):
         """Fetch the Plex track key."""
         tracks = self.music.searchTracks(
-            **{"album.title": item.album, "track.title": item.title}
+            **{"album.title": item.album, "track.title": item.title}, limit=50
         )
         if len(tracks) == 1:
             return tracks[0]
@@ -791,6 +960,10 @@ class PlexSync(BeetsPlugin):
 
     def _plex_add_playlist_item(self, items, playlist):
         """Add items to Plex playlist."""
+        if not items:
+            self._log.warning("No items to add to playlist {}", playlist)
+            return
+
         plex_set = set()
         try:
             plst = self.plex.playlist(playlist)
@@ -800,7 +973,12 @@ class PlexSync(BeetsPlugin):
             playlist_set = set()
         for item in items:
             try:
-                plex_set.add(self.plex.fetchItem(item.plex_ratingkey))
+                # Check for both plex_ratingkey and ratingKey
+                rating_key = getattr(item, 'plex_ratingkey', None) or getattr(item, 'ratingKey', None)
+                if rating_key:
+                    plex_set.add(self.plex.fetchItem(rating_key))
+                else:
+                    self._log.warning("{} does not have plex_ratingkey or ratingKey attribute. Item details: {}", item, vars(item))
             except (exceptions.NotFound, AttributeError) as e:
                 self._log.warning("{} not found in Plex library. Error: {}", item, e)
                 continue
@@ -912,94 +1090,48 @@ class PlexSync(BeetsPlugin):
                     self._log.debug("Please sync Plex library again")
                     continue
 
-    def search_plex_song(self, song, manual_search=None, fallback_attempted=False):
-        """Fetch the Plex track key."""
-        # Get base manual_search setting if not provided
-        if manual_search is None:
-            manual_search = config["plexsync"]["manual_search"].get(bool)
+    def _cache_result(self, cache_key, result, cleaned_metadata=None):
+        """Helper method to safely cache search results."""
+        if not cache_key:
+            return
 
-        # Clean up title and album
-        if 'From "' in song["title"] or '[From "' in song["title"]:
-            song["title"], song["album"] = self.parse_title(song["title"])
         try:
-            if song["album"] is None:
-                tracks = self.music.searchTracks(**{"track.title": song["title"]})
-            else:
-                tracks = self.music.searchTracks(
-                    **{"album.title": song["album"], "track.title": song["title"]}
-                )
-                if len(tracks) == 0:
-                    song["title"] = re.sub(r"\(.*\)", "", song["title"]).strip()
-                    tracks = self.music.searchTracks(**{"track.title": song["title"]})
+            ratingKey = result.ratingKey if hasattr(result, "ratingKey") else result
+            self.cache.set(cache_key, ratingKey, cleaned_metadata)
         except Exception as e:
-            self._log.debug(
-                "Error searching for {} - {}. Error: {}",
-                song["album"],
-                song["title"],
-                e,
-            )
-            return None
-        artist = song["artist"].split(",")[0]
-        if manual_search is None:
-            manual_search = config["plexsync"]["manual_search"].get(bool)
-        if len(tracks) == 1:
-            return tracks[0]
-        elif len(tracks) > 1:
-            sorted_tracks = self.find_closest_match(song, tracks)  # Simply pass the song dict
-            self._log.debug("Found {} tracks for {}", len(sorted_tracks), song["title"])
-            if manual_search and len(sorted_tracks) > 0:
-                print_(
-                    f'\nChoose candidates for {song["album"]} '
-                    f'- {song["title"]} - {song["artist"]}:'
-                )
-                for i, (track, score) in enumerate(sorted_tracks, start=1):
-                    print_(
-                        f"{i}. {track.parentTitle} - {track.title} - "
-                        f"{track.artist().title}"
-                    )
-                sel = ui.input_options(
-                    ("aBort", "Skip"), numrange=(1, len(sorted_tracks)), default=1
-                )
-                if sel in ("b", "B", "s", "S"):
-                    return None
-                return sorted_tracks[sel - 1][0] if sel > 0 else None
-            for track, score in sorted_tracks:
-                if track.originalTitle is not None:
-                    plex_artist = track.originalTitle
-                else:
-                    plex_artist = track.artist().title
-                if artist in plex_artist:
-                    return track
-        else:
-            if manual_search:
-                self._log.info(
-                    "Track {} - {} - {} not found in Plex",
-                    song["album"],
-                    song["artist"],
-                    song["title"],
-                )
-                if ui.input_yn("Search manually? (Y/n)"):
-                    self.manual_track_search()
-            else:
-                self._log.info(
-                    "Track {} - {} - {} not found in Plex",
-                    song["album"],
-                    song["artist"],
-                    song["title"],
-                )
-                # Fallback to YouTube search if not already attempted and YouTube plugin is configured
-                if not fallback_attempted and "youtube" in config["plugins"].get(list):
-                    search_query = f'{song["artist"]} {song["title"]}'
-                    if song.get("album"):
-                        search_query += f' {song["album"]}'
-                    yt_search_results = self.import_yt_search(search_query, limit=1)
-                    if yt_search_results:
-                        yt_song = yt_search_results[0]
-                        self._log.info("Found track via YouTube search: {} - {} - {}", yt_song["album"], yt_song["artist"], yt_song["title"])
-                        return self.search_plex_song(yt_song, manual_search, fallback_attempted=True)
-            return None
+            self._log.error("Failed to cache result: {}", e)
 
-    def manual_track_search(self):
+    def _handle_manual_search(self, sorted_tracks, song):
+        """Helper function to handle manual search."""
+        print_(
+            f'\nChoose candidates for {song.get("album", "Unknown")} '
+            f'- {song["title"]} - {song["artist"]}:'
+        )
+        for i, (track, score) in enumerate(sorted_tracks, start=1):
+            print_(
+                f"{i}. {track.parentTitle} - {track.title} - "
+                f"{track.artist().title}"
+            )
+        sel = ui.input_options(
+            ("aBort", "Skip", "Enter"), numrange=(1, len(sorted_tracks)), default=1
+        )
+        if sel in ("b", "B"):
+            return None
+        elif sel in ("s", "S"):
+            self._log.debug("User skipped, storing negative cache result.")
+            self._cache_result(song, None)
+            return None
+        elif sel in ("e", "E"):
+            return self.manual_track_search(song)
+        selected_track = sorted_tracks[sel - 1][0] if sel > 0 else None
+        if selected_track:
+            final_key = self.cache._make_cache_key(song)
+            self._log.debug("Storing manual selection in cache for key: {} ratingKey: {}",
+                            final_key, selected_track.ratingKey)
+            self._cache_result(final_key, selected_track.ratingKey, cleaned_metadata=song)
+        return selected_track
+
+    def manual_track_search(self, original_song=None):
         """Manually search for a track in the Plex library.
 
         Prompts the user to enter the title, album, and artist of the track
@@ -1016,7 +1148,154 @@ class PlexSync(BeetsPlugin):
             "album": album.strip(),
             "artist": artist.strip(),
         }
-        self.search_plex_song(song_dict, manual_search=True)
+        result = self.search_plex_song(song_dict, manual_search=True)
+        if result and original_song:
+            cache_key = self.cache._make_cache_key(original_song)  # Ensure consistent cache key
+            self._cache_result(cache_key, result)
+        return result
+
+    def search_plex_song(self, song, manual_search=None, llm_attempted=False):
+        """Fetch the Plex track key with fallback options.
+
+        Args:
+            song: Dictionary containing song metadata
+            manual_search: Whether to enable manual search (defaults to config value)
+            llm_attempted: Whether LLM cleaning has been attempted already
+        """
+        if manual_search is None:
+            manual_search = config["plexsync"]["manual_search"].get(bool)
+
+        # Check cache first
+        cache_key = self.cache._make_cache_key(song)
+        cached_result = self.cache.get(cache_key)
+        if cached_result is not None:
+            if isinstance(cached_result, tuple):
+                rating_key, cleaned_metadata = cached_result
+                if rating_key == -1 or rating_key is None:  # Handle both None and -1
+                    if cleaned_metadata and not llm_attempted:
+                        self._log.debug("Using cached cleaned metadata: {}", cleaned_metadata)
+                        return self.search_plex_song(cleaned_metadata, manual_search, llm_attempted=True)
+                    return None
+                try:
+                    if rating_key:  # Only try to fetch if we have a valid rating key
+                        return self.music.fetchItem(rating_key)
+                except Exception as e:
+                    self._log.debug("Failed to fetch cached item {}: {}", rating_key, e)
+            else:  # Legacy cache entry
+                if cached_result == -1 or cached_result is None:
+                    return None
+                try:
+                    if cached_result:  # Only try to fetch if we have a valid rating key
+                        return self.music.fetchItem(cached_result)
+                except Exception as e:
+                    self._log.debug("Failed to fetch cached item {}: {}", cached_result, e)
+
+        # Try regular search
+        artist = song["artist"].split(",")[0]
+        try:
+            if song["album"] is None:
+                tracks = self.music.searchTracks(**{"track.title": song["title"]}, limit=50)
+            else:
+                tracks = self.music.searchTracks(
+                    **{"album.title": song["album"], "track.title": song["title"]}, limit=50
+                )
+                if len(tracks) == 0:
+                    # Try with simplified title (no parentheses)
+                    song["title"] = re.sub(r"\(.*\)", "", song["title"]).strip()
+                    tracks = self.music.searchTracks(**{"track.title": song["title"]}, limit=50)
+        except Exception as e:
+            self._log.debug(
+                "Error searching for {} - {}. Error: {}",
+                song["album"],
+                song["title"],
+                e,
+            )
+            return None
+
+        # Process search results
+        if len(tracks) == 1:
+            result = tracks[0]
+            self._cache_result(cache_key, result)
+            return result
+        elif len(tracks) > 1:
+            sorted_tracks = self.find_closest_match(song, tracks)
+            self._log.debug("Found {} tracks for {}", len(sorted_tracks), song["title"])
+
+            # Try manual search first if enabled and we have matches
+            if manual_search and len(sorted_tracks) > 0:
+                manual_result = self._handle_manual_search(sorted_tracks, song)
+                if manual_result:
+                    return manual_result
+
+            # Otherwise try automatic matching
+            for track, score in sorted_tracks:
+                if track.originalTitle is not None:
+                    plex_artist = track.originalTitle
+                else:
+                    plex_artist = track.artist().title
+                if artist in plex_artist:
+                    self._cache_result(cache_key, track)
+                    return track
+
+        # Try LLM cleaning if enabled and not already attempted
+        if not llm_attempted and self.search_llm and config["plexsync"]["use_llm_search"].get(bool):
+            search_query = f"{song['title']} by {song['artist']}"
+            if song.get('album'):
+                search_query += f" from {song['album']}"
+
+            cleaned_metadata = search_track_info(search_query)
+            if cleaned_metadata:
+                cleaned_song = {
+                    "title": cleaned_metadata.get("title", song["title"]),
+                    "album": cleaned_metadata.get("album", song["album"]),
+                    "artist": cleaned_metadata.get("artist", song["artist"])
+                }
+                self._log.debug("Using LLM cleaned metadata: {}", cleaned_song)
+
+                # Cache the original query with cleaned metadata
+                self._cache_result(cache_key, None, cleaned_song)
+
+                # Try search with cleaned metadata
+                return self.search_plex_song(cleaned_song, manual_search, llm_attempted=True)
+
+        # Final fallback: try manual search if enabled
+        if manual_search:
+            self._log.info(
+                "Track {} - {} - {} not found in Plex",
+                song.get("album", "Unknown"),
+                song.get("artist", "Unknown"),
+                song["title"],
+            )
+            if ui.input_yn("Search manually? (Y/n)"):
+                return self.manual_track_search(song)
+
+        # Store negative result if nothing found
+        self._cache_result(cache_key, None)
+        return None
+
+    def _process_matches(self, tracks, song, manual_search):
+        """Helper function to process multiple track matches."""
+        artist = song["artist"].split(",")[0]
+        sorted_tracks = self.find_closest_match(song, tracks)
+        self._log.debug("Found {} tracks for {}", len(sorted_tracks), song["title"])
+
+        if manual_search and len(sorted_tracks) > 0:
+            return self._handle_manual_search(sorted_tracks, song)
+
+        result = None
+        for track, score in sorted_tracks:
+            if track.originalTitle is not None:
+                plex_artist = track.originalTitle
+            else:
+                plex_artist = track.artist().title
+            if artist in plex_artist:
+                result = track
+                break
+
+        if result is not None:
+            cache_key = json.dumps(song)
+            self.cache.set(cache_key, result.ratingKey)
+        return result
 
     def _plex_import_playlist(self, playlist, playlist_url=None, listenbrainz=False):
         """Import playlist into Plex."""
@@ -1082,12 +1361,12 @@ class PlexSync(BeetsPlugin):
             for song in songs:
                 found = self.search_plex_song(song, manual_search)
                 if found is not None:
-                    song_dict = {
-                        "title": found.title,
-                        "album": found.parentTitle,
-                        "plex_ratingkey": found.ratingKey,
-                    }
-                    song_list.append(self.dotdict(song_dict))
+                    song_list.append(found)
+
+        if not song_list:
+            self._log.warning("No songs found to add to playlist {}", playlist)
+            return
+
         self._plex_add_playlist_item(song_list, playlist)
 
     def _plex_import_search(self, playlist, search, limit=10):
@@ -1097,14 +1376,9 @@ class PlexSync(BeetsPlugin):
         song_list = []
         if songs:
             for song in songs:
-                if self.search_plex_song(song) is not None:
-                    found = self.search_plex_song(song)
-                    song_dict = {
-                        "title": found.title,
-                        "album": found.parentTitle,
-                        "plex_ratingkey": found.ratingKey,
-                    }
-                    song_list.append(self.dotdict(song_dict))
+                found = self.search_plex_song(song)
+                if found is not None:
+                    song_list.append(found)
         self._plex_add_playlist_item(song_list, playlist)
 
     def _plex_clear_playlist(self, playlist):
@@ -1331,15 +1605,9 @@ class PlexSync(BeetsPlugin):
         )
         matched_songs = []
         for song in song_list:
-            if self.search_plex_song(song) is not None:
-                found = self.search_plex_song(song)
-                match_dict = {
-                    "title": found.title,
-                    "album": found.parentTitle,
-                    "plex_ratingkey": found.ratingKey,
-                }
-                self._log.debug("Song matched in Plex library: {}", match_dict)
-                matched_songs.append(self.dotdict(match_dict))
+            found = self.search_plex_song(song)
+            if found is not None:
+                matched_songs.append(found)
         self._log.debug("Songs matched in Plex library: {}", matched_songs)
         if clear:
             try:
@@ -1679,49 +1947,119 @@ class PlexSync(BeetsPlugin):
         if not play_count or play_count < 0:
             play_count = 0
 
-        if play_count <= 2:
+        if (play_count <= 2):
             return 100 * 0.2
-        elif play_count <= 5:
+        elif (play_count <= 5):
             return 80 * 0.2
-        elif play_count <= 10:
+        elif (play_count <= 10):
             return 60 * 0.2
-        elif play_count <= 20:
+        elif (play_count <= 20):
             return 40 * 0.2
         else:
             return 20 * 0.2
 
-    def calculate_track_score(self, track, base_time=None):
-        """Calculate comprehensive score for a track."""
-        import random
+    def calculate_track_score(self, track, base_time=None, tracks_context=None):
+        """Calculate comprehensive score for a track using standardized variables."""
         import numpy as np
+        from scipy import stats
 
         if base_time is None:
             base_time = datetime.now()
 
-        # Rating score (60% weight)
+        # Get raw values with better defaults for never played/rated tracks
         rating = float(getattr(track, 'plex_userrating', 0))
-        rating_score = (rating / 10) * 60 if rating > 0 else 0
-
-        # Recency score (20% weight)
         last_played = getattr(track, 'plex_lastviewedat', None)
-        if not last_played:
-            recency_score = 20  # Never played gets full recency score
+        popularity = float(getattr(track, 'spotify_track_popularity', 0))
+        release_year = getattr(track, 'year', None)
+
+        # Convert release year to age
+        if release_year:
+            try:
+                release_year = int(release_year)
+                age = base_time.year - release_year
+            except ValueError:
+                age = 0  # Default to 0 if year is invalid
         else:
-            days_since_played = (base_time - datetime.fromtimestamp(last_played)).days
-            recency_score = max(0, 20 - (days_since_played / 30) * 20)  # Decay over 30 days
+            age = 0  # Default to 0 if year is missing
 
-        # Popularity score (20% weight)
-        popularity = int(getattr(track, 'spotify_track_popularity', 0))
-        popularity_score = (popularity / 100) * 20
+        # For never played tracks, use exponential random distribution
+        if last_played is None:
+            # Use exponential distribution with mean=365 days
+            days_since_played = np.random.exponential(365)
+        else:
+            days = (base_time - datetime.fromtimestamp(last_played)).days
+            # Use exponential decay instead of hard cap
+            days_since_played = min(days, 1095)  # Cap at 3 years
 
-        # Calculate base score
-        base_score = rating_score + recency_score + popularity_score
+        # If we have context tracks, calculate means and stds
+        if tracks_context:
+            # Get values for all tracks
+            all_ratings = [float(getattr(t, 'plex_userrating', 0)) for t in tracks_context]
+            all_days = [
+                (base_time - datetime.fromtimestamp(getattr(t, 'plex_lastviewedat', base_time - timedelta(days=365)))).days
+                for t in tracks_context
+            ]
+            all_popularity = [float(getattr(t, 'spotify_track_popularity', 0)) for t in tracks_context]
+            all_ages = [base_time.year - int(getattr(t, 'year', base_time.year)) for t in tracks_context]
 
-        # Add gaussian noise (mean=0, std=2.5) for variety
-        gaussian_noise = np.random.normal(0, 2.5)
+            # Calculate means and stds
+            rating_mean, rating_std = np.mean(all_ratings), np.std(all_ratings) or 1
+            days_mean, days_std = np.mean(all_days), np.std(all_days) or 1
+            popularity_mean, popularity_std = np.mean(all_popularity), np.std(all_popularity) or 1
+            age_mean, age_std = np.mean(all_ages), np.std(all_ages) or 1
+        else:
+            # Use better population estimates
+            rating_mean, rating_std = 5, 2.5        # Ratings 0-10
+            days_mean, days_std = 365, 180         # ~1 year mean, 6 months std
+            popularity_mean, popularity_std = 30, 20  # Spotify popularity 0-100, adjusted mean
+            age_mean, age_std = 30, 10              # Age mean 10 years, std 5 years
 
-        # Calculate final score
-        final_score = base_score + gaussian_noise
+        # Calculate z-scores with bounds
+        z_rating = (rating - rating_mean) / rating_std if rating > 0 else -2.0
+        z_recency = -(days_since_played - days_mean) / days_std  # Negative because fewer days = more recent
+        z_popularity = (popularity - popularity_mean) / popularity_std
+        z_age = -(age - age_mean) / age_std  # Negative because fewer years = more recent
+
+        # Bound z-scores to avoid extreme values
+        z_rating = np.clip(z_rating, -3, 3)
+        z_recency = np.clip(z_recency, -3, 3)
+        z_popularity = np.clip(z_popularity, -3, 3)
+        z_age = np.clip(z_age, -3, 3)
+
+        # Determine if track is rated
+        is_rated = rating > 0
+
+        # Apply weights based on rating status
+        if is_rated:
+            # For rated tracks: rating=50%, recency=10%, popularity=10%, age=20%
+            weighted_score = (z_rating * 0.5) + (z_recency * 0.1) + (z_popularity * 0.1) + (z_age * 0.2)
+        else:
+            # For unrated tracks: popularity=50%, recency=20%, age=30%
+            weighted_score = (z_recency * 0.2) + (z_popularity * 0.5) + (z_age * 0.3)
+
+        # Convert to 0-100 scale using modified percentile calculation
+        # This ensures better spread across the range
+        final_score = (stats.norm.cdf(weighted_score / 2) * 100)  # Divide by 2 to spread scores more
+
+        # Add small gaussian noise for variety (scaled appropriately)
+        noise = np.random.normal(0, 2)
+        final_score = final_score + noise
+
+        # Debug logging
+        self._log.debug(
+            "Score components for {}: rating={:.2f} (z={:.2f}), days={:.0f} (z={:.2f}), "
+            "popularity={:.2f} (z={:.2f}), age={:.0f} (z={:.2f}), final={:.2f}",
+            track.title,
+            rating,
+            z_rating,
+            days_since_played,
+            z_recency,
+            popularity,
+            z_popularity,
+            age,
+            z_age,
+            final_score
+        )
 
         return max(0, min(100, final_score))  # Clamp between 0 and 100
 
@@ -1778,56 +2116,301 @@ class PlexSync(BeetsPlugin):
         rated_tracks_count = max_tracks - unrated_tracks_count
         return unrated_tracks_count, rated_tracks_count
 
+    def validate_filter_config(self, filter_config):
+        """Validate the filter configuration structure and values.
+
+        Args:
+            filter_config: Dictionary containing filter configuration
+
+        Returns:
+            tuple: (is_valid: bool, error_message: str)
+        """
+        if not isinstance(filter_config, dict):
+            return False, "Filter configuration must be a dictionary"
+
+        # Check exclude/include sections
+        for section in ['exclude', 'include']:
+            if section in filter_config:
+                if not isinstance(filter_config[section], dict):
+                    return False, f"{section} section must be a dictionary"
+
+                # Validate genres
+                if 'genres' in filter_config[section]:
+                    if not isinstance(filter_config[section]['genres'], list):
+                        return False, f"{section}.genres must be a list"
+
+                # Validate years
+                if 'years' in filter_config[section]:
+                    years = filter_config[section]['years']
+                    if not isinstance(years, dict):
+                        return False, f"{section}.years must be a dictionary"
+
+                    # Check year values
+                    if 'before' in years and not isinstance(years['before'], int):
+                        return False, f"{section}.years.before must be an integer"
+                    if 'after' in years and not isinstance(years['after'], int):
+                        return False, f"{section}.years.after must be an integer"
+                    if 'between' in years:
+                        if not isinstance(years['between'], list) or len(years['between']) != 2:
+                            return False, f"{section}.years.between must be a list of two integers"
+                        if not all(isinstance(y, int) for y in years['between']):
+                            return False, f"{section}.years.between values must be integers"
+
+        # Validate min_rating
+        if 'min_rating' in filter_config:
+            if not isinstance(filter_config['min_rating'], (int, float)):
+                return False, "min_rating must be a number"
+            if not 0 <= filter_config['min_rating'] <= 10:
+                return False, "min_rating must be between 0 and 10"
+
+        return True, ""
+
+    def _apply_exclusion_filters(self, tracks, exclude_config):
+        """Apply exclusion filters to tracks."""
+        filtered_tracks = tracks[:]
+        original_count = len(filtered_tracks)
+
+        # Filter by genres
+        if 'genres' in exclude_config:
+            exclude_genres = [g.lower() for g in exclude_config['genres']]
+            filtered_tracks = [
+                track for track in filtered_tracks
+                if hasattr(track, 'genres') and not any(
+                    g.tag.lower() in exclude_genres
+                    for g in track.genres
+                )
+            ]
+            self._log.debug(
+                "Genre exclusion filter: {} -> {} tracks",
+                exclude_genres,
+                len(filtered_tracks)
+            )
+
+        # Filter by years
+        if 'years' in exclude_config:
+            years_config = exclude_config['years']
+
+            if 'before' in years_config:
+                year_before = years_config['before']
+                filtered_tracks = [
+                    track for track in filtered_tracks
+                    if not hasattr(track, 'year') or
+                    track.year is None or
+                    track.year >= year_before
+                ]
+                self._log.debug(
+                    "Year before {} filter: {} tracks",
+                    year_before,
+                    len(filtered_tracks)
+                )
+
+            if 'after' in years_config:
+                year_after = years_config['after']
+                filtered_tracks = [
+                    track for track in filtered_tracks
+                    if not hasattr(track, 'year') or
+                    track.year is None or
+                    track.year <= year_after
+                ]
+                self._log.debug(
+                    "Year after {} filter: {} tracks",
+                    year_after,
+                    len(filtered_tracks)
+                )
+
+        self._log.debug(
+            "Exclusion filters removed {} tracks",
+            original_count - len(filtered_tracks)
+        )
+        return filtered_tracks
+
+    def _apply_inclusion_filters(self, tracks, include_config):
+        """Apply inclusion filters to tracks."""
+        filtered_tracks = tracks[:]
+        original_count = len(filtered_tracks)
+
+        # Filter by genres
+        if 'genres' in include_config:
+            include_genres = [g.lower() for g in include_config['genres']]
+            filtered_tracks = [
+                track for track in filtered_tracks
+                if hasattr(track, 'genres') and any(
+                    g.tag.lower() in include_genres
+                    for g in track.genres
+                )
+            ]
+            self._log.debug(
+                "Genre inclusion filter: {} -> {} tracks",
+                include_genres,
+                len(filtered_tracks)
+            )
+
+        # Filter by years
+        if 'years' in include_config:
+            years_config = include_config['years']
+
+            if 'between' in years_config:
+                start_year, end_year = years_config['between']
+                filtered_tracks = [
+                    track for track in filtered_tracks
+                    if hasattr(track, 'year') and
+                    track.year is not None and
+                    start_year <= track.year <= end_year
+                ]
+                self._log.debug(
+                    "Year between {}-{} filter: {} tracks",
+                    start_year,
+                    end_year,
+                    len(filtered_tracks)
+                )
+
+        self._log.debug(
+            "Inclusion filters removed {} tracks",
+            original_count - len(filtered_tracks)
+        )
+        return filtered_tracks
+
+    def apply_playlist_filters(self, tracks, filter_config):
+        """Apply configured filters to a list of tracks.
+
+        Args:
+            tracks: List of tracks to filter
+            filter_config: Dictionary containing filter configuration
+
+        Returns:
+            list: Filtered track list
+        """
+        if not tracks:
+            return tracks
+
+        # Validate filter configuration
+        is_valid, error = self.validate_filter_config(filter_config)
+        if not is_valid:
+            self._log.error("Invalid filter configuration: {}", error)
+            return tracks
+
+        self._log.debug("Applying filters to {} tracks", len(tracks))
+        filtered_tracks = tracks[:]
+
+        # Apply exclusion filters first
+        if 'exclude' in filter_config:
+            self._log.debug("Applying exclusion filters...")
+            filtered_tracks = self._apply_exclusion_filters(filtered_tracks, filter_config['exclude'])
+
+        # Then apply inclusion filters
+        if 'include' in filter_config:
+            self._log.debug("Applying inclusion filters...")
+            filtered_tracks = self._apply_inclusion_filters(filtered_tracks, filter_config['include'])
+
+        # Apply rating filter if specified, but preserve unrated tracks
+        if 'min_rating' in filter_config:
+            min_rating = filter_config['min_rating']
+            original_count = len(filtered_tracks)
+
+            # Separate unrated and rated tracks
+            unrated_tracks = [
+                track for track in filtered_tracks
+                if not hasattr(track, 'userRating') or
+                track.userRating is None or
+                float(track.userRating or 0) == 0
+            ]
+
+            rated_tracks = [
+                track for track in filtered_tracks
+                if hasattr(track, 'userRating') and
+                track.userRating is not None and
+                float(track.userRating or 0) >= min_rating
+            ]
+
+            filtered_tracks = rated_tracks + unrated_tracks
+
+            self._log.debug(
+                "Rating filter (>= {}): {} -> {} tracks ({} rated, {} unrated)",
+                min_rating,
+                original_count,
+                len(filtered_tracks),
+                len(rated_tracks),
+                len(unrated_tracks)
+            )
+
+        self._log.debug(
+            "Filter application complete: {} -> {} tracks",
+            len(tracks),
+            len(filtered_tracks)
+        )
+        return filtered_tracks
+
     def generate_daily_discovery(self, lib, dd_config, plex_lookup, preferred_genres, similar_tracks):
         """Generate Daily Discovery playlist with improved track selection."""
         playlist_name = dd_config.get("name", "Daily Discovery")
         self._log.info("Generating {} playlist", playlist_name)
 
-        self._log.debug(f"Using preferred genres: {preferred_genres}")
-        self._log.debug(f"Processing {len(similar_tracks)} pre-filtered similar tracks")
-
-        if (
-            "playlists" in config["plexsync"]
-            and "defaults" in config["plexsync"]["playlists"]
-        ):
+        # Get base configuration
+        if "playlists" in config["plexsync"] and "defaults" in config["plexsync"]["playlists"]:
             defaults_cfg = config["plexsync"]["playlists"]["defaults"].get({})
         else:
             defaults_cfg = {}
 
         max_tracks = self.get_config_value(dd_config, defaults_cfg, "max_tracks", 20)
-        discovery_ratio = self.get_config_value(
-            dd_config, defaults_cfg, "discovery_ratio", 30
-        )
+        discovery_ratio = self.get_config_value(dd_config, defaults_cfg, "discovery_ratio", 30)
 
-        # Use lookup dictionary instead of individual queries
+        # Use lookup dictionary to convert similar tracks to beets items first
         matched_tracks = []
         for plex_track in similar_tracks:
             try:
                 beets_item = plex_lookup.get(plex_track.ratingKey)
-                if beets_item and float(getattr(beets_item, "plex_userrating", 0)) > 3:
-                    matched_tracks.append(beets_item)
+                if beets_item:
+                    matched_tracks.append(plex_track)  # Keep Plex track object for filtering
             except Exception as e:
                 self._log.debug("Error processing track {}: {}", plex_track.title, e)
                 continue
 
-        self._log.debug("Found {} tracks matching criteria", len(matched_tracks))
+        self._log.debug("Found {} initial tracks", len(matched_tracks))
+
+        # Get filters from config
+        filters = dd_config.get("filters", {})
+
+        # Apply filters to matched tracks
+        if filters:
+            self._log.debug("Applying filters to {} tracks...", len(matched_tracks))
+            filtered_tracks = self.apply_playlist_filters(matched_tracks, filters)
+            self._log.debug("After filtering: {} tracks", len(filtered_tracks))
+        else:
+            filtered_tracks = matched_tracks
+
+        self._log.debug("Processing {} filtered tracks", len(filtered_tracks))
+
+        # Now convert filtered Plex tracks to beets items for final processing
+        final_tracks = []
+        for track in filtered_tracks:
+            try:
+                beets_item = plex_lookup.get(track.ratingKey)
+                if beets_item:
+                    final_tracks.append(beets_item)
+            except Exception as e:
+                self._log.debug("Error converting track {}: {}", track.title, e)
+
+        self._log.debug("Found {} tracks matching all criteria", len(final_tracks))
+
+        # Split tracks into rated and unrated
+        rated_tracks = []
+        unrated_tracks = []
+        for track in final_tracks:
+            rating = float(getattr(track, 'plex_userrating', 0))
+            if rating > 0:  # Include all rated tracks
+                rated_tracks.append(track)
+            else:  # Only truly unrated tracks
+                unrated_tracks.append(track)
+
+        self._log.debug("Split into {} rated and {} unrated tracks",
+                       len(rated_tracks), len(unrated_tracks))
 
         # Calculate proportions
         unrated_tracks_count, rated_tracks_count = self.calculate_playlist_proportions(
             max_tracks, discovery_ratio
         )
 
-        # Split tracks into rated and unrated
-        rated_tracks = []
-        unrated_tracks = []
-        for track in matched_tracks:
-            rating = float(getattr(track, 'plex_userrating', 0))
-            if rating >= 6:  # Include all tracks rated 6 or higher
-                rated_tracks.append(track)
-            elif rating == 0:  # Only truly unrated tracks
-                unrated_tracks.append(track)
-
-        # Select tracks using weighted probability, ensuring we don't exceed max_tracks
+        # Select tracks using weighted probability
         selected_rated = self.select_tracks_weighted(rated_tracks, rated_tracks_count)
         selected_unrated = self.select_tracks_weighted(unrated_tracks, unrated_tracks_count)
 
@@ -1841,7 +2424,7 @@ class PlexSync(BeetsPlugin):
             additional_rated = self.select_tracks_weighted(remaining_rated, additional_count)
             selected_rated.extend(additional_rated)
 
-        # Combine and shuffle, ensuring total doesn't exceed max_tracks
+        # Combine and shuffle
         selected_tracks = selected_rated + selected_unrated
         if len(selected_tracks) > max_tracks:
             selected_tracks = selected_tracks[:max_tracks]
@@ -1849,7 +2432,6 @@ class PlexSync(BeetsPlugin):
         import random
         random.shuffle(selected_tracks)
 
-        # Add debug logging for selected track counts
         self._log.info(
             "Selected {} rated tracks and {} unrated tracks",
             len(selected_rated),
@@ -1860,144 +2442,217 @@ class PlexSync(BeetsPlugin):
             self._log.warning("No tracks matched criteria for Daily Discovery playlist")
             return
 
-        # Clear existing playlist only right before adding new tracks
+        # Create/update playlist
         try:
             self._plex_clear_playlist(playlist_name)
             self._log.info("Cleared existing Daily Discovery playlist")
         except exceptions.NotFound:
             self._log.debug("No existing Daily Discovery playlist found")
 
-        # Create playlist
         self._plex_add_playlist_item(selected_tracks, playlist_name)
 
         self._log.info(
             "Successfully updated {} playlist with {} tracks",
             playlist_name,
-            len(selected_tracks),
+            len(selected_tracks)
         )
+
+    def get_filtered_library_tracks(self, preferred_genres, config_filters, exclusion_days=30):
+        """Get filtered library tracks using Plex search capabilities."""
+        # Collect all relevant genres
+        all_genres = set(preferred_genres)
+
+        # Add genres from inclusion filters if present
+        if config_filters and 'include' in config_filters:
+            if 'genres' in config_filters['include']:
+                all_genres.update(g.lower() for g in config_filters['include']['genres'])
+
+        # Convert config filters to Plex filters
+        plex_filters = {"libtype": "track"}
+
+        # Handle year filters
+        if config_filters and 'include' in config_filters:
+            years_config = config_filters['include'].get('years', {})
+            if 'between' in years_config:
+                start_year, end_year = years_config['between']
+                plex_filters["year>>="] = start_year
+                plex_filters["year<<="] = end_year
+
+        if config_filters and 'exclude' in config_filters:
+            years_config = config_filters['exclude'].get('years', {})
+            if 'before' in years_config:
+                plex_filters["year>>="] = years_config['before']
+            if 'after' in years_config:
+                plex_filters["year<<="] = years_config['after']
+
+        # Handle rating filter if specified
+        if config_filters and 'min_rating' in config_filters:
+            plex_filters["userRating>>="] = config_filters['min_rating']
+
+        self._log.debug("Using Plex filters: {}", plex_filters)
+
+        # Get recently played tracks first
+        if exclusion_days > 0:
+            recent = set(
+                track.ratingKey
+                for track in self.music.search(
+                    filters={"lastViewedAt>>": f"{exclusion_days}d"},
+                    libtype="track"
+                )
+            )
+        else:
+            recent = set()
+
+        # Perform the search
+        all_tracks = []
+
+        # Search for each genre separately to avoid overly complex queries
+        for genre in all_genres:
+            try:
+                genre_filters = plex_filters.copy()
+                genre_filters["genre"] = genre
+
+                tracks = self.music.search(**genre_filters)
+
+                # Filter out recently played tracks in memory
+                tracks = [t for t in tracks if t.ratingKey not in recent]
+                all_tracks.extend(tracks)
+
+                self._log.debug("Found {} tracks for genre '{}' (after excluding recent)",
+                              len(tracks), genre)
+            except Exception as e:
+                self._log.error("Error searching for genre '{}': {}", genre, e)
+
+        # Remove duplicates based on ratingKey
+        seen = set()
+        unique_tracks = []
+        for track in all_tracks:
+            if track.ratingKey not in seen:
+                seen.add(track.ratingKey)
+                unique_tracks.append(track)
+
+        self._log.debug(
+            "Found {} unique tracks after filtering from {} total matches",
+            len(unique_tracks), len(all_tracks)
+        )
+        return unique_tracks
 
     def generate_forgotten_gems(self, lib, ug_config, plex_lookup, preferred_genres, similar_tracks):
         """Generate a Forgotten Gems playlist with improved discovery."""
         playlist_name = ug_config.get("name", "Forgotten Gems")
         self._log.info("Generating {} playlist", playlist_name)
 
-        self._log.debug(f"Using preferred genres: {preferred_genres}")
-
         # Get configuration
-        if (
-            "playlists" in config["plexsync"]
-            and "defaults" in config["plexsync"]["playlists"]
-        ):
+        if "playlists" in config["plexsync"] and "defaults" in config["plexsync"]["playlists"]:
             defaults_cfg = config["plexsync"]["playlists"]["defaults"].get({})
         else:
             defaults_cfg = {}
 
         max_tracks = self.get_config_value(ug_config, defaults_cfg, "max_tracks", 20)
-        max_plays = self.get_config_value(ug_config, defaults_cfg, "max_plays", 2)
-        min_rating = self.get_config_value(ug_config, defaults_cfg, "min_rating", 4)
-        discovery_ratio = self.get_config_value(ug_config, defaults_cfg, "discovery_ratio", 30)  # Default 30%
+        discovery_ratio = self.get_config_value(ug_config, defaults_cfg, "discovery_ratio", 30)
+        exclusion_days = self.get_config_value(ug_config, defaults_cfg, "exclusion_days", 30)
 
-        # Build filters for unplayed/barely played tracks
-        filters = {
-            "track.viewCount<<=": max_plays,  # Tracks played max_plays times or less
-        }
+        # Get filters from config
+        filters = ug_config.get("filters", {})
 
-        # Find tracks with matching genres but low play count
-        forgotten_tracks = []
-        tracks = self.music.searchTracks(**filters)
+        # If no genres configured in filters, use preferred_genres
+        if not filters:
+            filters = {'include': {'genres': preferred_genres}}
+        elif 'include' not in filters or 'genres' not in filters['include']:
+            if 'include' not in filters:
+                filters['include'] = {}
+            filters['include']['genres'] = preferred_genres
+            self._log.debug("Using preferred genres as no genres configured: {}", preferred_genres)
 
-        # Separate tracks into rated and unrated
+        # Get initial track pool using configured or preferred genres and filters
+        self._log.info("Searching library with filters...")
+        all_library_tracks = self.get_filtered_library_tracks(
+            [], # No need to pass preferred_genres since they're now in filters if needed
+            filters,
+            exclusion_days
+        )
+
+        # Add similar tracks if they match the filter criteria
+        if len(similar_tracks) > 0:
+            filtered_similar = self.apply_playlist_filters(similar_tracks, filters)
+
+            # Add filtered similar tracks if not already included
+            seen_keys = set(track.ratingKey for track in all_library_tracks)
+            for track in filtered_similar:
+                if track.ratingKey not in seen_keys:
+                    all_library_tracks.append(track)
+                    seen_keys.add(track.ratingKey)
+
+            self._log.debug(
+                "Combined {} library tracks with {} filtered similar tracks",
+                len(all_library_tracks), len(filtered_similar)
+            )
+
+        # Convert to beets items
+        final_tracks = []
+        for track in all_library_tracks:
+            try:
+                beets_item = plex_lookup.get(track.ratingKey)
+                if beets_item:
+                    final_tracks.append(beets_item)
+            except Exception as e:
+                self._log.debug("Error converting track {}: {}", track.title, e)
+
+        self._log.debug("Converted {} tracks to beets items", len(final_tracks))
+
+        # Split tracks into rated and unrated
         rated_tracks = []
         unrated_tracks = []
-        for track in tracks:
-            try:
-                track_genres = {str(g.tag).lower() for g in track.genres}
-                if any(genre in track_genres for genre in preferred_genres):
-                    beets_item = plex_lookup.get(track.ratingKey)
-                    if beets_item:
-                        rating = float(getattr(beets_item, "plex_userrating", 0))
-                        if rating >= min_rating:
-                            rated_tracks.append(beets_item)
-                        elif rating == 0:  # Unrated tracks
-                            unrated_tracks.append(beets_item)
-            except Exception as e:
-                self._log.debug("Error processing track {}: {}", track.title, e)
-                continue
+        for track in final_tracks:
+            rating = float(getattr(track, 'plex_userrating', 0))
+            if rating > 0:  # Include all rated tracks
+                rated_tracks.append(track)
+            else:  # Only truly unrated tracks
+                unrated_tracks.append(track)
 
-        # Calculate popularity threshold from well-rated tracks
-        rated_popularities = [
-            int(getattr(x, "spotify_track_popularity", 0))
-            for x in rated_tracks
-            if float(getattr(x, "plex_userrating", 0)) >= 7
-        ]
-
-        if rated_popularities:
-            # Use median popularity of highly rated tracks as threshold
-            popularity_threshold = sorted(rated_popularities)[len(rated_popularities)//2]
-            self._log.debug("Popularity threshold from rated tracks: {}", popularity_threshold)
-        else:
-            # Fallback to an absolute threshold if no rated tracks
-            popularity_threshold = 70
-            self._log.debug("Using fallback popularity threshold: {}")
+        self._log.debug("Split into {} rated and {} unrated tracks", len(rated_tracks), len(unrated_tracks))
 
         # Calculate proportions
-        unrated_tracks_count, rated_tracks_count = self.calculate_playlist_proportions(
-            max_tracks, discovery_ratio
-        )
+        unrated_tracks_count, rated_tracks_count = self.calculate_playlist_proportions(max_tracks, discovery_ratio)
 
-        # Filter unrated tracks by popularity threshold
-        popular_unrated = [
-            track for track in unrated_tracks
-            if int(getattr(track, "spotify_track_popularity", 0)) >= popularity_threshold
-        ]
+        # Select tracks using weighted probability
+        selected_rated = self.select_tracks_weighted(rated_tracks, rated_tracks_count)
+        selected_unrated = self.select_tracks_weighted(unrated_tracks, unrated_tracks_count)
 
-        # Sort rated and unrated tracks separately by their respective criteria
-        rated_tracks.sort(
-            key=lambda x: (
-                -float(getattr(x, "plex_userrating", 0)),
-                -int(getattr(x, "spotify_track_popularity", 0))
+        # If we don't have enough unrated tracks, fill with rated ones
+        if len(selected_unrated) < unrated_tracks_count:
+            additional_count = min(
+                unrated_tracks_count - len(selected_unrated),
+                max_tracks - len(selected_rated) - len(selected_unrated)
             )
-        )
-        popular_unrated.sort(
-            key=lambda x: -int(getattr(x, "spotify_track_popularity", 0))
-        )
+            remaining_rated = [t for t in rated_tracks if t not in selected_rated]
+            additional_rated = self.select_tracks_weighted(remaining_rated, additional_count)
+            selected_rated.extend(additional_rated)
 
-        # Select tracks maintaining the ratio
-        selected_rated = rated_tracks[:rated_tracks_count]
-        selected_unrated = popular_unrated[:unrated_tracks_count]
-
-        # Combine tracks
+        # Combine and shuffle
         selected_tracks = selected_rated + selected_unrated
+        if len(selected_tracks) > max_tracks:
+            selected_tracks = selected_tracks[:max_tracks]
 
-        # Shuffle the final selection
         import random
         random.shuffle(selected_tracks)
 
-        self._log.debug(
-            "Selected {} rated tracks and {} unrated popular tracks",
-            len(selected_rated),
-            len(selected_unrated)
-        )
+        self._log.info("Selected {} rated tracks and {} unrated tracks", len(selected_rated), len(selected_unrated))
 
         if not selected_tracks:
             self._log.warning("No tracks matched criteria for Forgotten Gems playlist")
             return
 
-        # Clear existing playlist
+        # Create/update playlist
         try:
             self._plex_clear_playlist(playlist_name)
             self._log.info("Cleared existing Forgotten Gems playlist")
         except exceptions.NotFound:
             self._log.debug("No existing Forgotten Gems playlist found")
 
-        # Create playlist
         self._plex_add_playlist_item(selected_tracks, playlist_name)
 
-        self._log.info(
-            "Successfully updated {} playlist with {} tracks",
-            playlist_name,
-            len(selected_tracks),
-        )
+        self._log.info("Successfully updated {} playlist with {} tracks", playlist_name, len(selected_tracks))
 
     def generate_imported_playlist(self, lib, playlist_config):
         """Generate a playlist by importing from external sources."""
@@ -2071,30 +2726,53 @@ class PlexSync(BeetsPlugin):
             self._log.warning("No tracks found from any source for playlist {}", playlist_name)
             return
 
+        # Get filters from config
+        filters = playlist_config.get("filters", {})
+
+        # Apply filters to imported tracks
+        if filters:
+            self._log.debug("Applying filters to {} tracks...", len(all_tracks))
+            filtered_tracks = self.apply_playlist_filters(all_tracks, filters)
+            self._log.debug("After filtering: {} tracks", len(filtered_tracks))
+        else:
+            filtered_tracks = all_tracks
+
         # Process tracks through Plex and filter out low-rated ones
         matched_songs = []
         with open(log_file, 'a', encoding='utf-8') as f:
             f.write("\nTracks not found in Plex library:\n")
             f.write("-" * 80 + "\n")
 
-        for track in all_tracks:
+        for track in filtered_tracks:
             found = self.search_plex_song(track, manual_search)
             if found:
-                rating = float(getattr(found, 'userrating', 0))
-                if rating == 0 or rating > 2:  # Include unrated or rating > 2
-                    song_dict = {
-                        "title": found.title,
-                        "album": found.parentTitle,
-                        "plex_ratingkey": found.ratingKey,
-                    }
-                    matched_songs.append(self.dotdict(song_dict))
+                # Just use Plex rating directly
+                plex_rating = float(getattr(found, "userRating", 0) or 0)
+
+                self._log.debug(
+                    "Track rating check: {} - {} - {} (Rating: {})",
+                    track.get('parentTitle', 'Unknown'),
+                    track.get('title', 'Unknown'),
+                    plex_rating,
+                    "excluded" if 0 < plex_rating <= 2 else "included"
+                )
+
+                if plex_rating == 0 or plex_rating > 2:  # Include unrated or rating > 2
+                    matched_songs.append(found)
+                    self._log.debug(
+                        "Added to playlist: {} - {} - {} (Rating: {})",
+                        track.get('artist', 'Unknown'),
+                        track.get('parentTitle', 'Unknown'),
+                        track.get('title', 'Unknown'),
+                        plex_rating
+                    )
                 else:
                     with open(log_file, 'a', encoding='utf-8') as f:
-                        f.write(f"Low rated ({rating}): {track.get('artist', 'Unknown')} - {track.get('album', 'Unknown')} - {track.get('title', 'Unknown')}\n")
+                        f.write(f"Low rated ({plex_rating}): {track.get('artist', 'Unknown')} - {track.get('parentTitle', 'Unknown')} - {track.get('title', 'Unknown')}\n")
             else:
                 not_found_count += 1
                 with open(log_file, 'a', encoding='utf-8') as f:
-                    f.write(f"Not found: {track.get('artist', 'Unknown')} - {track.get('album', 'Unknown')} - {track.get('title', 'Unknown')}\n")
+                    f.write(f"Not found: {track.get('artist', 'Unknown')} - {track.get('parentTitle', 'Unknown')} - {track.get('title', 'Unknown')}\n")
 
         # Write summary at the end of log file
         with open(log_file, 'a', encoding='utf-8') as f:
@@ -2109,8 +2787,8 @@ class PlexSync(BeetsPlugin):
         seen = set()
         unique_matched = []
         for song in matched_songs:
-            if song.plex_ratingkey not in seen:
-                seen.add(song.plex_ratingkey)
+            if song.ratingKey not in seen:
+                seen.add(song.ratingKey)
                 unique_matched.append(song)
 
         # Apply track limit if specified
@@ -2141,7 +2819,179 @@ class PlexSync(BeetsPlugin):
         else:
             self._log.warning("No tracks remaining after filtering for {}", playlist_name)
 
+    def process_import_logs(self, lib, specific_log=None):
+        """Process import logs in config directory and attempt manual import.
+
+        Args:
+            lib: The beets library instance
+            specific_log: Optional filename to process only one log file
+
+        Returns:
+            tuple: (total_imported, total_failed)
+        """
+        total_imported = 0
+        total_failed = 0
+
+        def parse_track_info(line):
+            """Helper function to parse track info from log line."""
+            try:
+                _, track_info = line.split("Not found:", 1)
+                # First try to find the Unknown album marker as a separator
+                parts = track_info.split(" - Unknown - ")
+                if len(parts) == 2:
+                    artist = parts[0].strip()
+                    title = parts[1].strip()
+                    album = "Unknown"
+                else:
+                    # Fallback to traditional parsing if no "Unknown" found
+                    parts = track_info.strip().split(" - ")
+                    if len(parts) >= 3:
+                        artist = parts[0]
+                        album = parts[1]
+                        # Join remaining parts as title (may contain dashes)
+                        title = " - ".join(parts[2:])
+                    else:
+                        return None
+
+                # Clean up the title
+                title = clean_title(title)
+
+                # Clean up artist (handle cases like "Vishal - Shekhar")
+                artist = re.sub(r'\s+-\s+', ' & ', artist)
+
+                if artist != "Unknown" and title:
+                    return {
+                        "artist": artist.strip(),
+                        "album": album.strip() if album != "Unknown" else None,
+                        "title": title.strip()
+                    }
+            except ValueError:
+                pass
+            return None
+
+        if specific_log:
+            # Process single log file
+            log_path = Path(self.config_dir) / specific_log
+            if not log_path.exists():
+                self._log.error("Log file not found: {}", specific_log)
+                return total_imported, total_failed
+            log_files = [log_path]
+        else:
+            # Process all log files
+            log_files = Path(self.config_dir).glob("*_import.log")
+
+        for log_file in log_files:
+            playlist_name = log_file.stem.replace("_import", "").replace("_", " ").title()
+            self._log.info("Processing failed imports for playlist: {}", playlist_name)
+
+            # Read the entire log file
+            with open(log_file, 'r', encoding='utf-8') as f:
+                log_content = f.readlines()
+
+            tracks_to_import = []
+            track_lines_to_remove = set()
+            in_not_found_section = False
+            header_lines = []
+            summary_lines = []
+            not_found_start = -1
+
+            # First pass: collect tracks and identify sections
+            for i, line in enumerate(log_content):
+                if "Tracks not found in Plex library:" in line:
+                    in_not_found_section = True
+                    not_found_start = i
+                    continue
+                elif "Import Summary:" in line:
+                    in_not_found_section = False
+                    summary_lines = log_content[i:]
+                    break
+
+                if i < not_found_start:
+                    header_lines.append(line)
+                elif in_not_found_section and line.startswith("Not found:"):
+                    track_info = parse_track_info(line)
+                    if track_info:
+                        track_info["line_num"] = i
+                        tracks_to_import.append(track_info)
+
+            if tracks_to_import:
+                self._log.info("Attempting to manually import {} tracks for {}",
+                             len(tracks_to_import), playlist_name)
+
+                matched_tracks = []
+                for track in tracks_to_import:
+                    found = self.search_plex_song(track, manual_search=True)
+                    if found:
+                        matched_tracks.append(found)
+                        track_lines_to_remove.add(track["line_num"])
+                        total_imported += 1
+                    else:
+                        total_failed += 1
+
+                if matched_tracks:
+                    self._plex_add_playlist_item(matched_tracks, playlist_name)
+                    self._log.info("Added {} tracks to playlist {}",
+                                 len(matched_tracks), playlist_name)
+
+                    # Update the log file
+                    remaining_not_found = [
+                        line for i, line in enumerate(log_content)
+                        if i not in track_lines_to_remove
+                    ]
+
+                    # Update summary
+                    new_summary = []
+                    for line in summary_lines:
+                        if "Tracks not found in Plex" in line:
+                            remaining_not_found_count = len([
+                                l for l in remaining_not_found
+                                if l.startswith("Not found:")
+                            ])
+                            new_summary.append(f"Tracks not found in Plex: {remaining_not_found_count}\n")
+                        else:
+                            new_summary.append(line)
+
+                    # Write updated log file
+                    with open(log_file, 'w', encoding='utf-8') as f:
+                        f.writelines(header_lines)
+                        f.write("Tracks not found in Plex library:\n")
+                        f.writelines(l for l in remaining_not_found if l.startswith("Not found:"))
+                        f.write("\nUpdated at: {}\n".format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+                        f.writelines(new_summary)
+
+        return total_imported, total_failed
+
     def shutdown(self, lib):
         """Clean up when plugin is disabled."""
         if self.loop and not self.loop.is_closed():
-            self.loop.close()
+            self.close()
+
+def clean_title(title):
+    """Clean up track title by removing common extras and normalizing format.
+
+    Args:
+        title: The title string to clean
+
+    Returns:
+        str: Cleaned title string
+    """
+    # Remove various suffix patterns
+    patterns = [
+        r'\s*\([^)]*\)\s*$',  # Remove trailing parentheses and contents
+        r'\s*\[[^\]]*\]\s*$',  # Remove trailing square brackets and contents
+        r'\s*-\s*[^-]*$',      # Remove trailing dash and text
+        r'\s*\|[^|]*$',        # Remove trailing pipe and text
+        r'\s*feat\.[^,]*',     # Remove "feat." and featured artists
+        r'\s*ft\.[^,]*',       # Remove "ft." and featured artists
+        r'\s*\d+\s*$',         # Remove trailing numbers
+        r'\s+$'                # Remove trailing whitespace
+    ]
+
+    cleaned = title
+    for pattern in patterns:
+        cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
+
+    # Remove redundant spaces
+    cleaned = ' '.join(cleaned.split())
+
+    return cleaned
