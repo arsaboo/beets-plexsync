@@ -382,10 +382,60 @@ class PlexSync(BeetsPlugin):
 
         # Existing import logic...
         song_list = []
-        # ...existing Apple Music import code...
 
-        if (song_list):
-            self.cache.set_playlist_cache(playlist_id, 'apple', song_list)
+        try:
+            # Send a GET request to the URL and get the HTML content
+            response = requests.get(url, headers=self.headers)
+            content = response.text
+
+            # Create a BeautifulSoup object with the HTML content
+            soup = BeautifulSoup(content, "html.parser")
+            try:
+                data = soup.find("script", id="serialized-server-data").text
+            except AttributeError:
+                self._log.debug("Error parsing Apple Music playlist")
+                return None
+
+            # load the data as a JSON object
+            data = json.loads(data)
+
+            # Extract songs from the sections
+            try:
+                songs = data[0]["data"]["sections"][1]["items"]
+            except (KeyError, IndexError) as e:
+                self._log.error("Failed to extract songs from Apple Music data: {}", e)
+                return None
+
+            # Create an empty list to store the songs
+            song_list = []
+
+            # Loop through each song element
+            for song in songs:
+                try:
+                    # Find and store the song title
+                    title = song["title"].strip()
+                    album = song["tertiaryLinks"][0]["title"]
+                    # Find and store the song artist
+                    artist = song["subtitleLinks"][0]["title"]
+                    # Create a dictionary with the song information
+                    song_dict = {
+                        "title": title.strip(),
+                        "album": album.strip(),
+                        "artist": artist.strip(),
+                    }
+                    # Append the dictionary to the list of songs
+                    song_list.append(song_dict)
+                except (KeyError, IndexError) as e:
+                    self._log.debug("Error processing song {}: {}", song.get("title", "Unknown"), e)
+                    continue
+
+            if (song_list):
+                self.cache.set_playlist_cache(playlist_id, 'apple', song_list)
+                self._log.info("Cached {} tracks from Apple Music playlist", len(song_list))
+
+        except Exception as e:
+            self._log.error("Error importing Apple Music playlist: {}", e)
+            return []
 
         return song_list
 
@@ -1796,6 +1846,16 @@ class PlexSync(BeetsPlugin):
         return tidal.import_tidal_playlist(url)
 
     def import_gaana_playlist(self, url):
+        """Import Gaana playlist with caching."""
+        # Generate cache key from URL
+        playlist_id = url.split('/')[-1]
+
+        # Check cache
+        cached_data = self.cache.get_playlist_cache(playlist_id, 'gaana')
+        if (cached_data):
+            self._log.info("Using cached Gaana playlist data")
+            return cached_data
+
         try:
             from beetsplug.gaana import GaanaPlugin
         except ModuleNotFoundError:
@@ -1803,13 +1863,23 @@ class PlexSync(BeetsPlugin):
                 "Gaana plugin not installed. \
                             See https://github.com/arsaboo/beets-gaana"
             )
-            return
+            return None
+
         try:
             gaana = GaanaPlugin()
         except Exception as e:
             self._log.error("Unable to initialize Gaana plugin. Error: {}", e)
-            return
-        return gaana.import_gaana_playlist(url)
+            return None
+
+        # Get songs from Gaana
+        song_list = gaana.import_gaana_playlist(url)
+
+        # Cache successful results
+        if song_list:
+            self.cache.set_playlist_cache(playlist_id, 'gaana', song_list)
+            self._log.info("Cached {} tracks from Gaana playlist", len(song_list))
+
+        return song_list
 
     def _plex2spotify(self, lib, playlist):
         self.authenticate_spotify()
