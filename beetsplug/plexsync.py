@@ -380,7 +380,6 @@ class PlexSync(BeetsPlugin):
             self._log.info("Using cached Apple Music playlist data")
             return cached_data
 
-        # Existing import logic...
         song_list = []
 
         try:
@@ -405,9 +404,6 @@ class PlexSync(BeetsPlugin):
             except (KeyError, IndexError) as e:
                 self._log.error("Failed to extract songs from Apple Music data: {}", e)
                 return None
-
-            # Create an empty list to store the songs
-            song_list = []
 
             # Loop through each song element
             for song in songs:
@@ -443,18 +439,75 @@ class PlexSync(BeetsPlugin):
         """Import JioSaavn playlist with caching."""
         playlist_id = url.split('/')[-1]
 
-        # Check cache
+        # Check cache first
         cached_data = self.cache.get_playlist_cache(playlist_id, 'jiosaavn')
         if (cached_data):
             self._log.info("Using cached JioSaavn playlist data")
             return cached_data
 
-        # Existing import logic...
+        # Initialize empty song list
         song_list = []
-        # ...existing JioSaavn import code...
 
-        if (song_list):
-            self.cache.set_playlist_cache(playlist_id, 'jiosaavn', song_list)
+        try:
+            loop = self.get_event_loop()
+
+            # Run the async operation and get results
+            data = loop.run_until_complete(
+                self.saavn.get_playlist_songs(url, page=1, limit=100)
+            )
+
+            if not data or "data" not in data or "list" not in data["data"]:
+                self._log.error("Invalid response from JioSaavn API")
+                return song_list
+
+            songs = data["data"]["list"]
+
+            for song in songs:
+                try:
+                    # Process song title
+                    if ('From "' in song["title"]) or ("From &quot" in song["title"]):
+                        title_orig = song["title"].replace("&quot;", '"')
+                        title, album = self.parse_title(title_orig)
+                    else:
+                        title = song["title"]
+                        album = self.clean_album_name(song["more_info"]["album"])
+
+                    # Get year if available
+                    year = song.get("year", None)
+
+                    # Get primary artist from artistMap
+                    try:
+                        artist = song["more_info"]["artistMap"]["primary_artists"][0]["name"]
+                    except (KeyError, IndexError):
+                        # Fallback to first featured artist if primary not found
+                        try:
+                            artist = song["more_info"]["artistMap"]["featured_artists"][0]["name"]
+                        except (KeyError, IndexError):
+                            # Skip if no artist found
+                            continue
+
+                    # Create song dictionary with cleaned data
+                    song_dict = {
+                        "title": title.strip(),
+                        "album": album.strip(),
+                        "artist": artist.strip(),
+                        "year": year,
+                    }
+
+                    song_list.append(song_dict)
+                    self._log.debug("Added song: {} - {}", song_dict["title"], song_dict["artist"])
+
+                except Exception as e:
+                    self._log.debug("Error processing JioSaavn song: {}", e)
+                    continue
+
+            # Cache successful results
+            if song_list:
+                self.cache.set_playlist_cache(playlist_id, 'jiosaavn', song_list)
+                self._log.info("Cached {} tracks from JioSaavn playlist", len(song_list))
+
+        except Exception as e:
+            self._log.error("Error importing JioSaavn playlist: {}", e)
 
         return song_list
 
@@ -848,66 +901,6 @@ class PlexSync(BeetsPlugin):
         # Return a list of songs with details
         return songs
 
-    def import_jiosaavn_playlist(self, url):
-        """Import JioSaavn playlist with caching."""
-        playlist_id = url.split('/')[-1]
-
-        # Check cache
-        cached_data = self.cache.get_playlist_cache(playlist_id, 'jiosaavn')
-        if (cached_data):
-            self._log.info("Using cached JioSaavn playlist data")
-            return cached_data
-
-        # Existing import logic...
-        song_list = []
-
-        try:
-            loop = self.get_event_loop()
-
-            # Run the async operation and get results
-            data = loop.run_until_complete(
-                self.saavn.get_playlist_songs(url, page=1, limit=100)
-            )
-
-            songs = data["data"]["list"]
-            song_list = []
-
-            for song in songs:
-                # Find and store the song title
-                if ('From "' in song["title"]) or ("From &quot" in song["title"]):
-                    title_orig = song["title"].replace("&quot;", '"')
-                    title, album = self.parse_title(title_orig)
-                else:
-                    title = song["title"]
-                    album = self.clean_album_name(song["more_info"]["album"])
-                year = song["year"]
-                # Find and store the song artist
-                try:
-                    artist = song["more_info"]["artistMap"]["primary_artists"][0]["name"]
-                except KeyError:
-                    continue
-                # Find and store the song duration
-                # duration = song.find("div", class_="songs-list-row__length").text.strip()
-                # Create a dictionary with the song information
-                song_dict = {
-                    "title": title.strip(),
-                    "album": album.strip(),
-                    "artist": artist.strip(),
-                    "year": year,
-                }
-                # Append the dictionary to the list of songs
-                song_list.append(song_dict)
-            return song_list
-
-        except Exception as e:
-            self._log.error("Error importing JioSaavn playlist: {}", e)
-            return []
-
-        if (song_list):
-            self.cache.set_playlist_cache(playlist_id, 'jiosaavn', song_list)
-
-        return song_list
-
     def get_fuzzy_score(self, str1, str2):
         """Calculate fuzzy match score between two strings."""
         if not str1 or not str2:
@@ -963,7 +956,6 @@ class PlexSync(BeetsPlugin):
             self._log.info("Using cached Apple Music playlist data")
             return cached_data
 
-        # Existing import logic...
         song_list = []
 
         # Send a GET request to the URL and get the HTML content
