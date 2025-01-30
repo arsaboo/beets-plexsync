@@ -1799,17 +1799,35 @@ class PlexSync(BeetsPlugin):
             return None
 
     def import_yt_playlist(self, url):
+        """Import YouTube playlist with caching."""
+        # Generate cache key from URL
+        playlist_id = url.split('list=')[-1].split('&')[0]  # Extract playlist ID from URL
+
+        # Check cache
+        cached_data = self.cache.get_playlist_cache(playlist_id, 'youtube')
+        if (cached_data):
+            self._log.info("Using cached YouTube playlist data")
+            return cached_data
+
         try:
             from beetsplug.youtube import YouTubePlugin
         except ModuleNotFoundError:
             self._log.error("YouTube plugin not installed")
-            return
+            return None
+
         try:
             ytp = YouTubePlugin()
+            song_list = ytp.import_youtube_playlist(url)
+
+            # Cache successful results
+            if song_list:
+                self.cache.set_playlist_cache(playlist_id, 'youtube', song_list)
+                self._log.info("Cached {} tracks from YouTube playlist", len(song_list))
+
+            return song_list
         except Exception as e:
             self._log.error("Unable to initialize YouTube plugin. Error: {}", e)
-            return
-        return ytp.import_youtube_playlist(url)
+            return None
 
     def import_yt_search(self, query, limit):
         try:
@@ -1825,17 +1843,35 @@ class PlexSync(BeetsPlugin):
         return ytp.import_youtube_search(query, limit)
 
     def import_tidal_playlist(self, url):
+        """Import Tidal playlist with caching."""
+        # Generate cache key from URL
+        playlist_id = url.split('/')[-1]
+
+        # Check cache
+        cached_data = self.cache.get_playlist_cache(playlist_id, 'tidal')
+        if (cached_data):
+            self._log.info("Using cached Tidal playlist data")
+            return cached_data
+
         try:
             from beetsplug.tidal import TidalPlugin
         except ModuleNotFoundError:
             self._log.error("Tidal plugin not installed")
-            return
+            return None
+
         try:
             tidal = TidalPlugin()
+            song_list = tidal.import_tidal_playlist(url)
+
+            # Cache successful results
+            if song_list:
+                self.cache.set_playlist_cache(playlist_id, 'tidal', song_list)
+                self._log.info("Cached {} tracks from Tidal playlist", len(song_list))
+
+            return song_list
         except Exception as e:
             self._log.error("Unable to initialize Tidal plugin. Error: {}", e)
-            return
-        return tidal.import_tidal_playlist(url)
+            return None
 
     def import_gaana_playlist(self, url):
         """Import Gaana playlist with caching."""
