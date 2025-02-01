@@ -2946,7 +2946,6 @@ class PlexSync(BeetsPlugin):
                     beets_item = plex_lookup.get(track.ratingKey)
                     if beets_item:
                         beets_items.append(beets_item)
-                        self._log.debug("Found beets item for track: {}", track.title)
                 except Exception as e:
                     self._log.debug("Error finding beets item for {}: {}", track.title, e)
                     continue
