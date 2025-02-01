@@ -2182,12 +2182,16 @@ class PlexSync(BeetsPlugin):
             weighted_score = (z_recency * 0.2) + (z_popularity * 0.5) + (z_age * 0.3)
 
         # Convert to 0-100 scale using modified percentile calculation
-        # This ensures better spread across the range
-        final_score = (stats.norm.cdf(weighted_score / 2) * 100)  # Divide by 2 to spread scores more
+        # Use a steeper sigmoid curve by multiplying weighted_score by 1.5
+        final_score = stats.norm.cdf(weighted_score * 1.5) * 100
 
-        # Add small gaussian noise for variety (scaled appropriately)
-        noise = np.random.normal(0, 2)
+        # Add very small gaussian noise (reduced from 2 to 0.5) for minor variety
+        noise = np.random.normal(0, 0.5)
         final_score = final_score + noise
+
+        # Apply a minimum threshold of 50 for unrated tracks to ensure quality
+        if not is_rated and final_score < 50:
+            final_score = 50 + (final_score / 2)  # Scale lower scores up but keep relative ordering
 
         # Debug logging
         self._log.debug(
