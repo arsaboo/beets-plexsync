@@ -1280,13 +1280,7 @@ class PlexSync(BeetsPlugin):
         return result
 
     def search_plex_song(self, song, manual_search=None, llm_attempted=False):
-        """Fetch the Plex track key with fallback options.
-
-        Args:
-            song: Dictionary containing song metadata
-            manual_search: Whether to enable manual search (defaults to config value)
-            llm_attempted: Whether LLM cleaning has been attempted already
-        """
+        """Fetch the Plex track key with fallback options."""
         if manual_search is None:
             manual_search = config["plexsync"]["manual_search"].get(bool)
 
@@ -1300,7 +1294,7 @@ class PlexSync(BeetsPlugin):
                     if cleaned_metadata and not llm_attempted:
                         self._log.debug("Using cached cleaned metadata: {}", cleaned_metadata)
                         return self.search_plex_song(cleaned_metadata, manual_search, llm_attempted=True)
-                    return None
+                    return None  # Return None if we have a negative cache result
                 try:
                     if rating_key:  # Only try to fetch if we have a valid rating key
                         return self.music.fetchItem(rating_key)
@@ -1351,6 +1345,8 @@ class PlexSync(BeetsPlugin):
                 manual_result = self._handle_manual_search(sorted_tracks, song)
                 if manual_result:
                     return manual_result
+                # If user skipped, the negative cache was already stored, return None
+                return None
 
             # Otherwise try automatic matching
             for track, score in sorted_tracks:
