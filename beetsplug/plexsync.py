@@ -2932,13 +2932,49 @@ class PlexSync(BeetsPlugin):
                 with open(log_file, 'a', encoding='utf-8') as f:
                     f.write(f"Not found: {track.get('artist', 'Unknown')} - {track.get('parentTitle', 'Unknown')} - {track.get('title', 'Unknown')}\n")
 
-        # Get filters from config and apply them to matched Plex tracks
+        # Get filters from config and apply them
         filters = playlist_config.get("filters", {})
         if filters:
             self._log.debug("Applying filters to {} matched tracks...", len(matched_songs))
-            filtered_tracks = self.apply_playlist_filters(matched_songs, filters)
-            self._log.debug("After filtering: {} tracks remain", len(filtered_tracks))
-            matched_songs = filtered_tracks
+
+            # Convert Plex tracks to beets items first
+            beets_items = []
+            plex_lookup = self.build_plex_lookup(lib)  # Get the lookup dictionary
+
+            for track in matched_songs:
+                try:
+                    beets_item = plex_lookup.get(track.ratingKey)
+                    if beets_item:
+                        beets_items.append(beets_item)
+                        self._log.debug("Found beets item for track: {}", track.title)
+                except Exception as e:
+                    self._log.debug("Error finding beets item for {}: {}", track.title, e)
+                    continue
+
+            # Now apply filters to beets items
+            filtered_items = []
+            for item in beets_items:
+                include_item = True
+
+                if 'exclude' in filters:
+                    if 'years' in filters['exclude']:
+                        years_config = filters['exclude']['years']
+                        if 'after' in years_config and item.year:
+                            if item.year > years_config['after']:
+                                include_item = False
+                                self._log.debug("Excluding {} (year {} > {})",
+                                    item.title, item.year, years_config['after'])
+                        if 'before' in years_config and item.year:
+                            if item.year < years_config['before']:
+                                include_item = False
+                                self._log.debug("Excluding {} (year {} < {})",
+                                    item.title, item.year, years_config['before'])
+
+                if include_item:
+                    filtered_items.append(item)
+
+            self._log.debug("After filtering: {} tracks remain", len(filtered_items))
+            matched_songs = filtered_items
 
         # Deduplicate based on plex_ratingkey
         seen = set()
