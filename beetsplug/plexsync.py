@@ -2605,10 +2605,7 @@ class PlexSync(BeetsPlugin):
         """Get filtered library tracks using Plex's advanced filters in a single query."""
         try:
             # Build advanced filters structure
-            advanced_filters = {'and': []}  # Match all of the following
-
-            # Base filter for tracks
-            advanced_filters['and'].append({'libtype': 'track'})
+            advanced_filters = {'and': []}
 
             # Handle genre filters
             include_genres = []
@@ -2657,7 +2654,7 @@ class PlexSync(BeetsPlugin):
                     if 'after' in years_config:
                         advanced_filters['and'].append({'year<<': years_config['after']})
 
-            # Handle rating filter - include unrated (0) OR rated above minimum
+            # Handle rating filter
             if config_filters and 'min_rating' in config_filters:
                 advanced_filters['and'].append({
                     'or': [
@@ -2672,10 +2669,13 @@ class PlexSync(BeetsPlugin):
 
             self._log.debug("Using advanced filters: {}", advanced_filters)
 
-            # Make single query with all filters
-            tracks = self.music.search(filters=advanced_filters)
+            # Use searchTracks with advanced filters
+            tracks = self.music.searchTracks(filters=advanced_filters)
 
-            self._log.debug("Found {} tracks matching all criteria in a single query", len(tracks))
+            self._log.debug(
+                "Found {} tracks matching all criteria in a single query",
+                len(tracks)
+            )
 
             return tracks
 
