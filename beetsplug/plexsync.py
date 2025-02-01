@@ -2980,8 +2980,10 @@ class PlexSync(BeetsPlugin):
         seen = set()
         unique_matched = []
         for song in matched_songs:
-            if song.ratingKey not in seen:
-                seen.add(song.ratingKey)
+            # Use plex_ratingkey for beets items
+            rating_key = getattr(song, 'plex_ratingkey', None)
+            if rating_key and rating_key not in seen:
+                seen.add(rating_key)
                 unique_matched.append(song)
 
         # Apply track limit if specified
