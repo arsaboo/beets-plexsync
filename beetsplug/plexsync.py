@@ -2622,17 +2622,17 @@ class PlexSync(BeetsPlugin):
                 if 'exclude' in config_filters and 'genres' in config_filters['exclude']:
                     exclude_genres.extend(g.lower() for g in config_filters['exclude']['genres'])
 
-            # Add genre conditions
+            # Add genre conditions - using OR for inclusions
             if include_genres:
                 include_genres = list(set(include_genres))  # Remove duplicates
                 advanced_filters['and'].append({
                     'or': [{'genre': genre} for genre in include_genres]
                 })
 
+            # Use AND for exclusions with genre! operator
             if exclude_genres:
                 exclude_genres = list(set(exclude_genres))  # Remove duplicates
-                for genre in exclude_genres:
-                    advanced_filters['and'].append({'genre!=': genre})
+                advanced_filters['and'].append({'genre!': exclude_genres})
 
             # Handle year filters
             if config_filters:
