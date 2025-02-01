@@ -1179,40 +1179,40 @@ class PlexSync(BeetsPlugin):
         plst.removeItems(items=list(to_remove))
 
     def _update_recently_played(self, lib, days=7):
-        """Fetch the Plex track key."""
+        """Update recently played track info using plex_lookup."""
         tracks = self.music.search(
             filters={"track.lastViewedAt>>": f"{days}d"}, libtype="track"
         )
         self._log.info("Updating information for {} tracks", len(tracks))
+
+        # Build lookup once for all tracks
+        plex_lookup = self.build_plex_lookup(lib)
+
         with lib.transaction():
             for track in tracks:
-                query = MatchQuery("plex_ratingkey", track.ratingKey, fast=False)
-                items = lib.items(query)
-                if not items:
-                    self._log.debug("{} | track not found", query)
+                beets_item = plex_lookup.get(track.ratingKey)
+                if not beets_item:
+                    self._log.debug("Track {} not found in beets", track.ratingKey)
                     continue
-                elif len(items) == 1:
-                    self._log.info("Updating information for {} ", items[0])
-                    try:
-                        items[0].plex_userrating = track.userRating
-                        items[0].plex_skipcount = track.skipCount
-                        items[0].plex_viewcount = track.viewCount
-                        items[0].plex_lastviewedat = (
-                            track.lastViewedAt.timestamp()
-                            if track.lastViewedAt
-                            else None
-                        )
-                        items[0].plex_lastratedat = (
-                            track.lastRatedAt.timestamp() if track.lastRatedAt else None
-                        )
-                        items[0].plex_updated = time.time()
-                        items[0].store()
-                        items[0].try_write()
-                    except exceptions.NotFound:
-                        self._log.debug("{} | track not found", items[0])
-                        continue
-                else:
-                    self._log.debug("Please sync Plex library again")
+
+                self._log.info("Updating information for {}", beets_item)
+                try:
+                    beets_item.plex_userrating = track.userRating
+                    beets_item.plex_skipcount = track.skipCount
+                    beets_item.plex_viewcount = track.viewCount
+                    beets_item.plex_lastviewedat = (
+                        track.lastViewedAt.timestamp()
+                        if track.lastViewedAt
+                        else None
+                    )
+                    beets_item.plex_lastratedat = (
+                        track.lastRatedAt.timestamp() if track.lastRatedAt else None
+                    )
+                    beets_item.plex_updated = time.time()
+                    beets_item.store()
+                    beets_item.try_write()
+                except exceptions.NotFound:
+                    self._log.debug("Track not found in Plex: {}", beets_item)
                     continue
 
     def _cache_result(self, cache_key, result, cleaned_metadata=None):
@@ -1912,50 +1912,55 @@ class PlexSync(BeetsPlugin):
         return song_list
 
     def _plex2spotify(self, lib, playlist):
+        """Transfer Plex playlist to Spotify using plex_lookup."""
         self.authenticate_spotify()
         plex_playlist = self.plex.playlist(playlist)
         plex_playlist_items = plex_playlist.items()
-        self._log.debug(f"Plex playlist items: {plex_playlist_items}")
+        self._log.debug("Plex playlist items: {}", plex_playlist_items)
+
+        # Build lookup once for all tracks
+        plex_lookup = self.build_plex_lookup(lib)
+
         spotify_tracks = []
         for item in plex_playlist_items:
-            self._log.debug(f"Processing {item.ratingKey}")
-            with lib.transaction():
-                query = MatchQuery("plex_ratingkey", item.ratingKey, fast=False)
-                items = lib.items(query)
-                if not items:
-                    self._log.debug(
-                        f"Item not found in Beets "
-                        f"{item.ratingKey}: {item.parentTitle} - "
-                        f"{item.title}"
-                    )
+            self._log.debug("Processing {}", item.ratingKey)
+
+            beets_item = plex_lookup.get(item.ratingKey)
+            if not beets_item:
+                self._log.debug(
+                    "Item not found in Beets: {} - {}",
+                    item.parentTitle,
+                    item.title
+                )
+                continue
+
+            self._log.debug("Beets item: {}", beets_item)
+
+            try:
+                spotify_track_id = beets_item.spotify_track_id
+                self._log.debug("Spotify track id in beets: {}", spotify_track_id)
+            except Exception:
+                spotify_track_id = None
+                self._log.debug("Spotify track_id not found in beets")
+
+            if not spotify_track_id:
+                self._log.debug(
+                    "Searching for {} {} in Spotify",
+                    beets_item.title,
+                    beets_item.album
+                )
+                spotify_search_results = self.sp.search(
+                    q=f"track:{beets_item.title} album:{beets_item.album}",
+                    limit=1,
+                    type="track",
+                )
+                if not spotify_search_results["tracks"]["items"]:
+                    self._log.info("Spotify match not found for {}", beets_item)
                     continue
-                beets_item = items[0]
-                self._log.debug(f"Beets item: {beets_item}")
-                try:
-                    spotify_track_id = beets_item.spotify_track_id
-                    self._log.debug(
-                        f"Spotify track id in beets: " f"{spotify_track_id}"
-                    )
-                except Exception:
-                    spotify_track_id = None
-                    self._log.debug("Spotify track_id not found in beets")
-                if not spotify_track_id:
-                    self._log.debug(
-                        f"Searching for {beets_item.title} "
-                        f"{beets_item.album} in Spotify"
-                    )
-                    spotify_search_results = self.sp.search(
-                        q=f"track:{beets_item.title} album:{beets_item.album}",
-                        limit=1,
-                        type="track",
-                    )
-                    if not spotify_search_results["tracks"]["items"]:
-                        self._log.info(f"Spotify match not found for " f"{beets_item}")
-                        continue
-                    spotify_track_id = spotify_search_results["tracks"]["items"][0][
-                        "id"
-                    ]
-                spotify_tracks.append(spotify_track_id)
+                spotify_track_id = spotify_search_results["tracks"]["items"][0]["id"]
+
+            spotify_tracks.append(spotify_track_id)
+
         self.add_tracks_to_spotify_playlist(playlist, spotify_tracks)
 
     def add_tracks_to_spotify_playlist(self, playlist_name, track_uris):
