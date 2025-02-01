@@ -833,6 +833,7 @@ class PlexSync(BeetsPlugin):
             for p in playlists_config:
                 playlist_type = p.get("type", "smart")
                 playlist_id = p.get("id")
+                playlist_name = p.get("name", "Unnamed playlist")
 
                 if playlist_type == "imported":
                     self.generate_imported_playlist(lib, p)
@@ -846,10 +847,10 @@ class PlexSync(BeetsPlugin):
                         self.generate_forgotten_gems(lib, p, plex_lookup, preferred_genres, similar_tracks)
                 else:
                     self._log.warning(
-                        "Unrecognized playlist configuration - type: '{}', id: '{}'. "
+                        "Unrecognized playlist configuration '{}' - type: '{}', id: '{}'. "
                         "Valid types are 'imported' or 'smart'. "
                         "Valid smart playlist IDs are 'daily_discovery' and 'forgotten_gems'.",
-                        playlist_type, playlist_id
+                        playlist_name, playlist_type, playlist_id
                     )
 
         plex_smartplaylists_cmd.func = func_plex_smartplaylists
