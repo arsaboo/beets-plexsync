@@ -2903,41 +2903,22 @@ class PlexSync(BeetsPlugin):
             self._log.warning("No tracks found from any source for playlist {}", playlist_name)
             return
 
-        # Get filters from config
-        filters = playlist_config.get("filters", {})
-
-        # Apply filters to imported tracks
-        if filters:
-            self._log.debug("Applying filters to {} tracks...", len(all_tracks))
-            filtered_tracks = self.apply_playlist_filters(all_tracks, filters)
-            self._log.debug("After filtering: {} tracks", len(filtered_tracks))
-        else:
-            filtered_tracks = all_tracks
-
-        # Process tracks through Plex and filter out low-rated ones
+        # Process tracks through Plex first
         matched_songs = []
         with open(log_file, 'a', encoding='utf-8') as f:
             f.write("\nTracks not found in Plex library:\n")
             f.write("-" * 80 + "\n")
 
-        for track in filtered_tracks:
+        for track in all_tracks:
             found = self.search_plex_song(track, manual_search)
             if found:
                 # Just use Plex rating directly
                 plex_rating = float(getattr(found, "userRating", 0) or 0)
 
-                self._log.debug(
-                    "Track rating check: {} - {} - {} (Rating: {})",
-                    track.get('parentTitle', 'Unknown'),
-                    track.get('title', 'Unknown'),
-                    plex_rating,
-                    "excluded" if 0 < plex_rating <= 2 else "included"
-                )
-
                 if plex_rating == 0 or plex_rating > 2:  # Include unrated or rating > 2
                     matched_songs.append(found)
                     self._log.debug(
-                        "Added to playlist: {} - {} - {} (Rating: {})",
+                        "Matched in Plex: {} - {} - {} (Rating: {})",
                         track.get('artist', 'Unknown'),
                         track.get('parentTitle', 'Unknown'),
                         track.get('title', 'Unknown'),
@@ -2951,14 +2932,13 @@ class PlexSync(BeetsPlugin):
                 with open(log_file, 'a', encoding='utf-8') as f:
                     f.write(f"Not found: {track.get('artist', 'Unknown')} - {track.get('parentTitle', 'Unknown')} - {track.get('title', 'Unknown')}\n")
 
-        # Write summary at the end of log file
-        with open(log_file, 'a', encoding='utf-8') as f:
-            f.write(f"\nImport Summary:\n")
-            f.write("-" * 80 + "\n")
-            f.write(f"Total tracks from sources: {len(all_tracks)}\n")
-            f.write(f"Tracks not found in Plex: {not_found_count}\n")
-            f.write(f"Tracks matched and added: {len(matched_songs)}\n")
-            f.write(f"\nImport completed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        # Get filters from config and apply them to matched Plex tracks
+        filters = playlist_config.get("filters", {})
+        if filters:
+            self._log.debug("Applying filters to {} matched tracks...", len(matched_songs))
+            filtered_tracks = self.apply_playlist_filters(matched_songs, filters)
+            self._log.debug("After filtering: {} tracks remain", len(filtered_tracks))
+            matched_songs = filtered_tracks
 
         # Deduplicate based on plex_ratingkey
         seen = set()
@@ -2971,6 +2951,15 @@ class PlexSync(BeetsPlugin):
         # Apply track limit if specified
         if max_tracks:
             unique_matched = unique_matched[:max_tracks]
+
+        # Write summary at the end of log file
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"\nImport Summary:\n")
+            f.write("-" * 80 + "\n")
+            f.write(f"Total tracks from sources: {len(all_tracks)}\n")
+            f.write(f"Tracks not found in Plex: {not_found_count}\n")
+            f.write(f"Tracks matched and added: {len(matched_songs)}\n")
+            f.write(f"\nImport completed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
 
         self._log.info(
             "Found {} unique tracks after filtering (see {} for details)",
