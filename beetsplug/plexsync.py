@@ -2602,84 +2602,86 @@ class PlexSync(BeetsPlugin):
         )
 
     def get_filtered_library_tracks(self, preferred_genres, config_filters, exclusion_days=30):
-        """Get filtered library tracks using Plex search capabilities."""
-        # Collect all relevant genres
-        all_genres = set(preferred_genres)
+        """Get filtered library tracks using Plex's advanced filters in a single query."""
+        try:
+            # Build advanced filters structure
+            advanced_filters = {'and': []}  # Match all of the following
 
-        # Add genres from inclusion filters if present
-        if config_filters and 'include' in config_filters:
-            if 'genres' in config_filters['include']:
-                all_genres.update(g.lower() for g in config_filters['include']['genres'])
+            # Base filter for tracks
+            advanced_filters['and'].append({'libtype': 'track'})
 
-        # Convert config filters to Plex filters
-        plex_filters = {"libtype": "track"}
+            # Handle genre filters
+            include_genres = []
+            exclude_genres = []
 
-        # Handle year filters
-        if config_filters and 'include' in config_filters:
-            years_config = config_filters['include'].get('years', {})
-            if 'between' in years_config:
-                start_year, end_year = years_config['between']
-                plex_filters["year>>="] = start_year
-                plex_filters["year<<="] = end_year
+            # Add genres from preferred_genres if no specific inclusion filters
+            if preferred_genres:
+                include_genres.extend(preferred_genres)
 
-        if config_filters and 'exclude' in config_filters:
-            years_config = config_filters['exclude'].get('years', {})
-            if 'before' in years_config:
-                plex_filters["year>>="] = years_config['before']
-            if 'after' in years_config:
-                plex_filters["year<<="] = years_config['after']
+            # Add configured genres
+            if config_filters:
+                if 'include' in config_filters and 'genres' in config_filters['include']:
+                    include_genres.extend(g.lower() for g in config_filters['include']['genres'])
+                if 'exclude' in config_filters and 'genres' in config_filters['exclude']:
+                    exclude_genres.extend(g.lower() for g in config_filters['exclude']['genres'])
 
-        # Handle rating filter if specified
-        if config_filters and 'min_rating' in config_filters:
-            plex_filters["userRating>>="] = config_filters['min_rating']
+            # Add genre conditions
+            if include_genres:
+                include_genres = list(set(include_genres))  # Remove duplicates
+                advanced_filters['and'].append({
+                    'or': [{'genre': genre} for genre in include_genres]
+                })
 
-        self._log.debug("Using Plex filters: {}", plex_filters)
+            if exclude_genres:
+                exclude_genres = list(set(exclude_genres))  # Remove duplicates
+                for genre in exclude_genres:
+                    advanced_filters['and'].append({'genre!=': genre})
 
-        # Get recently played tracks first
-        if exclusion_days > 0:
-            recent = set(
-                track.ratingKey
-                for track in self.music.search(
-                    filters={"lastViewedAt>>": f"{exclusion_days}d"},
-                    libtype="track"
-                )
-            )
-        else:
-            recent = set()
+            # Handle year filters
+            if config_filters:
+                if 'include' in config_filters and 'years' in config_filters['include']:
+                    years_config = config_filters['include']['years']
+                    if 'between' in years_config:
+                        start_year, end_year = years_config['between']
+                        advanced_filters['and'].append({
+                            'and': [
+                                {'year>>': start_year},
+                                {'year<<': end_year}
+                            ]
+                        })
 
-        # Perform the search
-        all_tracks = []
+                if 'exclude' in config_filters and 'years' in config_filters['exclude']:
+                    years_config = config_filters['exclude']['years']
+                    if 'before' in years_config:
+                        advanced_filters['and'].append({'year>>': years_config['before']})
+                    if 'after' in years_config:
+                        advanced_filters['and'].append({'year<<': years_config['after']})
 
-        # Search for each genre separately to avoid overly complex queries
-        for genre in all_genres:
-            try:
-                genre_filters = plex_filters.copy()
-                genre_filters["genre"] = genre
+            # Handle rating filter - include unrated (0) OR rated above minimum
+            if config_filters and 'min_rating' in config_filters:
+                advanced_filters['and'].append({
+                    'or': [
+                        {'userRating': 0},  # Unrated
+                        {'userRating>>': config_filters['min_rating']}  # Above minimum
+                    ]
+                })
 
-                tracks = self.music.search(**genre_filters)
+            # Handle recent plays exclusion
+            if exclusion_days > 0:
+                advanced_filters['and'].append({'lastViewedAt<<': f"-{exclusion_days}d"})
 
-                # Filter out recently played tracks in memory
-                tracks = [t for t in tracks if t.ratingKey not in recent]
-                all_tracks.extend(tracks)
+            self._log.debug("Using advanced filters: {}", advanced_filters)
 
-                self._log.debug("Found {} tracks for genre '{}' (after excluding recent)",
-                              len(tracks), genre)
-            except Exception as e:
-                self._log.error("Error searching for genre '{}': {}", genre, e)
+            # Make single query with all filters
+            tracks = self.music.search(filters=advanced_filters)
 
-        # Remove duplicates based on ratingKey
-        seen = set()
-        unique_tracks = []
-        for track in all_tracks:
-            if track.ratingKey not in seen:
-                seen.add(track.ratingKey)
-                unique_tracks.append(track)
+            self._log.debug("Found {} tracks matching all criteria in a single query", len(tracks))
 
-        self._log.debug(
-            "Found {} unique tracks after filtering from {} total matches",
-            len(unique_tracks), len(all_tracks)
-        )
-        return unique_tracks
+            return tracks
+
+        except Exception as e:
+            self._log.error("Error searching with advanced filters: {}. Filter: {}", e, advanced_filters)
+            return []
 
     def generate_forgotten_gems(self, lib, ug_config, plex_lookup, preferred_genres, similar_tracks):
         """Generate a Forgotten Gems playlist with improved discovery."""
