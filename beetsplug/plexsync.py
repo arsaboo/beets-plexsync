@@ -845,7 +845,12 @@ class PlexSync(BeetsPlugin):
                     else:  # forgotten_gems
                         self.generate_forgotten_gems(lib, p, plex_lookup, preferred_genres, similar_tracks)
                 else:
-                    self._log.warning("Unknown playlist type or id: {} - {}", playlist_type, playlist_id)
+                    self._log.warning(
+                        "Unrecognized playlist configuration - type: '{}', id: '{}'. "
+                        "Valid types are 'imported' or 'smart'. "
+                        "Valid smart playlist IDs are 'daily_discovery' and 'forgotten_gems'.",
+                        playlist_type, playlist_id
+                    )
 
         plex_smartplaylists_cmd.func = func_plex_smartplaylists
 
@@ -2972,8 +2977,7 @@ class PlexSync(BeetsPlugin):
 
         self._log.info(
             "Found {} unique tracks after filtering (see {} for details)",
-            len(unique_matched),
-            log_file
+            len(unique_matched), log_file
         )
 
         # Create or update playlist based on clear_playlist setting
