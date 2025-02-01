@@ -15,6 +15,7 @@ import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import List
 
 import confuse
@@ -30,15 +31,15 @@ from beets.plugins import BeetsPlugin
 from beets.ui import input_, print_
 from bs4 import BeautifulSoup
 from jiosaavn import JioSaavn
-from beetsplug.llm import search_track_info
 from openai import OpenAI
 from plexapi import exceptions
 from plexapi.server import PlexServer
 from pydantic import BaseModel, Field
 from requests.exceptions import ConnectionError, ContentDecodingError
 from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
+
 from beetsplug.caching import Cache
-from pathlib import Path
+from beetsplug.llm import search_track_info
 
 
 class Song(BaseModel):
