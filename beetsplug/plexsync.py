@@ -2906,14 +2906,6 @@ class PlexSync(BeetsPlugin):
                 with open(log_file, 'a', encoding='utf-8') as f:
                     f.write(f"Not found: {track.get('artist', 'Unknown')} - {track.get('parentTitle', 'Unknown')} - {track.get('title', 'Unknown')}\n")
 
-        self._log.debug("Initial matched_songs count: {}", len(matched_songs))
-
-        self._log.debug(
-            "Before deduplication: {} tracks, Types: {}",
-            len(matched_songs),
-            set(type(song).__name__ for song in matched_songs)
-        )
-
         # Get filters from config and apply them
         filters = playlist_config.get("filters", {})
         if filters:
