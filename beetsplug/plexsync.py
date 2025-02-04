@@ -2906,6 +2906,14 @@ class PlexSync(BeetsPlugin):
                 with open(log_file, 'a', encoding='utf-8') as f:
                     f.write(f"Not found: {track.get('artist', 'Unknown')} - {track.get('parentTitle', 'Unknown')} - {track.get('title', 'Unknown')}\n")
 
+        self._log.debug("Initial matched_songs count: {}", len(matched_songs))
+
+        self._log.debug(
+            "Before deduplication: {} tracks, Types: {}",
+            len(matched_songs),
+            set(type(song).__name__ for song in matched_songs)
+        )
+
         # Get filters from config and apply them
         filters = playlist_config.get("filters", {})
         if filters:
@@ -2963,9 +2971,21 @@ class PlexSync(BeetsPlugin):
                 seen.add(rating_key)
                 unique_matched.append(song)
 
+        self._log.debug(
+            "After deduplication: {} tracks, Rating keys: {}",
+            len(unique_matched),
+            [getattr(song, 'plex_ratingkey', None) for song in unique_matched]
+        )
+
         # Apply track limit if specified
         if max_tracks:
             unique_matched = unique_matched[:max_tracks]
+
+        self._log.debug(
+            "First 5 tracks to be added: {}",
+            [(getattr(t, 'title', None), getattr(t, 'plex_ratingkey', None))
+             for t in unique_matched[:5]]
+        )
 
         # Write summary at the end of log file
         with open(log_file, 'a', encoding='utf-8') as f:
