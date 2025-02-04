@@ -2973,27 +2973,9 @@ class PlexSync(BeetsPlugin):
             if rating_key and rating_key not in seen:
                 seen.add(rating_key)
                 unique_matched.append(song)
-                self._log.debug(
-                    "Added track to unique list: {} (Rating key: {})",
-                    getattr(song, 'title', 'Unknown'),
-                    rating_key
-                )
-
-        self._log.debug(
-            "After deduplication: {} tracks, Rating keys: {}",
-            len(unique_matched),
-            [getattr(song, 'plex_ratingkey', None) for song in unique_matched]
-        )
-
         # Apply track limit if specified
         if max_tracks:
             unique_matched = unique_matched[:max_tracks]
-
-        self._log.debug(
-            "First 5 tracks to be added: {}",
-            [(getattr(t, 'title', None), getattr(t, 'plex_ratingkey', None))
-             for t in unique_matched[:5]]
-        )
 
         # Write summary at the end of log file
         with open(log_file, 'a', encoding='utf-8') as f:
