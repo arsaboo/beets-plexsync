@@ -2961,15 +2961,23 @@ class PlexSync(BeetsPlugin):
             self._log.debug("After filtering: {} tracks remain", len(filtered_items))
             matched_songs = filtered_items
 
-        # Deduplicate based on plex_ratingkey
+        # Deduplicate based on ratingKey for Plex Track objects and plex_ratingkey for beets items
         seen = set()
         unique_matched = []
         for song in matched_songs:
-            # Use plex_ratingkey for beets items
-            rating_key = getattr(song, 'plex_ratingkey', None)
+            # Try both ratingKey (Plex Track) and plex_ratingkey (beets Item)
+            rating_key = (
+                getattr(song, 'ratingKey', None)  # For Plex Track objects
+                or getattr(song, 'plex_ratingkey', None)  # For beets Items
+            )
             if rating_key and rating_key not in seen:
                 seen.add(rating_key)
                 unique_matched.append(song)
+                self._log.debug(
+                    "Added track to unique list: {} (Rating key: {})",
+                    getattr(song, 'title', 'Unknown'),
+                    rating_key
+                )
 
         self._log.debug(
             "After deduplication: {} tracks, Rating keys: {}",
@@ -3182,7 +3190,7 @@ class PlexSync(BeetsPlugin):
             playlist_id = p.get("id")
             playlist_name = p.get("name", "Unnamed playlist")
 
-            if playlist_type == "imported":
+            if (playlist_type == "imported"):
                 self.generate_imported_playlist(lib, p, plex_lookup)  # Pass plex_lookup
             elif playlist_id in ["daily_discovery", "forgotten_gems"]:
                 if playlist_id == "daily_discovery":
