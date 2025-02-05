@@ -1221,27 +1221,99 @@ class PlexSync(BeetsPlugin):
         return selected_track
 
     def manual_track_search(self, original_song=None):
-        """Manually search for a track in the Plex library.
-
-        Prompts the user to enter the title, album, and artist of the track
-        they want to search for.
-        Calls the `search_plex_song` method with the provided information and
-        sets the `manual_search` flag to True.
-        """
+        """Manually search for a track in the Plex library."""
         song_dict = {}
         title = input_("Title:").strip()
         album = input_("Album:").strip()
         artist = input_("Artist:").strip()
-        song_dict = {
-            "title": title.strip(),
-            "album": album.strip(),
-            "artist": artist.strip(),
-        }
-        result = self.search_plex_song(song_dict, manual_search=True)
-        if result and original_song:
-            cache_key = self.cache._make_cache_key(original_song)  # Ensure consistent cache key
-            self._cache_result(cache_key, result)
-        return result
+
+        # Only include non-empty values in search
+        search_params = {}
+        if title:
+            search_params["track.title"] = title
+        if album:
+            search_params["album.title"] = album
+        if artist:
+            search_params["artist.title"] = artist
+
+        # If no search parameters provided, return None
+        if not search_params:
+            self._log.debug("No search criteria provided")
+            return None
+
+        self._log.debug("Searching with params: {}", search_params)
+
+        try:
+            # Search using provided parameters
+            tracks = self.music.searchTracks(**search_params, limit=50)
+
+            if not tracks:
+                # If no results and we have an artist, try artist-only search
+                if artist and len(search_params) > 1:
+                    self._log.debug("No results, trying artist-only search")
+                    tracks = self.music.searchTracks(**{"artist.title": artist}, limit=50)
+
+            if not tracks:
+                self._log.info("No matching tracks found")
+                return None
+
+            # Filter results by artist if specified
+            if artist:
+                filtered_tracks = []
+                for track in tracks:
+                    track_artist = getattr(track, 'originalTitle', None) or track.artist().title
+                    if self.get_fuzzy_score(artist.lower(), track_artist.lower()) > 0.8:
+                        filtered_tracks.append(track)
+                tracks = filtered_tracks
+
+            if not tracks:
+                self._log.info("No tracks matched after artist filtering")
+                return None
+
+            # Create song_dict for closest match calculation
+            song_dict = {
+                "title": title if title else "",
+                "album": album if album else "",
+                "artist": artist if artist else "",
+            }
+
+            # Sort matches by relevance
+            sorted_tracks = self.find_closest_match(song_dict, tracks)
+
+            if not sorted_tracks:
+                return None
+
+            print_(f"\nFound {len(sorted_tracks)} potential matches:")
+            for i, (track, score) in enumerate(sorted_tracks, start=1):
+                track_artist = getattr(track, 'originalTitle', None) or track.artist().title
+                print_(
+                    f"{i}. {track.parentTitle} - {track.title} - {track_artist}"
+                    f" (Match: {score:.2f})"
+                )
+
+            sel = ui.input_options(
+                ("aBort", "Skip", "Enter"),
+                numrange=(1, len(sorted_tracks)),
+                default=1
+            )
+            if sel in ("b", "B"):
+                return None
+            elif sel in ("s", "S"):
+                self._cache_result(song_dict, None)
+                return None
+            elif sel in ("e", "E"):
+                return self.manual_track_search(song_dict)
+
+            selected_track = sorted_tracks[sel - 1][0] if sel > 0 else None
+
+            if selected_track and original_song:
+                self._cache_result(self.cache._make_cache_key(original_song), selected_track)
+
+            return selected_track
+
+        except Exception as e:
+            self._log.error("Error during manual search: {}", e)
+            return None
 
     def search_plex_song(self, song, manual_search=None, llm_attempted=False):
         """Fetch the Plex track key with fallback options."""
