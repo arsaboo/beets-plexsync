@@ -356,6 +356,7 @@ class PlexSync(BeetsPlugin):
                                         'year': None
                                     }
                                     song_list.append(song_dict)
+
                         except Exception as e:
                             self._log.debug("Error processing track {}: {}", track_url, e)
 
@@ -2805,6 +2806,59 @@ class PlexSync(BeetsPlugin):
 
         self._log.info("Successfully updated {} playlist with {} tracks", playlist_name, len(selected_tracks))
 
+    def import_m3u8_playlist(self, filepath):
+        """Import M3U8 playlist with caching."""
+        # Generate cache key from file path
+        playlist_id = str(Path(filepath).stem)
+
+        # Check cache
+        cached_data = self.cache.get_playlist_cache(playlist_id, 'm3u8')
+        if (cached_data):
+            self._log.info("Using cached M3U8 playlist data")
+            return cached_data
+
+        song_list = []
+        current_song = {}
+
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith('#EXTM3U'):
+                        continue
+
+                    if line.startswith('#EXTINF:'):
+                        # Extract artist - title from the EXTINF line
+                        meta = line.split(',', 1)[1]
+                        if ' - ' in meta:
+                            artist, title = meta.split(' - ', 1)
+                            current_song = {
+                                'artist': artist.strip(),
+                                'title': title.strip(),
+                                'album': None  # Will be set by EXTALB
+                            }
+                    elif line.startswith('#EXTALB:'):
+                        # Extract album info
+                        current_song['album'] = line[8:].strip()
+                    elif not line.startswith('#'):
+                        # This is a file path line - finalize the song entry
+                        if current_song and all(k in current_song for k in ['title', 'artist']):
+                            # If no album was specified, use None
+                            if 'album' not in current_song:
+                                current_song['album'] = None
+                            song_list.append(current_song)
+                            current_song = {}
+
+            if song_list:
+                self.cache.set_playlist_cache(playlist_id, 'm3u8', song_list)
+                self._log.info("Cached {} tracks from M3U8 playlist", len(song_list))
+
+            return song_list
+
+        except Exception as e:
+            self._log.error("Error importing M3U8 playlist {}: {}", filepath, e)
+            return []
+
     def generate_imported_playlist(self, lib, playlist_config, plex_lookup=None):
         """Generate a playlist by importing from external sources."""
         playlist_name = playlist_config.get("name", "Imported Playlist")
@@ -2849,24 +2903,34 @@ class PlexSync(BeetsPlugin):
         for source in sources:
             try:
                 self._log.info("Importing from source: {}", source)
-                if "spotify" in source:
-                    tracks = self.import_spotify_playlist(self.get_playlist_id(source))
-                elif "jiosaavn" in source:
-                    tracks = self.import_jiosaavn_playlist(source)
-                elif "apple" in source:
-                    tracks = self.import_apple_playlist(source)
-                elif "gaana" in source:
-                    tracks = self.import_gaana_playlist(source)
-                elif "youtube" in source:
-                    tracks = self.import_yt_playlist(source)
-                elif "tidal" in source:
-                    tracks = self.import_tidal_playlist(source)
+                if isinstance(source, str):  # Handle string sources (URLs and file paths)
+                    if source.lower().endswith('.m3u8'):
+                        # Check if path is absolute, if not make it relative to config dir
+                        if not os.path.isabs(source):
+                            source = os.path.join(self.config_dir, source)
+                        tracks = self.import_m3u8_playlist(source)
+                    elif "spotify" in source:
+                        tracks = self.import_spotify_playlist(self.get_playlist_id(source))
+                    elif "jiosaavn" in source:
+                        tracks = self.import_jiosaavn_playlist(source)
+                    elif "apple" in source:
+                        tracks = self.import_apple_playlist(source)
+                    elif "gaana" in source:
+                        tracks = self.import_gaana_playlist(source)
+                    elif "youtube" in source:
+                        tracks = self.import_yt_playlist(source)
+                    elif "tidal" in source:
+                        tracks = self.import_tidal_playlist(source)
+                    else:
+                        self._log.warning("Unsupported source: {}", source)
+                        continue
+
+                    if tracks:
+                        all_tracks.extend(tracks)
                 else:
-                    self._log.warning("Unsupported source: {}", source)
+                    self._log.warning("Invalid source format: {}", source)
                     continue
 
-                if tracks:
-                    all_tracks.extend(tracks)
             except Exception as e:
                 self._log.error("Error importing from {}: {}", source, e)
                 with open(log_file, 'a', encoding='utf-8') as f:
