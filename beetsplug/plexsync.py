@@ -356,6 +356,7 @@ class PlexSync(BeetsPlugin):
                                         'year': None
                                     }
                                     song_list.append(song_dict)
+
                         except Exception as e:
                             self._log.debug("Error processing track {}: {}", track_url, e)
 
@@ -876,33 +877,76 @@ class PlexSync(BeetsPlugin):
             return 0
         return difflib.SequenceMatcher(None, str1.lower(), str2.lower()).ratio()
 
+    def clean_text_for_matching(self, text):
+        """Clean text for better fuzzy matching.
+
+        Args:
+            text: Text to clean
+
+        Returns:
+            str: Cleaned text
+        """
+        if not text:
+            return ""
+        # Convert to lowercase
+        text = text.lower()
+        # Remove parentheses and contents
+        text = re.sub(r'\([^)]*\)', '', text)
+        # Remove brackets and contents
+        text = re.sub(r'\[[^\]]*\]', '', text)
+        # Remove soundtrack mentions
+        text = re.sub(r'(?i)original\s+(?:motion\s+picture\s+)?soundtrack', '', text)
+        # Remove special chars and extra spaces
+        text = re.sub(r'[^\w\s]', ' ', text)
+        # Normalize whitespace
+        text = ' '.join(text.split())
+        return text
+
     def find_closest_match(self, title, lst):
         matches = []
         for track in lst:
-            # Calculate title and album scores
-            title_score = self.get_fuzzy_score(title.get('title', ''), track.title)
-            album_score = self.get_fuzzy_score(title.get('album', ''), track.parentTitle)
+            # Clean strings for matching
+            clean_title = self.clean_text_for_matching(title.get('title', ''))
+            clean_track_title = self.clean_text_for_matching(track.title)
+            clean_album = self.clean_text_for_matching(title.get('album', ''))
+            clean_track_album = self.clean_text_for_matching(track.parentTitle)
 
             # Safely get artists with None handling
-            track_artist_str = getattr(track, 'originalTitle', None) or ''
-            source_artist_str = title.get('artist', '')
+            track_artist_str = self.clean_text_for_matching(
+                getattr(track, 'originalTitle', None) or track.artist().title
+            )
+            source_artist_str = self.clean_text_for_matching(title.get('artist', ''))
 
-            # Split artists safely
-            track_artists = [a.strip() for a in track_artist_str.split(',') if a.strip()] if track_artist_str else []
-            source_artists = [a.strip() for a in source_artist_str.split(',') if a.strip()] if source_artist_str else []
+            # Calculate scores
+            title_score = self.get_fuzzy_score(clean_title, clean_track_title) if clean_title else 0
+            album_score = self.get_fuzzy_score(clean_album, clean_track_album) if clean_album else 0
+            artist_score = self.get_fuzzy_score(source_artist_str, track_artist_str) if source_artist_str else 0
 
-            # Compare artists
-            artist_score = 0
-            if track_artists and source_artists:
-                scores = [
-                    self.get_fuzzy_score(s_artist, t_artist)
-                    for s_artist in source_artists
-                    for t_artist in track_artists
-                ]
-                artist_score = max(scores) if scores else 0
+            # Count how many fields were provided
+            provided_fields = sum(bool(x) for x in [clean_title, clean_album, source_artist_str])
 
-            # Calculate weighted score
-            combined_score = (title_score * 0.5) + (album_score * 0.3) + (artist_score * 0.2)
+            if provided_fields == 0:
+                combined_score = 0
+            else:
+                # Adjust weights based on which fields were provided
+                weights = {
+                    'title': 0.6 if clean_title else 0,
+                    'album': 0.3 if clean_album else 0,
+                    'artist': 0.1 if source_artist_str else 0
+                }
+
+                # Normalize weights
+                total_weight = sum(weights.values())
+                if total_weight > 0:
+                    weights = {k: v/total_weight for k, v in weights.items()}
+
+                # Calculate weighted score
+                combined_score = (
+                    (title_score * weights['title']) +
+                    (album_score * weights['album']) +
+                    (artist_score * weights['artist'])
+                )
+
             matches.append((track, combined_score))
 
             # Debug logging
@@ -1191,18 +1235,68 @@ class PlexSync(BeetsPlugin):
 
     def _handle_manual_search(self, sorted_tracks, song):
         """Helper function to handle manual search."""
-        print_(
-            f'\nChoose candidates for {song.get("album", "Unknown")} '
-            f'- {song["title"]} - {song["artist"]}:'
-        )
+        source_title = song.get("title", "")
+        source_album = song.get("album", "Unknown")
+        source_artist = song.get("artist", "")
+
+        # Use beets UI formatting for the query header
+        print_(ui.colorize('text_highlight', '\nChoose candidates for: ') +
+               ui.colorize('text_highlight_minor', f"{source_album} - {source_title} - {source_artist}"))
+
+        # Format and display the matches
         for i, (track, score) in enumerate(sorted_tracks, start=1):
+            track_artist = getattr(track, 'originalTitle', None) or track.artist().title
+
+            # Use beets' similarity detection for highlighting
+            def highlight_matches(source, target):
+                # Split into parts but preserve complete names
+                source_parts = [p.strip() for p in source.replace(',', ' ,').split()]
+                target_parts = [p.strip() for p in target.replace(',', ' ,').split()]
+
+                highlighted_parts = []
+                for part in target_parts:
+                    matched = any(self.get_fuzzy_score(source_part.lower(), part.lower()) > 0.8
+                                for source_part in source_parts)
+                    if matched:
+                        highlighted_parts.append(ui.colorize('added_highlight', part))
+                    else:
+                        highlighted_parts.append(part)
+                return ' '.join(highlighted_parts)
+
+            # Highlight matching parts
+            highlighted_title = highlight_matches(source_title, track.title)
+            highlighted_album = highlight_matches(source_album, track.parentTitle)
+            highlighted_artist = highlight_matches(source_artist, track_artist)
+
+            # Color code the score
+            if score >= 0.8:
+                score_color = 'text_success'    # High match
+            elif score >= 0.5:
+                score_color = 'text_warning'    # Medium match
+            else:
+                score_color = 'text_error'      # Low match
+
+            # Format the line with matching and index colors
             print_(
-                f"{i}. {track.parentTitle} - {track.title} - "
-                f"{track.artist().title}"
+                f"{ui.colorize('action', str(i))}. {highlighted_album} - {highlighted_title} - "
+                f"{highlighted_artist} (Match: {ui.colorize(score_color, f'{score:.2f}')})"
             )
-        sel = ui.input_options(
-            ("aBort", "Skip", "Enter"), numrange=(1, len(sorted_tracks)), default=1
+
+        # Show options footer
+        print_(ui.colorize('text_highlight', '\nActions:'))
+        print_(ui.colorize('text', '  #: Select match by number'))
+        print_(
+            f"  {ui.colorize('action', 'a')}{ui.colorize('text', ': Abort')}   "
+            f"{ui.colorize('action', 's')}{ui.colorize('text', ': Skip')}   "
+            f"{ui.colorize('action', 'e')}{ui.colorize('text', ': Enter manual search')}\n"
         )
+
+        sel = ui.input_options(
+            ("aBort", "Skip", "Enter"),
+            numrange=(1, len(sorted_tracks)),
+            default=1
+        )
+
         if sel in ("b", "B"):
             return None
         elif sel in ("s", "S"):
@@ -1211,6 +1305,7 @@ class PlexSync(BeetsPlugin):
             return None
         elif sel in ("e", "E"):
             return self.manual_track_search(song)
+
         selected_track = sorted_tracks[sel - 1][0] if sel > 0 else None
         if selected_track:
             final_key = self.cache._make_cache_key(song)
@@ -1220,27 +1315,110 @@ class PlexSync(BeetsPlugin):
         return selected_track
 
     def manual_track_search(self, original_song=None):
-        """Manually search for a track in the Plex library.
+        """Manually search for a track in the Plex library."""
+        print_(ui.colorize('text_highlight', '\nManual Search'))
+        print_(ui.colorize('text', 'Enter search criteria (empty to skip):'))
 
-        Prompts the user to enter the title, album, and artist of the track
-        they want to search for.
-        Calls the `search_plex_song` method with the provided information and
-        sets the `manual_search` flag to True.
-        """
-        song_dict = {}
-        title = input_("Title:").strip()
-        album = input_("Album:").strip()
-        artist = input_("Artist:").strip()
-        song_dict = {
-            "title": title.strip(),
-            "album": album.strip(),
-            "artist": artist.strip(),
-        }
-        result = self.search_plex_song(song_dict, manual_search=True)
-        if result and original_song:
-            cache_key = self.cache._make_cache_key(original_song)  # Ensure consistent cache key
-            self._cache_result(cache_key, result)
-        return result
+        title = input_(ui.colorize('text_highlight_minor', 'Title: ')).strip()
+        album = input_(ui.colorize('text_highlight_minor', 'Album: ')).strip()
+        artist = input_(ui.colorize('text_highlight_minor', 'Artist: ')).strip()
+
+        # Only include non-empty values in search
+        search_params = {}
+        if title:
+            search_params["track.title"] = title
+        if album:
+            search_params["album.title"] = album
+        if artist:
+            search_params["artist.title"] = artist
+
+        # If no search parameters provided, return None
+        if not search_params:
+            print_(ui.colorize('text_warning', 'No search criteria provided'))
+            return None
+
+        self._log.debug("Searching with params: {}", search_params)
+
+        try:
+            # Search using provided parameters
+            tracks = self.music.searchTracks(**search_params, limit=50)
+
+            if not tracks:
+                # If no results and we have an artist, try artist-only search
+                if artist and len(search_params) > 1:
+                    self._log.debug("No results, trying artist-only search")
+                    tracks = self.music.searchTracks(**{"artist.title": artist}, limit=50)
+
+            if not tracks:
+                self._log.info("No matching tracks found")
+                return None
+
+            # Filter results by artist if specified
+            if artist:
+                filtered_tracks = []
+                for track in tracks:
+                    track_artist = getattr(track, 'originalTitle', None) or track.artist().title
+                    if self.get_fuzzy_score(artist.lower(), track_artist.lower()) > 0.8:
+                        filtered_tracks.append(track)
+                tracks = filtered_tracks
+
+            if not tracks:
+                self._log.info("No tracks matched after artist filtering")
+                return None
+
+            # Create song_dict for closest match calculation
+            song_dict = {
+                "title": title if title else "",
+                "album": album if album else "",
+                "artist": artist if artist else "",
+            }
+
+            # Sort matches by relevance
+            sorted_tracks = self.find_closest_match(song_dict, tracks)
+
+            if not sorted_tracks:
+                return None
+
+            print_(ui.colorize('text_success', f"\nFound {len(sorted_tracks)} potential matches:"))
+            for i, (track, score) in enumerate(sorted_tracks, start=1):
+                track_artist = getattr(track, 'originalTitle', None) or track.artist().title
+                # Color matches by score
+                if score >= 0.8:
+                    entry_color = 'text_success'
+                elif score >= 0.5:
+                    entry_color = 'text_warning'
+                else:
+                    entry_color = 'text_error'
+
+                print_(
+                    f"{ui.colorize('action', str(i))}. "
+                    f"{ui.colorize(entry_color, f'{track.parentTitle} - {track.title} - {track_artist}')} "
+                    f"(Match: {ui.colorize(entry_color, f'{score:.2f}')})"
+                )
+
+            sel = ui.input_options(
+                ("aBort", "Skip", "Enter"),
+                numrange=(1, len(sorted_tracks)),
+                default=1
+            )
+            if sel in ("b", "B"):
+                return None
+            elif sel in ("s", "S"):
+                self._cache_result(song_dict, None)
+                return None
+            elif sel in ("e", "E"):
+                return self.manual_track_search(song_dict)
+
+            selected_track = sorted_tracks[sel - 1][0] if sel > 0 else None
+
+            if selected_track and original_song:
+                self._cache_result(self.cache._make_cache_key(original_song), selected_track)
+
+            return selected_track
+
+        except Exception as e:
+            self._log.error("Error during manual search: {}", e)
+            return None
 
     def search_plex_song(self, song, manual_search=None, llm_attempted=False):
         """Fetch the Plex track key with fallback options."""
@@ -1350,7 +1528,7 @@ class PlexSync(BeetsPlugin):
                 song.get("artist", "Unknown"),
                 song["title"],
             )
-            if ui.input_yn("Search manually? (Y/n)"):
+            if ui.input_yn(ui.colorize('text_highlight', "\nSearch manually?") + " (Y/n)"):
                 return self.manual_track_search(song)
 
         # Store negative result if nothing found
@@ -2805,6 +2983,59 @@ class PlexSync(BeetsPlugin):
 
         self._log.info("Successfully updated {} playlist with {} tracks", playlist_name, len(selected_tracks))
 
+    def import_m3u8_playlist(self, filepath):
+        """Import M3U8 playlist with caching."""
+        # Generate cache key from file path
+        playlist_id = str(Path(filepath).stem)
+
+        # Check cache
+        cached_data = self.cache.get_playlist_cache(playlist_id, 'm3u8')
+        if (cached_data):
+            self._log.info("Using cached M3U8 playlist data")
+            return cached_data
+
+        song_list = []
+        current_song = {}
+
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith('#EXTM3U'):
+                        continue
+
+                    if line.startswith('#EXTINF:'):
+                        # Extract artist - title from the EXTINF line
+                        meta = line.split(',', 1)[1]
+                        if ' - ' in meta:
+                            artist, title = meta.split(' - ', 1)
+                            current_song = {
+                                'artist': artist.strip(),
+                                'title': title.strip(),
+                                'album': None  # Will be set by EXTALB
+                            }
+                    elif line.startswith('#EXTALB:'):
+                        # Extract album info
+                        current_song['album'] = line[8:].strip()
+                    elif not line.startswith('#'):
+                        # This is a file path line - finalize the song entry
+                        if current_song and all(k in current_song for k in ['title', 'artist']):
+                            # If no album was specified, use None
+                            if 'album' not in current_song:
+                                current_song['album'] = None
+                            song_list.append(current_song)
+                            current_song = {}
+
+            if song_list:
+                self.cache.set_playlist_cache(playlist_id, 'm3u8', song_list)
+                self._log.info("Cached {} tracks from M3U8 playlist", len(song_list))
+
+            return song_list
+
+        except Exception as e:
+            self._log.error("Error importing M3U8 playlist {}: {}", filepath, e)
+            return []
+
     def generate_imported_playlist(self, lib, playlist_config, plex_lookup=None):
         """Generate a playlist by importing from external sources."""
         playlist_name = playlist_config.get("name", "Imported Playlist")
@@ -2849,24 +3080,34 @@ class PlexSync(BeetsPlugin):
         for source in sources:
             try:
                 self._log.info("Importing from source: {}", source)
-                if "spotify" in source:
-                    tracks = self.import_spotify_playlist(self.get_playlist_id(source))
-                elif "jiosaavn" in source:
-                    tracks = self.import_jiosaavn_playlist(source)
-                elif "apple" in source:
-                    tracks = self.import_apple_playlist(source)
-                elif "gaana" in source:
-                    tracks = self.import_gaana_playlist(source)
-                elif "youtube" in source:
-                    tracks = self.import_yt_playlist(source)
-                elif "tidal" in source:
-                    tracks = self.import_tidal_playlist(source)
+                if isinstance(source, str):  # Handle string sources (URLs and file paths)
+                    if source.lower().endswith('.m3u8'):
+                        # Check if path is absolute, if not make it relative to config dir
+                        if not os.path.isabs(source):
+                            source = os.path.join(self.config_dir, source)
+                        tracks = self.import_m3u8_playlist(source)
+                    elif "spotify" in source:
+                        tracks = self.import_spotify_playlist(self.get_playlist_id(source))
+                    elif "jiosaavn" in source:
+                        tracks = self.import_jiosaavn_playlist(source)
+                    elif "apple" in source:
+                        tracks = self.import_apple_playlist(source)
+                    elif "gaana" in source:
+                        tracks = self.import_gaana_playlist(source)
+                    elif "youtube" in source:
+                        tracks = self.import_yt_playlist(source)
+                    elif "tidal" in source:
+                        tracks = self.import_tidal_playlist(source)
+                    else:
+                        self._log.warning("Unsupported source: {}", source)
+                        continue
+
+                    if tracks:
+                        all_tracks.extend(tracks)
                 else:
-                    self._log.warning("Unsupported source: {}", source)
+                    self._log.warning("Invalid source format: {}", source)
                     continue
 
-                if tracks:
-                    all_tracks.extend(tracks)
             except Exception as e:
                 self._log.error("Error importing from {}: {}", source, e)
                 with open(log_file, 'a', encoding='utf-8') as f:
