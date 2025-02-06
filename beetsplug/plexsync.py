@@ -920,23 +920,42 @@ class PlexSync(BeetsPlugin):
             clean_album = self.clean_text_for_matching(title.get('album', ''))
             clean_track_album = self.clean_text_for_matching(track.parentTitle)
 
-            # Calculate scores with cleaned strings
-            title_score = self.get_fuzzy_score(clean_title, clean_track_title)
-            album_score = self.get_fuzzy_score(clean_album, clean_track_album)
-
             # Safely get artists with None handling
             track_artist_str = self.clean_text_for_matching(
                 getattr(track, 'originalTitle', None) or track.artist().title
             )
             source_artist_str = self.clean_text_for_matching(title.get('artist', ''))
 
-            # Compare artists
-            artist_score = 0
-            if track_artist_str and source_artist_str:
-                artist_score = self.get_fuzzy_score(source_artist_str, track_artist_str)
+            # Calculate scores
+            title_score = self.get_fuzzy_score(clean_title, clean_track_title) if clean_title else 0
+            album_score = self.get_fuzzy_score(clean_album, clean_track_album) if clean_album else 0
+            artist_score = self.get_fuzzy_score(source_artist_str, track_artist_str) if source_artist_str else 0
 
-            # Adjust weights to prioritize title matches more
-            combined_score = (title_score * 0.6) + (album_score * 0.3) + (artist_score * 0.1)
+            # Count how many fields were provided
+            provided_fields = sum(bool(x) for x in [clean_title, clean_album, source_artist_str])
+
+            if provided_fields == 0:
+                combined_score = 0
+            else:
+                # Adjust weights based on which fields were provided
+                weights = {
+                    'title': 0.6 if clean_title else 0,
+                    'album': 0.3 if clean_album else 0,
+                    'artist': 0.1 if source_artist_str else 0
+                }
+
+                # Normalize weights
+                total_weight = sum(weights.values())
+                if total_weight > 0:
+                    weights = {k: v/total_weight for k, v in weights.items()}
+
+                # Calculate weighted score
+                combined_score = (
+                    (title_score * weights['title']) +
+                    (album_score * weights['album']) +
+                    (artist_score * weights['artist'])
+                )
+
             matches.append((track, combined_score))
 
             # Debug logging
@@ -1229,54 +1248,64 @@ class PlexSync(BeetsPlugin):
         source_album = song.get("album", "Unknown")
         source_artist = song.get("artist", "")
 
-        print_(
-            f'\nChoose candidates for {Colors.BOLD}{source_album} - {source_title} - {source_artist}{Colors.END}:'
-        )
+        # Use beets UI formatting for the query header
+        print_(ui.colorize('text_highlight', '\nChoose candidates for: ') +
+               ui.colorize('text_highlight_minor', f"{source_album} - {source_title} - {source_artist}"))
 
+        # Format and display the matches
         for i, (track, score) in enumerate(sorted_tracks, start=1):
             track_artist = getattr(track, 'originalTitle', None) or track.artist().title
 
+            # Use beets' similarity detection for highlighting
+            def highlight_matches(source, target):
+                # Split into parts but preserve complete names
+                source_parts = [p.strip() for p in source.replace(',', ' ,').split()]
+                target_parts = [p.strip() for p in target.replace(',', ' ,').split()]
+
+                highlighted_parts = []
+                for part in target_parts:
+                    matched = any(self.get_fuzzy_score(source_part.lower(), part.lower()) > 0.8
+                                for source_part in source_parts)
+                    if matched:
+                        highlighted_parts.append(ui.colorize('added_highlight', part))
+                    else:
+                        highlighted_parts.append(part)
+                return ' '.join(highlighted_parts)
+
             # Highlight matching parts
-            title_parts = []
-            for word in track.title.split():
-                if word.lower() in source_title.lower():
-                    title_parts.append(f"{Colors.GREEN}{word}{Colors.END}")
-                else:
-                    title_parts.append(word)
-            highlighted_title = ' '.join(title_parts)
-
-            album_parts = []
-            for word in track.parentTitle.split():
-                if word.lower() in source_album.lower():
-                    album_parts.append(f"{Colors.GREEN}{word}{Colors.END}")
-                else:
-                    album_parts.append(word)
-            highlighted_album = ' '.join(album_parts)
-
-            artist_parts = []
-            for word in track_artist.split():
-                if word.lower() in source_artist.lower():
-                    artist_parts.append(f"{Colors.GREEN}{word}{Colors.END}")
-                else:
-                    artist_parts.append(word)
-            highlighted_artist = ' '.join(artist_parts)
+            highlighted_title = highlight_matches(source_title, track.title)
+            highlighted_album = highlight_matches(source_album, track.parentTitle)
+            highlighted_artist = highlight_matches(source_artist, track_artist)
 
             # Color code the score
             if score >= 0.8:
-                score_color = Colors.GREEN
+                score_color = 'text_success'    # High match
             elif score >= 0.5:
-                score_color = Colors.YELLOW
+                score_color = 'text_warning'    # Medium match
             else:
-                score_color = Colors.RED
+                score_color = 'text_error'      # Low match
 
+            # Format the line with matching and index colors
             print_(
-                f"{Colors.BLUE}{i}{Colors.END}. {highlighted_album} - {highlighted_title} - "
-                f"{highlighted_artist} (Match: {score_color}{score:.2f}{Colors.END})"
+                f"{ui.colorize('action', str(i))}. {highlighted_album} - {highlighted_title} - "
+                f"{highlighted_artist} (Match: {ui.colorize(score_color, f'{score:.2f}')})"
             )
 
-        sel = ui.input_options(
-            ("aBort", "Skip", "Enter"), numrange=(1, len(sorted_tracks)), default=1
+        # Show options footer
+        print_(ui.colorize('text_highlight', '\nActions:'))
+        print_(ui.colorize('text', '  #: Select match by number'))
+        print_(
+            f"  {ui.colorize('action', 'a')}{ui.colorize('text', ': Abort')}   "
+            f"{ui.colorize('action', 's')}{ui.colorize('text', ': Skip')}   "
+            f"{ui.colorize('action', 'e')}{ui.colorize('text', ': Enter manual search')}\n"
         )
+
+        sel = ui.input_options(
+            ("aBort", "Skip", "Enter"),
+            numrange=(1, len(sorted_tracks)),
+            default=1
+        )
+
         if sel in ("b", "B"):
             return None
         elif sel in ("s", "S"):
@@ -1285,6 +1314,7 @@ class PlexSync(BeetsPlugin):
             return None
         elif sel in ("e", "E"):
             return self.manual_track_search(song)
+
         selected_track = sorted_tracks[sel - 1][0] if sel > 0 else None
         if selected_track:
             final_key = self.cache._make_cache_key(song)
@@ -1295,10 +1325,12 @@ class PlexSync(BeetsPlugin):
 
     def manual_track_search(self, original_song=None):
         """Manually search for a track in the Plex library."""
-        song_dict = {}
-        title = input_("Title:").strip()
-        album = input_("Album:").strip()
-        artist = input_("Artist:").strip()
+        print_(ui.colorize('text_highlight', '\nManual Search'))
+        print_(ui.colorize('text', 'Enter search criteria (empty to skip):'))
+
+        title = input_(ui.colorize('text_highlight_minor', 'Title: ')).strip()
+        album = input_(ui.colorize('text_highlight_minor', 'Album: ')).strip()
+        artist = input_(ui.colorize('text_highlight_minor', 'Artist: ')).strip()
 
         # Only include non-empty values in search
         search_params = {}
@@ -1311,7 +1343,7 @@ class PlexSync(BeetsPlugin):
 
         # If no search parameters provided, return None
         if not search_params:
-            self._log.debug("No search criteria provided")
+            print_(ui.colorize('text_warning', 'No search criteria provided'))
             return None
 
         self._log.debug("Searching with params: {}", search_params)
@@ -1356,12 +1388,21 @@ class PlexSync(BeetsPlugin):
             if not sorted_tracks:
                 return None
 
-            print_(f"\nFound {len(sorted_tracks)} potential matches:")
+            print_(ui.colorize('text_success', f"\nFound {len(sorted_tracks)} potential matches:"))
             for i, (track, score) in enumerate(sorted_tracks, start=1):
                 track_artist = getattr(track, 'originalTitle', None) or track.artist().title
+                # Color matches by score
+                if score >= 0.8:
+                    entry_color = 'text_success'
+                elif score >= 0.5:
+                    entry_color = 'text_warning'
+                else:
+                    entry_color = 'text_error'
+
                 print_(
-                    f"{i}. {track.parentTitle} - {track.title} - {track_artist}"
-                    f" (Match: {score:.2f})"
+                    f"{ui.colorize('action', str(i))}. "
+                    f"{ui.colorize(entry_color, f'{track.parentTitle} - {track.title} - {track_artist}')} "
+                    f"(Match: {ui.colorize(entry_color, f'{score:.2f}')})"
                 )
 
             sel = ui.input_options(
@@ -1496,7 +1537,7 @@ class PlexSync(BeetsPlugin):
                 song.get("artist", "Unknown"),
                 song["title"],
             )
-            if ui.input_yn("Search manually? (Y/n)"):
+            if ui.input_yn(ui.colorize('text_highlight', "\nSearch manually?") + " (Y/n)"):
                 return self.manual_track_search(song)
 
         # Store negative result if nothing found
