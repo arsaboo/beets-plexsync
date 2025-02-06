@@ -1229,54 +1229,67 @@ class PlexSync(BeetsPlugin):
         source_album = song.get("album", "Unknown")
         source_artist = song.get("artist", "")
 
-        print_(
-            f'\nChoose candidates for {Colors.BOLD}{source_album} - {source_title} - {source_artist}{Colors.END}:'
-        )
+        # Use beets UI formatting for the query header
+        print_(ui.colorize('text_highlight', '\nChoose candidates for: ') +
+               ui.colorize('text_bold', f"{source_album} - {source_title} - {source_artist}"))
 
+        # Format and display the matches
         for i, (track, score) in enumerate(sorted_tracks, start=1):
             track_artist = getattr(track, 'originalTitle', None) or track.artist().title
 
-            # Highlight matching parts
+            # Highlight matching parts of title
             title_parts = []
             for word in track.title.split():
                 if word.lower() in source_title.lower():
-                    title_parts.append(f"{Colors.GREEN}{word}{Colors.END}")
+                    title_parts.append(ui.colorize('action', word))
                 else:
                     title_parts.append(word)
             highlighted_title = ' '.join(title_parts)
 
+            # Highlight matching parts of album
             album_parts = []
             for word in track.parentTitle.split():
                 if word.lower() in source_album.lower():
-                    album_parts.append(f"{Colors.GREEN}{word}{Colors.END}")
+                    album_parts.append(ui.colorize('action', word))
                 else:
                     album_parts.append(word)
             highlighted_album = ' '.join(album_parts)
 
+            # Highlight matching parts of artist
             artist_parts = []
             for word in track_artist.split():
                 if word.lower() in source_artist.lower():
-                    artist_parts.append(f"{Colors.GREEN}{word}{Colors.END}")
+                    artist_parts.append(ui.colorize('action', word))
                 else:
                     artist_parts.append(word)
             highlighted_artist = ' '.join(artist_parts)
 
             # Color code the score
             if score >= 0.8:
-                score_color = Colors.GREEN
+                score_color = 'action'  # Green
             elif score >= 0.5:
-                score_color = Colors.YELLOW
+                score_color = 'warning'  # Yellow
             else:
-                score_color = Colors.RED
+                score_color = 'error'    # Red
 
             print_(
-                f"{Colors.BLUE}{i}{Colors.END}. {highlighted_album} - {highlighted_title} - "
-                f"{highlighted_artist} (Match: {score_color}{score:.2f}{Colors.END})"
+                f"{ui.colorize('action', str(i))}. {highlighted_album} - {highlighted_title} - "
+                f"{highlighted_artist} (Match: {ui.colorize(score_color, f'{score:.2f}')})"
             )
 
+        # Show options footer
+        print_(ui.colorize('text', '\nActions:'))
+        print_(ui.colorize('text', '  #: Select match by number'))
+        print_(ui.colorize('action', '  a') + ui.colorize('text', ': Abort'))
+        print_(ui.colorize('action', '  s') + ui.colorize('text', ': Skip'))
+        print_(ui.colorize('action', '  e') + ui.colorize('text', ': Enter manual search\n'))
+
         sel = ui.input_options(
-            ("aBort", "Skip", "Enter"), numrange=(1, len(sorted_tracks)), default=1
+            ("aBort", "Skip", "Enter"),
+            numrange=(1, len(sorted_tracks)),
+            default=1
         )
+
         if sel in ("b", "B"):
             return None
         elif sel in ("s", "S"):
@@ -1285,6 +1298,7 @@ class PlexSync(BeetsPlugin):
             return None
         elif sel in ("e", "E"):
             return self.manual_track_search(song)
+
         selected_track = sorted_tracks[sel - 1][0] if sel > 0 else None
         if selected_track:
             final_key = self.cache._make_cache_key(song)
@@ -1295,10 +1309,12 @@ class PlexSync(BeetsPlugin):
 
     def manual_track_search(self, original_song=None):
         """Manually search for a track in the Plex library."""
-        song_dict = {}
-        title = input_("Title:").strip()
-        album = input_("Album:").strip()
-        artist = input_("Artist:").strip()
+        print_(ui.colorize('text_highlight', '\nManual Search'))
+        print_(ui.colorize('text', 'Enter search criteria (empty to skip):'))
+
+        title = input_(ui.colorize('text', 'Title: ')).strip()
+        album = input_(ui.colorize('text', 'Album: ')).strip()
+        artist = input_(ui.colorize('text', 'Artist: ')).strip()
 
         # Only include non-empty values in search
         search_params = {}
@@ -1311,7 +1327,7 @@ class PlexSync(BeetsPlugin):
 
         # If no search parameters provided, return None
         if not search_params:
-            self._log.debug("No search criteria provided")
+            print_(ui.colorize('warning', 'No search criteria provided'))
             return None
 
         self._log.debug("Searching with params: {}", search_params)
