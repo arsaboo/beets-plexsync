@@ -35,8 +35,9 @@ Use `beet plex_smartplaylists` to generate or manage custom playlists in Plex. T
       - Percentage of playlist to fill with unrated but popular tracks (configurable via `discovery_ratio`, default 30%)
 
   3. **Imported Playlists**:
-      - Import playlists from external services (Spotify, Apple Music, YouTube, etc.)
-      - Configure multiple source URLs per playlist
+      - Import playlists from external services (Spotify, Apple Music, YouTube, etc.) and local M3U8 files
+      - Configure multiple source URLs and file paths per playlist
+      - For M3U8 files, use paths relative to beets config directory or absolute paths
       - Control playlist behavior with options:
         - `manual_search`: Enable/disable manual matching for unmatched tracks
         - `clear_playlist`: Clear existing playlist before adding new tracks
@@ -53,7 +54,10 @@ You can use config filters to finetune any playlist. You can specify the `genre`
 - **Playlist Clear**: `beet plexplaylistclear` clears a Plex playlist. Use the `-m` flag to specify the playlist name.
 
 ### Playlist Import
-- **Playlist Import**: `beet plexplaylistimport` imports individual playlists from Spotify, Apple Music, Gaana.com, JioSaavn, Youtube, and Tidal. Use the `-m` flag to specify the playlist name and the `-u` flag to supply the full playlist url. For each import session, a detailed log file is created in your beets config directory (named `<playlist_name>_import.log`) that records:
+- **Playlist Import**: `beet plexplaylistimport` imports individual playlists from Spotify, Apple Music, Gaana.com, JioSaavn, Youtube, Tidal, and M3U8 files. Use the `-m` flag to specify the playlist name and:
+  - For online services: use the `-u` flag to supply the full playlist url
+  - For M3U8 files: use the `-u` flag with the file path (relative to beets config directory or absolute path)
+  For each import session, a detailed log file is created in your beets config directory (named `<playlist_name>_import.log`) that records:
   - Tracks that couldn't be found in your Plex library
   - Low-rated tracks that were skipped
   - Import statistics and summary
@@ -148,7 +152,9 @@ spotify:
 
    * To remove all tracks that are rated less than 5 from the `Country` playlist, use the command `beet plexplaylistremove -m Country plex_userrating:..5`
 
-* `beet plexplaylistimport`: allows you to import playlists from other online services. Spotify, Apple Music, Gaana.com, JioSaavn, Youtube, and Tidal are currently supported. Use the `-m` flag to specify the playlist name to be created in Plex and supply the full playlist url with the `-u` flag.
+* `beet plexplaylistimport`: allows you to import playlists from other online services. Spotify, Apple Music, Gaana.com, JioSaavn, Youtube, Tidal, and M3U8 files are currently supported. Use the `-m` flag to specify the playlist name to be created in Plex and:
+  - For online services: use the `-u` flag to supply the full playlist url
+  - For M3U8 files: use the `-u` flag with the file path (relative to beets config directory or absolute path)
 
   For example, to import the Global Top-100 Apple Music playlist, use the command `beet plexplaylistimport -m Top-100 -u https://music.apple.com/us/playlist/top-100-global/pl.d25f5d1181894928af76c85c967f8f31`. Similarly, to import the Hot-hits USA playlist from Spotify, use the command `beet plexplaylistimport -m HotHitsUSA -u https://open.spotify.com/playlist/37i9dQZF1DX0kbJZpiYdZl`
 
@@ -221,8 +227,10 @@ plexsync:
       - id: bollywood_hits
         name: "Bollywood Hits"
         type: imported
-        sources: # full playlist urls from the supported services.
+        sources: # full playlist urls or M3U8 file paths
           - https://music.youtube.com/playlist?list=RDCLAK5uy_kjNBBWqyQ_Cy14B0P4xrcKgd39CRjXXKk
+          - "playlists/local_hits.m3u8"  # Relative to beets config dir
+          - "/absolute/path/to/playlist.m3u8"
         max_tracks: 100     # Optional limit
         manual_search: no
         clear_playlist: no
