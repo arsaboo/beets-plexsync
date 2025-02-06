@@ -1231,7 +1231,7 @@ class PlexSync(BeetsPlugin):
 
         # Use beets UI formatting for the query header
         print_(ui.colorize('text_highlight', '\nChoose candidates for: ') +
-               ui.colorize('text_bold', f"{source_album} - {source_title} - {source_artist}"))
+               ui.colorize('text_highlight_minor', f"{source_album} - {source_title} - {source_artist}"))
 
         # Format and display the matches
         for i, (track, score) in enumerate(sorted_tracks, start=1):
@@ -1241,7 +1241,7 @@ class PlexSync(BeetsPlugin):
             title_parts = []
             for word in track.title.split():
                 if word.lower() in source_title.lower():
-                    title_parts.append(ui.colorize('action', word))
+                    title_parts.append(ui.colorize('added_highlight', word))
                 else:
                     title_parts.append(word)
             highlighted_title = ' '.join(title_parts)
@@ -1250,7 +1250,7 @@ class PlexSync(BeetsPlugin):
             album_parts = []
             for word in track.parentTitle.split():
                 if word.lower() in source_album.lower():
-                    album_parts.append(ui.colorize('action', word))
+                    album_parts.append(ui.colorize('added_highlight', word))
                 else:
                     album_parts.append(word)
             highlighted_album = ' '.join(album_parts)
@@ -1259,30 +1259,33 @@ class PlexSync(BeetsPlugin):
             artist_parts = []
             for word in track_artist.split():
                 if word.lower() in source_artist.lower():
-                    artist_parts.append(ui.colorize('action', word))
+                    artist_parts.append(ui.colorize('added_highlight', word))
                 else:
                     artist_parts.append(word)
             highlighted_artist = ' '.join(artist_parts)
 
             # Color code the score
             if score >= 0.8:
-                score_color = 'action'  # Green
+                score_color = 'text_success'    # High match
             elif score >= 0.5:
-                score_color = 'warning'  # Yellow
+                score_color = 'text_warning'    # Medium match
             else:
-                score_color = 'error'    # Red
+                score_color = 'text_error'      # Low match
 
+            # Format the line with matching and index colors
             print_(
                 f"{ui.colorize('action', str(i))}. {highlighted_album} - {highlighted_title} - "
                 f"{highlighted_artist} (Match: {ui.colorize(score_color, f'{score:.2f}')})"
             )
 
         # Show options footer
-        print_(ui.colorize('text', '\nActions:'))
+        print_(ui.colorize('text_highlight', '\nActions:'))
         print_(ui.colorize('text', '  #: Select match by number'))
-        print_(ui.colorize('action', '  a') + ui.colorize('text', ': Abort'))
-        print_(ui.colorize('action', '  s') + ui.colorize('text', ': Skip'))
-        print_(ui.colorize('action', '  e') + ui.colorize('text', ': Enter manual search\n'))
+        print_(
+            f"  {ui.colorize('action', 'a')}{ui.colorize('text', ': Abort')}   "
+            f"{ui.colorize('action', 's')}{ui.colorize('text', ': Skip')}   "
+            f"{ui.colorize('action', 'e')}{ui.colorize('text', ': Enter manual search')}\n"
+        )
 
         sel = ui.input_options(
             ("aBort", "Skip", "Enter"),
@@ -1312,9 +1315,9 @@ class PlexSync(BeetsPlugin):
         print_(ui.colorize('text_highlight', '\nManual Search'))
         print_(ui.colorize('text', 'Enter search criteria (empty to skip):'))
 
-        title = input_(ui.colorize('text', 'Title: ')).strip()
-        album = input_(ui.colorize('text', 'Album: ')).strip()
-        artist = input_(ui.colorize('text', 'Artist: ')).strip()
+        title = input_(ui.colorize('text_highlight_minor', 'Title: ')).strip()
+        album = input_(ui.colorize('text_highlight_minor', 'Album: ')).strip()
+        artist = input_(ui.colorize('text_highlight_minor', 'Artist: ')).strip()
 
         # Only include non-empty values in search
         search_params = {}
@@ -1327,7 +1330,7 @@ class PlexSync(BeetsPlugin):
 
         # If no search parameters provided, return None
         if not search_params:
-            print_(ui.colorize('warning', 'No search criteria provided'))
+            print_(ui.colorize('text_warning', 'No search criteria provided'))
             return None
 
         self._log.debug("Searching with params: {}", search_params)
@@ -1372,12 +1375,21 @@ class PlexSync(BeetsPlugin):
             if not sorted_tracks:
                 return None
 
-            print_(f"\nFound {len(sorted_tracks)} potential matches:")
+            print_(ui.colorize('text_success', f"\nFound {len(sorted_tracks)} potential matches:"))
             for i, (track, score) in enumerate(sorted_tracks, start=1):
                 track_artist = getattr(track, 'originalTitle', None) or track.artist().title
+                # Color matches by score
+                if score >= 0.8:
+                    entry_color = 'text_success'
+                elif score >= 0.5:
+                    entry_color = 'text_warning'
+                else:
+                    entry_color = 'text_error'
+
                 print_(
-                    f"{i}. {track.parentTitle} - {track.title} - {track_artist}"
-                    f" (Match: {score:.2f})"
+                    f"{ui.colorize('action', str(i))}. "
+                    f"{ui.colorize(entry_color, f'{track.parentTitle} - {track.title} - {track_artist}')} "
+                    f"(Match: {ui.colorize(entry_color, f'{score:.2f}')})"
                 )
 
             sel = ui.input_options(
@@ -1512,7 +1524,7 @@ class PlexSync(BeetsPlugin):
                 song.get("artist", "Unknown"),
                 song["title"],
             )
-            if ui.input_yn("Search manually? (Y/n)"):
+            if ui.input_yn("\nSearch manually? (Y/n)"):
                 return self.manual_track_search(song)
 
         # Store negative result if nothing found
