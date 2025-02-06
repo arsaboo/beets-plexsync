@@ -1237,32 +1237,26 @@ class PlexSync(BeetsPlugin):
         for i, (track, score) in enumerate(sorted_tracks, start=1):
             track_artist = getattr(track, 'originalTitle', None) or track.artist().title
 
-            # Highlight matching parts of title
-            title_parts = []
-            for word in track.title.split():
-                if word.lower() in source_title.lower():
-                    title_parts.append(ui.colorize('added_highlight', word))
-                else:
-                    title_parts.append(word)
-            highlighted_title = ' '.join(title_parts)
+            # Use beets' similarity detection for highlighting
+            def highlight_matches(source, target):
+                # Split into parts but preserve complete names
+                source_parts = [p.strip() for p in source.replace(',', ' ,').split()]
+                target_parts = [p.strip() for p in target.replace(',', ' ,').split()]
 
-            # Highlight matching parts of album
-            album_parts = []
-            for word in track.parentTitle.split():
-                if word.lower() in source_album.lower():
-                    album_parts.append(ui.colorize('added_highlight', word))
-                else:
-                    album_parts.append(word)
-            highlighted_album = ' '.join(album_parts)
+                highlighted_parts = []
+                for part in target_parts:
+                    matched = any(self.get_fuzzy_score(source_part.lower(), part.lower()) > 0.8
+                                for source_part in source_parts)
+                    if matched:
+                        highlighted_parts.append(ui.colorize('added_highlight', part))
+                    else:
+                        highlighted_parts.append(part)
+                return ' '.join(highlighted_parts)
 
-            # Highlight matching parts of artist
-            artist_parts = []
-            for word in track_artist.split():
-                if word.lower() in source_artist.lower():
-                    artist_parts.append(ui.colorize('added_highlight', word))
-                else:
-                    artist_parts.append(word)
-            highlighted_artist = ' '.join(artist_parts)
+            # Highlight matching parts
+            highlighted_title = highlight_matches(source_title, track.title)
+            highlighted_album = highlight_matches(source_album, track.parentTitle)
+            highlighted_artist = highlight_matches(source_artist, track_artist)
 
             # Color code the score
             if score >= 0.8:
