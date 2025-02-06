@@ -42,15 +42,6 @@ from beetsplug.caching import Cache
 from beetsplug.llm import search_track_info
 
 
-class Colors:
-    GREEN = '\033[92m'
-    YELLOW = '\033[93m'
-    RED = '\033[91m'
-    BLUE = '\033[94m'
-    BOLD = '\033[1m'
-    END = '\033[0m'
-
-
 class Song(BaseModel):
     title: str
     artist: str
