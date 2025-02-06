@@ -42,6 +42,15 @@ from beetsplug.caching import Cache
 from beetsplug.llm import search_track_info
 
 
+class Colors:
+    GREEN = '\033[92m'
+    YELLOW = '\033[93m'
+    RED = '\033[91m'
+    BLUE = '\033[94m'
+    BOLD = '\033[1m'
+    END = '\033[0m'
+
+
 class Song(BaseModel):
     title: str
     artist: str
@@ -877,33 +886,57 @@ class PlexSync(BeetsPlugin):
             return 0
         return difflib.SequenceMatcher(None, str1.lower(), str2.lower()).ratio()
 
+    def clean_text_for_matching(self, text):
+        """Clean text for better fuzzy matching.
+
+        Args:
+            text: Text to clean
+
+        Returns:
+            str: Cleaned text
+        """
+        if not text:
+            return ""
+        # Convert to lowercase
+        text = text.lower()
+        # Remove parentheses and contents
+        text = re.sub(r'\([^)]*\)', '', text)
+        # Remove brackets and contents
+        text = re.sub(r'\[[^\]]*\]', '', text)
+        # Remove soundtrack mentions
+        text = re.sub(r'(?i)original\s+(?:motion\s+picture\s+)?soundtrack', '', text)
+        # Remove special chars and extra spaces
+        text = re.sub(r'[^\w\s]', ' ', text)
+        # Normalize whitespace
+        text = ' '.join(text.split())
+        return text
+
     def find_closest_match(self, title, lst):
         matches = []
         for track in lst:
-            # Calculate title and album scores
-            title_score = self.get_fuzzy_score(title.get('title', ''), track.title)
-            album_score = self.get_fuzzy_score(title.get('album', ''), track.parentTitle)
+            # Clean strings for matching
+            clean_title = self.clean_text_for_matching(title.get('title', ''))
+            clean_track_title = self.clean_text_for_matching(track.title)
+            clean_album = self.clean_text_for_matching(title.get('album', ''))
+            clean_track_album = self.clean_text_for_matching(track.parentTitle)
+
+            # Calculate scores with cleaned strings
+            title_score = self.get_fuzzy_score(clean_title, clean_track_title)
+            album_score = self.get_fuzzy_score(clean_album, clean_track_album)
 
             # Safely get artists with None handling
-            track_artist_str = getattr(track, 'originalTitle', None) or ''
-            source_artist_str = title.get('artist', '')
-
-            # Split artists safely
-            track_artists = [a.strip() for a in track_artist_str.split(',') if a.strip()] if track_artist_str else []
-            source_artists = [a.strip() for a in source_artist_str.split(',') if a.strip()] if source_artist_str else []
+            track_artist_str = self.clean_text_for_matching(
+                getattr(track, 'originalTitle', None) or track.artist().title
+            )
+            source_artist_str = self.clean_text_for_matching(title.get('artist', ''))
 
             # Compare artists
             artist_score = 0
-            if track_artists and source_artists:
-                scores = [
-                    self.get_fuzzy_score(s_artist, t_artist)
-                    for s_artist in source_artists
-                    for t_artist in track_artists
-                ]
-                artist_score = max(scores) if scores else 0
+            if track_artist_str and source_artist_str:
+                artist_score = self.get_fuzzy_score(source_artist_str, track_artist_str)
 
-            # Calculate weighted score
-            combined_score = (title_score * 0.5) + (album_score * 0.3) + (artist_score * 0.2)
+            # Adjust weights to prioritize title matches more
+            combined_score = (title_score * 0.6) + (album_score * 0.3) + (artist_score * 0.1)
             matches.append((track, combined_score))
 
             # Debug logging
@@ -1192,15 +1225,55 @@ class PlexSync(BeetsPlugin):
 
     def _handle_manual_search(self, sorted_tracks, song):
         """Helper function to handle manual search."""
+        source_title = song.get("title", "")
+        source_album = song.get("album", "Unknown")
+        source_artist = song.get("artist", "")
+
         print_(
-            f'\nChoose candidates for {song.get("album", "Unknown")} '
-            f'- {song["title"]} - {song["artist"]}:'
+            f'\nChoose candidates for {Colors.BOLD}{source_album} - {source_title} - {source_artist}{Colors.END}:'
         )
+
         for i, (track, score) in enumerate(sorted_tracks, start=1):
+            track_artist = getattr(track, 'originalTitle', None) or track.artist().title
+
+            # Highlight matching parts
+            title_parts = []
+            for word in track.title.split():
+                if word.lower() in source_title.lower():
+                    title_parts.append(f"{Colors.GREEN}{word}{Colors.END}")
+                else:
+                    title_parts.append(word)
+            highlighted_title = ' '.join(title_parts)
+
+            album_parts = []
+            for word in track.parentTitle.split():
+                if word.lower() in source_album.lower():
+                    album_parts.append(f"{Colors.GREEN}{word}{Colors.END}")
+                else:
+                    album_parts.append(word)
+            highlighted_album = ' '.join(album_parts)
+
+            artist_parts = []
+            for word in track_artist.split():
+                if word.lower() in source_artist.lower():
+                    artist_parts.append(f"{Colors.GREEN}{word}{Colors.END}")
+                else:
+                    artist_parts.append(word)
+            highlighted_artist = ' '.join(artist_parts)
+
+            # Color code the score
+            if score >= 0.8:
+                score_color = Colors.GREEN
+            elif score >= 0.5:
+                score_color = Colors.YELLOW
+            else:
+                score_color = Colors.RED
+
             print_(
-                f"{i}. {track.parentTitle} - {track.title} - "
-                f"{track.artist().title}"
+                f"{Colors.BLUE}{i}{Colors.END}. {highlighted_album} - {highlighted_title} - "
+                f"{highlighted_artist} (Match: {score_color}{score:.2f}{Colors.END})"
             )
+
         sel = ui.input_options(
             ("aBort", "Skip", "Enter"), numrange=(1, len(sorted_tracks)), default=1
         )
