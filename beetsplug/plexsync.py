@@ -920,23 +920,42 @@ class PlexSync(BeetsPlugin):
             clean_album = self.clean_text_for_matching(title.get('album', ''))
             clean_track_album = self.clean_text_for_matching(track.parentTitle)
 
-            # Calculate scores with cleaned strings
-            title_score = self.get_fuzzy_score(clean_title, clean_track_title)
-            album_score = self.get_fuzzy_score(clean_album, clean_track_album)
-
             # Safely get artists with None handling
             track_artist_str = self.clean_text_for_matching(
                 getattr(track, 'originalTitle', None) or track.artist().title
             )
             source_artist_str = self.clean_text_for_matching(title.get('artist', ''))
 
-            # Compare artists
-            artist_score = 0
-            if track_artist_str and source_artist_str:
-                artist_score = self.get_fuzzy_score(source_artist_str, track_artist_str)
+            # Calculate scores
+            title_score = self.get_fuzzy_score(clean_title, clean_track_title) if clean_title else 0
+            album_score = self.get_fuzzy_score(clean_album, clean_track_album) if clean_album else 0
+            artist_score = self.get_fuzzy_score(source_artist_str, track_artist_str) if source_artist_str else 0
 
-            # Adjust weights to prioritize title matches more
-            combined_score = (title_score * 0.6) + (album_score * 0.3) + (artist_score * 0.1)
+            # Count how many fields were provided
+            provided_fields = sum(bool(x) for x in [clean_title, clean_album, source_artist_str])
+
+            if provided_fields == 0:
+                combined_score = 0
+            else:
+                # Adjust weights based on which fields were provided
+                weights = {
+                    'title': 0.6 if clean_title else 0,
+                    'album': 0.3 if clean_album else 0,
+                    'artist': 0.1 if source_artist_str else 0
+                }
+
+                # Normalize weights
+                total_weight = sum(weights.values())
+                if total_weight > 0:
+                    weights = {k: v/total_weight for k, v in weights.items()}
+
+                # Calculate weighted score
+                combined_score = (
+                    (title_score * weights['title']) +
+                    (album_score * weights['album']) +
+                    (artist_score * weights['artist'])
+                )
+
             matches.append((track, combined_score))
 
             # Debug logging
@@ -1518,7 +1537,7 @@ class PlexSync(BeetsPlugin):
                 song.get("artist", "Unknown"),
                 song["title"],
             )
-            if ui.input_yn("\nSearch manually? (Y/n)"):
+            if ui.input_yn(ui.colorize('text_highlight', "\nSearch manually?") + " (Y/n)"):
                 return self.manual_track_search(song)
 
         # Store negative result if nothing found
