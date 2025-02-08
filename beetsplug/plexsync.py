@@ -905,47 +905,29 @@ class PlexSync(BeetsPlugin):
     def find_closest_match(self, title, lst):
         matches = []
         for track in lst:
-            # Clean strings for matching
-            clean_title = self.clean_text_for_matching(title.get('title', ''))
-            clean_track_title = self.clean_text_for_matching(track.title)
-            clean_album = self.clean_text_for_matching(title.get('album', ''))
-            clean_track_album = self.clean_text_for_matching(track.parentTitle)
+            # Get raw string values
+            source_title = title.get('title', '')
+            source_album = title.get('album', '')
+            source_artists = [a.strip() for a in title.get('artist', '').split(',')]
 
-            # Safely get artists with None handling
-            track_artist_str = self.clean_text_for_matching(
-                getattr(track, 'originalTitle', None) or track.artist().title
-            )
-            source_artist_str = self.clean_text_for_matching(title.get('artist', ''))
+            track_title = track.title
+            track_album = track.parentTitle
+            track_artists = [a.strip() for a in (getattr(track, 'originalTitle', None)
+                            or track.artist().title).split(',')]
 
             # Calculate scores
-            title_score = self.get_fuzzy_score(clean_title, clean_track_title) if clean_title else 0
-            album_score = self.get_fuzzy_score(clean_album, clean_track_album) if clean_album else 0
-            artist_score = self.get_fuzzy_score(source_artist_str, track_artist_str) if source_artist_str else 0
+            title_score = self.get_fuzzy_score(source_title, track_title)
+            album_score = self.get_fuzzy_score(source_album, track_album) if source_album else 0
 
-            # Count how many fields were provided
-            provided_fields = sum(bool(x) for x in [clean_title, clean_album, source_artist_str])
+            # Calculate artist match score by finding common artists
+            artist_matches = sum(1 for a1 in source_artists
+                               for a2 in track_artists
+                               if self.get_fuzzy_score(a1, a2) > 0.8)
+            max_artists = max(len(source_artists), len(track_artists))
+            artist_score = artist_matches / max_artists if max_artists > 0 else 0
 
-            if provided_fields == 0:
-                combined_score = 0
-            else:
-                # Adjust weights based on which fields were provided
-                weights = {
-                    'title': 0.6 if clean_title else 0,
-                    'album': 0.3 if clean_album else 0,
-                    'artist': 0.1 if source_artist_str else 0
-                }
-
-                # Normalize weights
-                total_weight = sum(weights.values())
-                if (total_weight > 0):
-                    weights = {k: v/total_weight for k, v in weights.items()}
-
-                # Calculate weighted score
-                combined_score = (
-                    (title_score * weights['title']) +
-                    (album_score * weights['album']) +
-                    (artist_score * weights['artist'])
-                )
+            # Weight the scores (50% title, 30% album, 20% artists)
+            combined_score = (title_score * 0.5) + (album_score * 0.3) + (artist_score * 0.2)
 
             matches.append((track, combined_score))
 
