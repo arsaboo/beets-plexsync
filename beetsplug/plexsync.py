@@ -1236,7 +1236,7 @@ class PlexSync(BeetsPlugin):
     def _handle_manual_search(self, sorted_tracks, song):
         """Helper function to handle manual search."""
         source_title = song.get("title", "")
-        source_album = song.get("album", "Unknown")
+        source_album = song.get("album", "Unknown")  # Changed from None to "Unknown"
         source_artist = song.get("artist", "")
 
         # Use beets UI formatting for the query header
@@ -1249,6 +1249,12 @@ class PlexSync(BeetsPlugin):
 
             # Use beets' similarity detection for highlighting
             def highlight_matches(source, target):
+                # Handle None values before splitting
+                if source is None:
+                    source = "Unknown"
+                if target is None:
+                    target = "Unknown"
+
                 # Split into parts but preserve complete names
                 source_parts = [p.strip() for p in source.replace(',', ' ,').split()]
                 target_parts = [p.strip() for p in target.replace(',', ' ,').split()]
