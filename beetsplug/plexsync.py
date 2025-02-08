@@ -1389,34 +1389,34 @@ class PlexSync(BeetsPlugin):
             for i, (track, score) in enumerate(sorted_tracks, start=1):
                 track_artist = getattr(track, 'originalTitle', None) or track.artist().title
 
-                # Calculate individual component scores
-                title_score = self.get_fuzzy_score(title, track.title) if title else 1
-                album_score = self.get_fuzzy_score(album, track.parentTitle) if album else 1
-                artist_score = self.get_fuzzy_score(artist, track_artist) if artist else 1
+                # Only calculate scores for provided fields
+                title_score = self.get_fuzzy_score(title, track.title) if title else 0
+                album_score = self.get_fuzzy_score(album, track.parentTitle) if album else 0
+                artist_score = self.get_fuzzy_score(artist, track_artist) if artist else 0
 
-                # Color each component based on its individual score
-                def get_color_for_score(score):
-                    if score >= 0.8:
-                        return 'text_success'
-                    elif score >= 0.5:
-                        return 'text_warning'
-                    else:
-                        return 'text_error'
+                # Use non-colorized text for fields that weren't searched
+                album_text = (ui.colorize(get_color_for_score(album_score), track.parentTitle)
+                            if album else track.parentTitle)
+                title_text = (ui.colorize(get_color_for_score(title_score), track.title)
+                            if title else track.title)
+                artist_text = (ui.colorize(get_color_for_score(artist_score), track_artist)
+                            if artist else track_artist)
 
-                # Format each component with its own color
-                album_color = get_color_for_score(album_score)
-                title_color = get_color_for_score(title_score)
-                artist_color = get_color_for_score(artist_score)
-                score_color = get_color_for_score(score)
+                # Weight score based on only the provided fields
+                provided_fields = sum(1 for x in (title, album, artist) if x)
+                if provided_fields > 0:
+                    weighted_score = ((title_score if title else 0) +
+                                   (album_score if album else 0) +
+                                   (artist_score if artist else 0)) / provided_fields
+                else:
+                    weighted_score = 0
 
-                colored_album = ui.colorize(album_color, track.parentTitle)
-                colored_title = ui.colorize(title_color, track.title)
-                colored_artist = ui.colorize(artist_color, track_artist)
-                colored_score = ui.colorize(score_color, f'{score:.2f}')
+                score_color = get_color_for_score(weighted_score)
+                colored_score = ui.colorize(score_color, f'{weighted_score:.2f}')
 
                 print_(
                     f"{ui.colorize('action', str(i))}. "
-                    f"{colored_album} - {colored_title} - {colored_artist} "
+                    f"{album_text} - {title_text} - {artist_text} "
                     f"(Match: {colored_score})"
                 )
 
@@ -1547,7 +1547,7 @@ class PlexSync(BeetsPlugin):
         # Final fallback: try manual search if enabled
         if manual_search:
             self._log.info(
-                "Track {} - {} - {} not found in Plex",
+                "\nTrack {} - {} - {} not found in Plex",
                 song.get("album", "Unknown"),
                 song.get("artist", "Unknown"),
                 song["title"],
