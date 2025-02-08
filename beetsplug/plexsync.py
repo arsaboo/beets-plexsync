@@ -1547,10 +1547,10 @@ class PlexSync(BeetsPlugin):
         # Final fallback: try manual search if enabled
         if manual_search:
             self._log.info(
-                "\nTrack {} - {} - {} not found in Plex",
+                "\nTrack {} - {} - {} not found in Plex".format(
                 song.get("album", "Unknown"),
                 song.get("artist", "Unknown"),
-                song["title"],
+                song["title"])
             )
             if ui.input_yn(ui.colorize('text_highlight', "\nSearch manually?") + " (Y/n)"):
                 return self.manual_track_search(song)
