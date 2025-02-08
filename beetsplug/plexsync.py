@@ -1313,50 +1313,61 @@ class PlexSync(BeetsPlugin):
         album = input_(ui.colorize('text_highlight_minor', 'Album: ')).strip()
         artist = input_(ui.colorize('text_highlight_minor', 'Artist: ')).strip()
 
-        # Only include non-empty values in search
+        # Log the search parameters for debugging
+        self._log.debug("Searching with title='{}', album='{}', artist='{}'", title, album, artist)
+
+        # Search with minimal parameters first to get a broader result set
         search_params = {}
         if title:
             search_params["track.title"] = title
-        if album:
-            search_params["album.title"] = album
-        if artist:
-            search_params["artist.title"] = artist
-
-        # If no search parameters provided, return None
-        if not search_params:
-            print_(ui.colorize('text_warning', 'No search criteria provided'))
-            return None
-
-        self._log.debug("Searching with params: {}", search_params)
 
         try:
-            # Search using provided parameters
-            tracks = self.music.searchTracks(**search_params, limit=50)
+            # Do initial search with just title if provided, otherwise use album
+            if search_params:
+                tracks = self.music.searchTracks(**search_params, limit=50)
+            elif album:
+                tracks = self.music.searchTracks(**{"album.title": album}, limit=50)
+            else:
+                tracks = self.music.searchTracks(**{"artist.title": artist}, limit=50)
 
-            if not tracks:
-                # If no results and we have an artist, try artist-only search
-                if artist and len(search_params) > 1:
-                    self._log.debug("No results, trying artist-only search")
-                    tracks = self.music.searchTracks(**{"artist.title": artist}, limit=50)
+            self._log.debug("Initial search returned {} tracks", len(tracks))
 
-            if not tracks:
+            # Filter results manually for better matching
+            filtered_tracks = []
+            for track in tracks:
+                track_artist = getattr(track, 'originalTitle', None) or track.artist().title
+                track_album = track.parentTitle
+                track_title = track.title
+
+                # Debug log each track being considered
+                self._log.debug("Considering track: {} - {} - {}", track_album, track_title, track_artist)
+
+                # Implement fuzzy matching for each field if provided
+                title_match = not title or self.get_fuzzy_score(title.lower(), track_title.lower()) > 0.6
+                album_match = not album or self.get_fuzzy_score(album.lower(), track_album.lower()) > 0.6
+
+                # For artist, split and check each artist name
+                artist_match = True
+                if artist:
+                    track_artists = [a.strip().lower() for a in track_artist.split(',')]
+                    search_artists = [a.strip().lower() for a in artist.split(',')]
+
+                    # Check if any search artist matches any track artist
+                    artist_match = any(
+                        any(self.get_fuzzy_score(search_a, track_a) > 0.6
+                            for track_a in track_artists)
+                        for search_a in search_artists
+                    )
+
+                if title_match and album_match and artist_match:
+                    filtered_tracks.append(track)
+                    self._log.debug("Matched: {} - {} - {}", track_album, track_title, track_artist)
+
+            if not filtered_tracks:
                 self._log.info("No matching tracks found")
                 return None
 
-            # Filter results by artist if specified
-            if artist:
-                filtered_tracks = []
-                for track in tracks:
-                    track_artist = getattr(track, 'originalTitle', None) or track.artist().title
-                    if self.get_fuzzy_score(artist.lower(), track_artist.lower()) > 0.8:
-                        filtered_tracks.append(track)
-                tracks = filtered_tracks
-
-            if not tracks:
-                self._log.info("No tracks matched after artist filtering")
-                return None
-
-            # Create song_dict for closest match calculation
+            # Create song_dict for match scoring
             song_dict = {
                 "title": title if title else "",
                 "album": album if album else "",
@@ -1364,51 +1375,74 @@ class PlexSync(BeetsPlugin):
             }
 
             # Sort matches by relevance
-            sorted_tracks = self.find_closest_match(song_dict, tracks)
+            sorted_tracks = self.find_closest_match(song_dict, filtered_tracks)
 
-            if not sorted_tracks:
-                return None
+            # Use beets UI formatting for the query header
+            print_(ui.colorize('text_highlight', '\nChoose candidates for: ') +
+                   ui.colorize('text_highlight_minor', f"{album} - {title} - {artist}"))
 
-            print_(ui.colorize('text_success', f"\nFound {len(sorted_tracks)} potential matches:"))
+            # Format and display the matches
             for i, (track, score) in enumerate(sorted_tracks, start=1):
                 track_artist = getattr(track, 'originalTitle', None) or track.artist().title
 
-                # Only calculate scores for provided fields
-                title_score = self.get_fuzzy_score(title, track.title) if title else 0
-                album_score = self.get_fuzzy_score(album, track.parentTitle) if album else 0
-                artist_score = self.get_fuzzy_score(artist, track_artist) if artist else 0
+                # Use beets' similarity detection for highlighting
+                def highlight_matches(source, target):
+                    """Highlight exact matching parts between source and target strings."""
+                    if source is None or target is None:
+                        return target or "Unknown"
 
-                # Use non-colorized text for fields that weren't searched
-                album_text = (ui.colorize(get_color_for_score(album_score), track.parentTitle)
-                            if album else track.parentTitle)
-                title_text = (ui.colorize(get_color_for_score(title_score), track.title)
-                            if title else track.title)
-                artist_text = (ui.colorize(get_color_for_score(artist_score), track_artist)
-                            if artist else track_artist)
+                    # Split both strings into words while preserving spaces
+                    source_words = source.replace(',', ' ,').split()
+                    target_words = target.replace(',', ' ,').split()
 
-                # Weight score based on only the provided fields
-                provided_fields = sum(1 for x in (title, album, artist) if x)
-                if provided_fields > 0:
-                    weighted_score = ((title_score if title else 0) +
-                                   (album_score if album else 0) +
-                                   (artist_score if artist else 0)) / provided_fields
+                    # Process each target word
+                    highlighted_words = []
+                    for target_word in target_words:
+                        word_matched = False
+                        for source_word in source_words:
+                            if self.get_fuzzy_score(source_word.lower(), target_word.lower()) > 0.8:
+                                highlighted_words.append(ui.colorize('added_highlight', target_word))
+                                word_matched = True
+                                break
+                        if not word_matched:
+                            highlighted_words.append(target_word)
+
+                    return ' '.join(highlighted_words)
+
+                # Highlight matching parts
+                highlighted_title = highlight_matches(title, track.title)
+                highlighted_album = highlight_matches(album, track.parentTitle)
+                highlighted_artist = highlight_matches(artist, track_artist)
+
+                # Color code the score
+                if score >= 0.8:
+                    score_color = 'text_success'    # High match
+                elif score >= 0.5:
+                    score_color = 'text_warning'    # Medium match
                 else:
-                    weighted_score = 0
+                    score_color = 'text_error'      # Low match
 
-                score_color = get_color_for_score(weighted_score)
-                colored_score = ui.colorize(score_color, f'{weighted_score:.2f}')
-
+                # Format the line with matching and index colors
                 print_(
-                    f"{ui.colorize('action', str(i))}. "
-                    f"{album_text} - {title_text} - {artist_text} "
-                    f"(Match: {colored_score})"
+                    f"{ui.colorize('action', str(i))}. {highlighted_album} - {highlighted_title} - "
+                    f"{highlighted_artist} (Match: {ui.colorize(score_color, f'{score:.2f}')})"
                 )
+
+            # Show options footer
+            print_(ui.colorize('text_highlight', '\nActions:'))
+            print_(ui.colorize('text', '  #: Select match by number'))
+            print_(
+                f"  {ui.colorize('action', 'a')}{ui.colorize('text', ': Abort')}   "
+                f"{ui.colorize('action', 's')}{ui.colorize('text', ': Skip')}   "
+                f"{ui.colorize('action', 'e')}{ui.colorize('text', ': Enter manual search')}\n"
+            )
 
             sel = ui.input_options(
                 ("aBort", "Skip", "Enter"),
                 numrange=(1, len(sorted_tracks)),
                 default=1
             )
+
             if sel in ("b", "B"):
                 return None
             elif sel in ("s", "S"):
@@ -3471,3 +3505,4 @@ def clean_title(title):
     cleaned = ' '.join(cleaned.split())
 
     return cleaned
+```
