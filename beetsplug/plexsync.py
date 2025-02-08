@@ -1382,18 +1382,36 @@ class PlexSync(BeetsPlugin):
             print_(ui.colorize('text_success', f"\nFound {len(sorted_tracks)} potential matches:"))
             for i, (track, score) in enumerate(sorted_tracks, start=1):
                 track_artist = getattr(track, 'originalTitle', None) or track.artist().title
-                # Color matches by score
-                if score >= 0.8:
-                    entry_color = 'text_success'
-                elif score >= 0.5:
-                    entry_color = 'text_warning'
-                else:
-                    entry_color = 'text_error'
+
+                # Calculate individual component scores
+                title_score = self.get_fuzzy_score(title, track.title) if title else 1
+                album_score = self.get_fuzzy_score(album, track.parentTitle) if album else 1
+                artist_score = self.get_fuzzy_score(artist, track_artist) if artist else 1
+
+                # Color each component based on its individual score
+                def get_color_for_score(score):
+                    if score >= 0.8:
+                        return 'text_success'
+                    elif score >= 0.5:
+                        return 'text_warning'
+                    else:
+                        return 'text_error'
+
+                # Format each component with its own color
+                album_color = get_color_for_score(album_score)
+                title_color = get_color_for_score(title_score)
+                artist_color = get_color_for_score(artist_score)
+                score_color = get_color_for_score(score)
+
+                colored_album = ui.colorize(album_color, track.parentTitle)
+                colored_title = ui.colorize(title_color, track.title)
+                colored_artist = ui.colorize(artist_color, track_artist)
+                colored_score = ui.colorize(score_color, f'{score:.2f}')
 
                 print_(
                     f"{ui.colorize('action', str(i))}. "
-                    f"{ui.colorize(entry_color, f'{track.parentTitle} - {track.title} - {track_artist}')} "
-                    f"(Match: {ui.colorize(entry_color, f'{score:.2f}')})"
+                    f"{colored_album} - {colored_title} - {colored_artist} "
+                    f"(Match: {colored_score})"
                 )
 
             sel = ui.input_options(
