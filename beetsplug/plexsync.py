@@ -937,7 +937,7 @@ class PlexSync(BeetsPlugin):
 
                 # Normalize weights
                 total_weight = sum(weights.values())
-                if total_weight > 0:
+                if (total_weight > 0):
                     weights = {k: v/total_weight for k, v in weights.items()}
 
                 # Calculate weighted score
@@ -1249,25 +1249,27 @@ class PlexSync(BeetsPlugin):
 
             # Use beets' similarity detection for highlighting
             def highlight_matches(source, target):
-                # Handle None values before splitting
-                if source is None:
-                    source = "Unknown"
-                if target is None:
-                    target = "Unknown"
+                """Highlight exact matching parts between source and target strings."""
+                if source is None or target is None:
+                    return target or "Unknown"
 
-                # Split into parts but preserve complete names
-                source_parts = [p.strip() for p in source.replace(',', ' ,').split()]
-                target_parts = [p.strip() for p in target.replace(',', ' ,').split()]
+                # Split both strings into words while preserving spaces
+                source_words = source.replace(',', ' ,').split()
+                target_words = target.replace(',', ' ,').split()
 
-                highlighted_parts = []
-                for part in target_parts:
-                    matched = any(self.get_fuzzy_score(source_part.lower(), part.lower()) > 0.8
-                                for source_part in source_parts)
-                    if matched:
-                        highlighted_parts.append(ui.colorize('added_highlight', part))
-                    else:
-                        highlighted_parts.append(part)
-                return ' '.join(highlighted_parts)
+                # Process each target word
+                highlighted_words = []
+                for target_word in target_words:
+                    word_matched = False
+                    for source_word in source_words:
+                        if self.get_fuzzy_score(source_word.lower(), target_word.lower()) > 0.8:
+                            highlighted_words.append(ui.colorize('added_highlight', target_word))
+                            word_matched = True
+                            break
+                    if not word_matched:
+                        highlighted_words.append(target_word)
+
+                return ' '.join(highlighted_words)
 
             # Highlight matching parts
             highlighted_title = highlight_matches(source_title, track.title)
