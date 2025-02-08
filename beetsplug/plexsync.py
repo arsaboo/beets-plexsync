@@ -3449,6 +3449,15 @@ class PlexSync(BeetsPlugin):
         if self.loop and not self.loop.is_closed():
             self.close()
 
+def get_color_for_score(score):
+    """Get the appropriate color for a given score."""
+    if score >= 0.8:
+        return 'text_success'    # High match (green)
+    elif score >= 0.5:
+        return 'text_warning'    # Medium match (yellow)
+    else:
+        return 'text_error'      # Low match (red)
+
 def clean_title(title):
     """Clean up track title by removing common extras and normalizing format.
 
