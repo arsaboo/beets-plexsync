@@ -1036,53 +1036,6 @@ class PlexSync(BeetsPlugin):
         matches.sort(key=lambda x: x[1], reverse=True)
         return matches
 
-    def import_apple_playlist(self, url):
-        """Import Apple Music playlist with caching."""
-        # Generate cache key from URL
-        playlist_id = url.split('/')[-1]
-
-        # Check cache
-        cached_data = self.cache.get_playlist_cache(playlist_id, 'apple')
-        if (cached_data):
-            self._log.info("Using cached Apple Music playlist data")
-            return cached_data
-
-        song_list = []
-
-        # Send a GET request to the URL and get the HTML content
-        response = requests.get(url)
-        content = response.text
-
-        # Create a BeautifulSoup object with the HTML content
-        soup = BeautifulSoup(content, "html.parser")
-        try:
-            data = soup.find("script", id="serialized-server-data").text
-        except AttributeError:
-            self._log.debug("Error parsing Apple Music playlist")
-            return None
-        # load the data as a JSON object
-        data = json.loads(data)
-        songs = data[0]["data"]["sections"][1]["items"]
-
-        # Create an empty list to store the songs
-        song_list = []
-        # Loop through each song element
-        for song in songs:
-            # Find and store the song title
-            title = song["title"].strip()
-            album = song["tertiaryLinks"][0]["title"]
-            # Find and store the song artist
-            artist = song["subtitleLinks"][0]["title"]
-            # Create a dictionary with the song information
-            song_dict = {
-                "title": title.strip(),
-                "album": album.strip(),
-                "artist": artist.strip(),
-            }
-            # Append the dictionary to the list of songs
-            song_list.append(song_dict)
-        return song_list
-
     def _plexupdate(self):
         """Update Plex music library."""
         try:
