@@ -1014,38 +1014,14 @@ class PlexSync(BeetsPlugin):
 
         for track in tracks:
             score, dist = plex_track_distance(temp_item, track, config)
-            title_pen = dist._penalties.get('title', 0.0)
-            if not isinstance(title_pen, (int, float)):
-                title_pen = 0.0
-            album_pen = dist._penalties.get('album', 0.0)
-            if not isinstance(album_pen, (int, float)):
-                album_pen = 0.0
-            artist_pen = dist._penalties.get('artist', 0.0)
-            if not isinstance(artist_pen, (int, float)):
-                artist_pen = 0.0
             matches.append((track, score))
 
-            # Debug logging - use beets logger style with argument dictionary
-            log_args = {
-                'parentTitle': track.parentTitle,
-                'trackTitle': track.title,
-                'itemTitle': temp_item.title,
-                'trackTitle2': track.title,
-                'titlePenalty': title_pen,
-                'itemAlbum': temp_item.album,
-                'parentTitle2': track.parentTitle,
-                'albumPenalty': album_pen,
-                'itemArtist': temp_item.artist,
-                'trackArtist': track.artist().title,
-                'artistPenalty': artist_pen,
-                'score': score
-            }
+            # Debug logging - simpler format with positional args
+            self._log.debug("Track: {} - {}, Score: {:.3f}",
+                          track.parentTitle, track.title, score)
 
-            self._log.debug(
-                "Comparing track: {} - {} with item: {} - {} (title penalty: {}, album penalty: {}, artist penalty: {}) - Score: {}",
-                **log_args
-            )
-
+        # Sort by score descending
+        matches.sort(key=lambda x: x[1], reverse=True)
         return matches
 
     def _plexupdate(self):
