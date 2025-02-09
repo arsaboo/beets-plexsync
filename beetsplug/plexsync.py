@@ -1498,8 +1498,8 @@ class PlexSync(BeetsPlugin):
                 "artist": artist if artist else "",
             }
 
-            # Sort matches by relevance with adjusted weights for soundtrack albums
-            sorted_tracks = self.find_closest_match(song_dict, filtered_tracks, is_soundtrack=bool(album))
+            # Sort matches by relevance (removed is_soundtrack parameter)
+            sorted_tracks = self.find_closest_match(song_dict, filtered_tracks)
 
             # Use beets UI formatting for the query header
             print_(ui.colorize('text_highlight', '\nChoose candidates for: ') +
