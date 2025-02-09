@@ -1010,21 +1010,25 @@ class PlexSync(BeetsPlugin):
             score, dist = plex_track_distance(temp_item, track, config)
             matches.append((track, score))
 
-            # Debug logging - use beets logger style
+            # Debug logging - use beets logger style with argument dictionary
+            log_args = {
+                'parentTitle': track.parentTitle,
+                'trackTitle': track.title,
+                'itemTitle': temp_item.title,
+                'trackTitle2': track.title,
+                'titlePenalty': dist._penalties.get('title', 0.0),
+                'itemAlbum': temp_item.album,
+                'parentTitle2': track.parentTitle,
+                'albumPenalty': dist._penalties.get('album', 0.0),
+                'itemArtist': temp_item.artist,
+                'trackArtist': track.artist().title,
+                'artistPenalty': dist._penalties.get('artist', 0.0),
+                'score': score
+            }
+
             self._log.debug(
-                "Match scores for {} - {}: Title: {} vs {} (ratio: {:.3f}), Album: {} vs {} (ratio: {:.3f}), Artist: {} vs {} (ratio: {:.3f}), Final Score: {:.3f}",
-                track.parentTitle,
-                track.title,
-                temp_item.title,
-                track.title,
-                dist._penalties.get('title', 0.0),
-                temp_item.album,
-                track.parentTitle,
-                dist._penalties.get('album', 0.0),
-                temp_item.artist,
-                track.artist().title,
-                dist._penalties.get('artist', 0.0),
-                score
+                "Match scores for {parentTitle} - {trackTitle}: Title: {itemTitle} vs {trackTitle2} (ratio: {titlePenalty:.3f}), Album: {itemAlbum} vs {parentTitle2} (ratio: {albumPenalty:.3f}), Artist: {itemArtist} vs {trackArtist} (ratio: {artistPenalty:.3f}), Final Score: {score:.3f}",
+                **log_args
             )
 
         # Sort by score descending
@@ -2567,31 +2571,30 @@ class PlexSync(BeetsPlugin):
 
         # Check exclude/include sections
         for section in ['exclude', 'include']:
-            if section in filter_config:
-                if not isinstance(filter_config[section], dict):
-                    return False, f"{section} section must be a dictionary"
+            if (section in filter_config) and (not isinstance(filter_config[section], dict)):
+                return False, f"{section} section must be a dictionary"
 
-                # Validate genres
-                if 'genres' in filter_config[section]:
-                    if not isinstance(filter_config[section]['genres'], list):
-                        return False, f"{section}.genres must be a list"
+            # Validate genres
+            if 'genres' in filter_config[section]:
+                if not isinstance(filter_config[section]['genres'], list):
+                    return False, f"{section}.genres must be a list"
 
-                # Validate years
-                if 'years' in filter_config[section]:
-                    years = filter_config[section]['years']
-                    if not isinstance(years, dict):
-                        return False, f"{section}.years must be a dictionary"
+            # Validate years
+            if 'years' in filter_config[section]:
+                years = filter_config[section]['years']
+                if not isinstance(years, dict):
+                    return False, f"{section}.years must be a dictionary"
 
-                    # Check year values
-                    if 'before' in years and not isinstance(years['before'], int):
-                        return False, f"{section}.years.before must be an integer"
-                    if 'after' in years and not isinstance(years['after'], int):
-                        return False, f"{section}.years.after must be an integer"
-                    if 'between' in years:
-                        if not isinstance(years['between'], list) or len(years['between']) != 2:
-                            return False, f"{section}.years.between must be a list of two integers"
-                        if not all(isinstance(y, int) for y in years['between']):
-                            return False, f"{section}.years.between values must be integers"
+                # Check year values
+                if 'before' in years and not isinstance(years['before'], int):
+                    return False, f"{section}.years.before must be an integer"
+                if 'after' in years and not isinstance(years['after'], int):
+                    return False, f"{section}.years.after must be an integer"
+                if 'between' in years:
+                    if not isinstance(years['between'], list) or len(years['between']) != 2:
+                        return False, f"{section}.years.between must be a list of two integers"
+                    if not all(isinstance(y, int) for y in years['between']):
+                        return False, f"{section}.years.between values must be integers"
 
         # Validate min_rating
         if 'min_rating' in filter_config:
