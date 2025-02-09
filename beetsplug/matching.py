@@ -1,48 +1,11 @@
 """Custom matching utilities for PlexSync plugin."""
 
-import difflib
 import re
 from typing import Optional, Tuple
 
 from beets.autotag import hooks
-from beets.dbcore import types
 from beets.library import Item
-from beets.util import levenshtein
 from plexapi.audio import Track
-
-
-def string_ratio(str1: str, str2: str, ignore_case: bool = True) -> float:
-    """Calculate similarity ratio between two strings.
-
-    Args:
-        str1: First string to compare
-        str2: Second string to compare
-        ignore_case: Whether to ignore case when comparing
-
-    Returns:
-        float: Similarity ratio between 0 and 1
-    """
-    if not str1 and not str2:
-        return 1.0
-    if not str1 or not str2:
-        return 0.0
-
-    if ignore_case:
-        str1 = str1.lower()
-        str2 = str2.lower()
-
-    # Try exact match first
-    if str1 == str2:
-        return 1.0
-
-    # Try substring match
-    if str1 in str2 or str2 in str1:
-        shorter = min(len(str1), len(str2))
-        longer = max(len(str1), len(str2))
-        return 0.9 * (shorter / longer)
-
-    # Fallback to sequence matcher
-    return difflib.SequenceMatcher(None, str1, str2).ratio()
 
 
 def clean_string(s: str) -> str:
@@ -82,13 +45,13 @@ def artist_distance(str1: str, str2: str) -> float:
     if not artists1 or not artists2:
         return 1.0
 
-    # Calculate best match for each artist
+    # Calculate best match for each artist using hooks.string_distance
     matches = []
     for artist1 in artists1:
-        best_match = max(string_ratio(artist1, artist2) for artist2 in artists2)
+        best_match = min(hooks.string_distance(artist1, artist2) for artist2 in artists2)
         matches.append(best_match)
 
-    # Return average of best matches
+    # Return average distance (note: hooks.string_distance returns distance, not similarity)
     return sum(matches) / len(matches)
 
 
@@ -111,9 +74,9 @@ def plex_track_distance(
 
     # Default weights with only title, artist, and album
     weights = {
-        'title': 0.45,      # Title most important (increased from 0.40)
-        'artist': 0.35,     # Artist next (increased from 0.25)
-        'album': 0.20,      # Album title (unchanged)
+        'title': 0.45,      # Title most important
+        'artist': 0.35,     # Artist next
+        'album': 0.20,      # Album title
     }
 
     if config and 'weights' in config:
@@ -122,20 +85,20 @@ def plex_track_distance(
     # Title distance (clean and compare)
     title1 = clean_string(item.title)
     title2 = clean_string(plex_track.title)
-    title_ratio = string_ratio(title1, title2)
-    dist.add_ratio('title', 1 - title_ratio, 1.0)
+    title_dist = hooks.string_distance(title1, title2)
+    dist.add_ratio('title', title_dist, 1.0)
 
     # Artist distance (with multiple artist handling)
     artist1 = item.artist
     artist2 = plex_track.originalTitle or plex_track.artist().title
-    artist_ratio = artist_distance(artist1, artist2)
-    dist.add_ratio('artist', 1 - artist_ratio, 1.0)
+    artist_dist = artist_distance(artist1, artist2)
+    dist.add_ratio('artist', artist_dist, 1.0)
 
     # Album distance
     album1 = clean_string(item.album)
     album2 = clean_string(plex_track.parentTitle)
-    album_ratio = string_ratio(album1, album2)
-    dist.add_ratio('album', 1 - album_ratio, 1.0)
+    album_dist = hooks.string_distance(album1, album2)
+    dist.add_ratio('album', album_dist, 1.0)
 
     # Calculate weighted score
     total_distance = sum(
