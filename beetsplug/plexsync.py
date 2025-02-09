@@ -1010,18 +1010,28 @@ class PlexSync(BeetsPlugin):
             score, dist = plex_track_distance(temp_item, track, config)
             matches.append((track, score))
 
-            # Debug logging - access penalties directly from dist._penalties
+            # Debug logging - format each part separately
+            title_penalty = dist._penalties.get('title', 0.0)
+            album_penalty = dist._penalties.get('album', 0.0)
+            artist_penalty = dist._penalties.get('artist', 0.0)
+
             self._log.debug(
-                "Match scores for {} - {}:\n"
-                "  Title: {} vs {} (ratio: {:.3f})\n"
-                "  Album: {} vs {} (ratio: {:.3f})\n"
-                "  Artist: {} vs {} (ratio: {:.3f})\n"
-                "  Final Score: {:.3f}",
-                track.parentTitle, track.title,
-                temp_item.title, track.title, dist._penalties.get('title', 0.0),
-                temp_item.album, track.parentTitle, dist._penalties.get('album', 0.0),
-                temp_item.artist, track.artist().title, dist._penalties.get('artist', 0.0),
-                score
+                "Match scores for {} - {}: Title: {} vs {} (ratio: {:.3f}), "
+                "Album: {} vs {} (ratio: {:.3f}), Artist: {} vs {} (ratio: {:.3f}), "
+                "Final Score: {:.3f}".format(
+                    track.parentTitle,
+                    track.title,
+                    temp_item.title,
+                    track.title,
+                    title_penalty,
+                    temp_item.album,
+                    track.parentTitle,
+                    album_penalty,
+                    temp_item.artist,
+                    track.artist().title,
+                    artist_penalty,
+                    score
+                )
             )
 
         # Sort by score descending
