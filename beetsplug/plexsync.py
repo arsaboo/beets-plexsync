@@ -1014,6 +1014,15 @@ class PlexSync(BeetsPlugin):
 
         for track in tracks:
             score, dist = plex_track_distance(temp_item, track, config)
+            title_pen = dist._penalties.get('title', 0.0)
+            if not isinstance(title_pen, (int, float)):
+                title_pen = 0.0
+            album_pen = dist._penalties.get('album', 0.0)
+            if not isinstance(album_pen, (int, float)):
+                album_pen = 0.0
+            artist_pen = dist._penalties.get('artist', 0.0)
+            if not isinstance(artist_pen, (int, float)):
+                artist_pen = 0.0
             matches.append((track, score))
 
             # Debug logging - use beets logger style with argument dictionary
@@ -1022,17 +1031,21 @@ class PlexSync(BeetsPlugin):
                 'trackTitle': track.title,
                 'itemTitle': temp_item.title,
                 'trackTitle2': track.title,
-                'titlePenalty': ensure_float(dist._penalties.get('title', 0.0)),
+                'titlePenalty': title_pen,
                 'itemAlbum': temp_item.album,
                 'parentTitle2': track.parentTitle,
-                'albumPenalty': ensure_float(dist._penalties.get('album', 0.0)),
+                'albumPenalty': album_pen,
                 'itemArtist': temp_item.artist,
                 'trackArtist': track.artist().title,
-                'artistPenalty': ensure_float(dist._penalties.get('artist', 0.0)),
+                'artistPenalty': artist_pen,
                 'score': score
             }
 
             self._log.debug(
+                "Comparing track: {} - {} with item: {} - {} (title penalty: {}, album penalty: {}, artist penalty: {}) - Score: {}",
+                **log_args
+            )
+
         return matches
 
     def _plexupdate(self):
