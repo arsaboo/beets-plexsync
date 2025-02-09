@@ -902,89 +902,132 @@ class PlexSync(BeetsPlugin):
         text = ' '.join(text.split())
         return text
 
-    def find_closest_match(self, title, lst, is_soundtrack=False):
+    def calculate_string_similarity(self, source, target):
+        """Calculate similarity score between two strings.
+
+        Args:
+            source: Source string to match
+            target: Target string to match against
+
+        Returns:
+            float: Similarity score between 0-1
+        """
+        if not source or not target:
+            return 0.0
+
+        source = source.lower().strip()
+        target = target.lower().strip()
+
+        # Exact match
+        if source == target:
+            return 1.0
+
+        # Source is substring of target or vice versa
+        if source in target or target in source:
+            shorter = min(len(source), len(target))
+            longer = max(len(source), len(target))
+            return 0.9 * (shorter / longer)
+
+        # Calculate Levenshtein distance
+        distance = difflib.SequenceMatcher(None, source, target).ratio()
+        return distance
+
+    def calculate_artist_similarity(self, source_artists, target_artists):
+        """Calculate similarity between artist sets.
+
+        Args:
+            source_artists: List/set of source artist names
+            target_artists: List/set of target artist names
+
+        Returns:
+            float: Similarity score between 0-1
+        """
+        def normalize_artist(artist):
+            """Normalize artist name for comparison."""
+            if not artist:
+                return ""
+            artist = artist.lower()
+            # Replace common separators
+            artist = re.sub(r'\s*[&,]\s*', ' and ', artist)
+            # Remove featuring
+            artist = re.sub(r'\s*(?:feat\.?|ft\.?|featuring)\s*.*$', '', artist)
+            # Remove special chars
+            artist = re.sub(r'[^\w\s]', '', artist)
+            return artist.strip()
+
+        # Convert to sets and normalize
+        source_set = {normalize_artist(a) for a in source_artists if a}
+        target_set = {normalize_artist(a) for a in target_artists if a}
+
+        if not source_set or not target_set:
+            return 0.0
+
+        # Calculate Jaccard similarity
+        intersection = len(source_set.intersection(target_set))
+        union = len(source_set.union(target_set))
+
+        return intersection / union if union > 0 else 0.0
+
+    def find_closest_match(self, song, tracks):
+        """Find best matching tracks using string similarity.
+
+        Args:
+            song: Dictionary containing song metadata
+            tracks: List of Plex tracks to search
+
+        Returns:
+            list: Sorted list of (track, score) tuples
+        """
         matches = []
-        for track in lst:
-            # Get raw string values
-            source_title = title.get('title', '')
-            source_album = title.get('album', '')
-            source_artists = set(a.strip().lower() for a in title.get('artist', '').split(','))
 
-            # Clean up and normalize track title/artists
-            track_title = track.title
-            track_album = track.parentTitle
+        # Get source values
+        source_title = song.get('title', '').strip()
+        source_album = song.get('album', '').strip()
+        source_artists = [a.strip() for a in song.get('artist', '').split(',')]
 
-            # Clean up feature text from title for better matching
-            clean_track_title = re.sub(r'\s*[\(\[]feat\.[^\)\]]*[\)\]]', '', track_title, flags=re.IGNORECASE)
-            clean_source_title = re.sub(r'\s*[\(\[]feat\.[^\)\]]*[\)\]]', '', source_title, flags=re.IGNORECASE)
+        for track in tracks:
+            # Get track values
+            track_title = track.title.strip()
+            track_album = track.parentTitle.strip()
+            track_artist = getattr(track, 'originalTitle', None) or track.artist().title
+            track_artists = [a.strip() for a in track_artist.split(',')]
 
-            # Get track artists and normalize
-            track_artist_raw = getattr(track, 'originalTitle', None) or track.artist().title
-            track_artists = set(a.strip().lower() for a in track_artist_raw.split(','))
+            # Calculate individual scores
+            title_score = self.calculate_string_similarity(source_title, track_title)
 
-            # Remove common words/markers from artist names
-            artist_stopwords = {'feat', 'ft', 'featuring', '&', 'and'}
-            source_artists = {re.sub(r'\s*(?:feat\.?|ft\.?|&)\s*', '', a.lower()) for a in source_artists}
-            track_artists = {re.sub(r'\s*(?:feat\.?|ft\.?|&)\s*', '', a.lower()) for a in track_artists}
+            # Album score (if source has album)
+            album_score = 0.0
+            if source_album:
+                album_score = self.calculate_string_similarity(source_album, track_album)
 
-            # Calculate scores
-            title_score = self.get_fuzzy_score(clean_source_title, clean_track_title)
-            album_score = self.get_fuzzy_score(source_album, track_album) if source_album else 0
+            # Artist score using set similarity
+            artist_score = self.calculate_artist_similarity(source_artists, track_artists)
 
-            # Calculate artist match score using set intersection
-            common_artists = source_artists.intersection(track_artists)
-            total_artists = source_artists.union(track_artists)
-            artist_score = len(common_artists) / len(total_artists) if total_artists else 0
-
-            # Extra boost if we have exact artist matches
-            if len(common_artists) == len(source_artists):
-                artist_score += 0.2  # Bonus for having all source artists
-
-            # Title matching is more important for exact matches
-            if title_score > 0.9:  # Almost exact title match
-                title_weight = 0.6
-                artist_weight = 0.3
-                album_weight = 0.1
-            else:
-                title_weight = 0.4
-                artist_weight = 0.4
-                album_weight = 0.2
-
-            # Adjust weights based on context
-            if is_soundtrack:
-                # For soundtracks, album matching is more important
-                album_weight = 0.5
-                title_weight = 0.3
-                artist_weight = 0.2
-            else:
-                # Standard weights
-                album_weight = 0.2
-                title_weight = 0.5
-                artist_weight = 0.3
-
-            # Calculate final score
-            combined_score = (
-                (title_score * title_weight) +
-                (artist_score * artist_weight) +
-                (album_score * album_weight)
+            # Calculate weighted score
+            # Title: 45%, Artist: 35%, Album: 20%
+            final_score = (
+                (0.45 * title_score) +
+                (0.35 * artist_score) +
+                (0.20 * album_score)
             )
 
-            matches.append((track, combined_score))
+            matches.append((track, final_score))
 
             # Debug logging
             self._log.debug(
-                "Match details for {} - {}:\n"
-                "  Title: {} vs {} (Score: {:.2f})\n"
-                "  Artists: {} vs {} (Score: {:.2f}, Common: {})\n"
-                "  Album: {} vs {} (Score: {:.2f})\n"
-                "  Final Score: {:.2f}",
-                track.parentTitle, track.title,
-                clean_source_title, clean_track_title, title_score,
-                source_artists, track_artists, artist_score, common_artists,
+                "Match scores for {} - {}:\n"
+                "  Title: {} vs {} (Score: {:.3f})\n"
+                "  Album: {} vs {} (Score: {:.3f})\n"
+                "  Artist: {} vs {} (Score: {:.3f})\n"
+                "  Final Score: {:.3f}",
+                track_album, track_title,
+                source_title, track_title, title_score,
                 source_album, track_album, album_score,
-                combined_score
+                source_artists, track_artists, artist_score,
+                final_score
             )
 
+        # Sort by score descending
         matches.sort(key=lambda x: x[1], reverse=True)
         return matches
 
