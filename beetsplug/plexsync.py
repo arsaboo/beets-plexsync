@@ -933,7 +933,7 @@ class PlexSync(BeetsPlugin):
         return distance
 
     def calculate_artist_similarity(self, source_artists, target_artists):
-        """Calculate similarity between artist sets.
+        """Calculate similarity between artist sets with partial matching.
 
         Args:
             source_artists: List/set of source artist names
@@ -955,21 +955,39 @@ class PlexSync(BeetsPlugin):
             artist = re.sub(r'[^\w\s]', '', artist)
             return artist.strip()
 
-        # Convert to sets and normalize
-        source_set = {normalize_artist(a) for a in source_artists if a}
-        target_set = {normalize_artist(a) for a in target_artists if a}
+        def get_artist_parts(artist):
+            """Split artist name into words for partial matching."""
+            return set(normalize_artist(artist).split())
 
-        if not source_set or not target_set:
+        # Normalize and filter out empty/None artists
+        source = [normalize_artist(a) for a in source_artists if a and a.lower() != "unknown"]
+        target = [normalize_artist(a) for a in target_artists if a and a.lower() != "unknown"]
+
+        if not source or not target:
             return 0.0
 
-        # Calculate Jaccard similarity
-        intersection = len(source_set.intersection(target_set))
-        union = len(source_set.union(target_set))
+        # Calculate exact matches first
+        exact_matches = len(set(source).intersection(target))
+        if exact_matches:
+            # Weight by proportion of exact matches
+            return exact_matches / max(len(source), len(target))
 
-        return intersection / union if union > 0 else 0.0
+        # If no exact matches, try partial word matching
+        source_parts = set().union(*(get_artist_parts(a) for a in source))
+        target_parts = set().union(*(get_artist_parts(a) for a in target))
+
+        if not source_parts or not target_parts:
+            return 0.0
+
+        # Calculate Jaccard similarity of word parts
+        intersection = len(source_parts.intersection(target_parts))
+        union = len(source_parts.union(target_parts))
+
+        # Reduce score for partial matches
+        return 0.8 * (intersection / union if union > 0 else 0)
 
     def find_closest_match(self, song, tracks):
-        """Find best matching tracks using string similarity.
+        """Find best matching tracks using string similarity with dynamic weights.
 
         Args:
             song: Dictionary containing song metadata
@@ -985,6 +1003,25 @@ class PlexSync(BeetsPlugin):
         source_album = song.get('album', '').strip()
         source_artists = [a.strip() for a in song.get('artist', '').split(',')]
 
+        # Base weights
+        title_weight = 0.45  # 45%
+        artist_weight = 0.35 # 35%
+        album_weight = 0.20  # 20%
+
+        # Adjust weights if fields are unknown/missing
+        if not source_album or source_album.lower() == "unknown":
+            # Redistribute album weight proportionally
+            total = title_weight + artist_weight
+            title_weight += (album_weight * (title_weight / total))
+            artist_weight += (album_weight * (artist_weight / total))
+            album_weight = 0
+
+        if not source_artists or all(a.lower() == "unknown" for a in source_artists):
+            # Redistribute artist weight to title and album
+            title_weight += artist_weight * 0.7  # Give most to title
+            album_weight += artist_weight * 0.3  # Rest to album
+            artist_weight = 0
+
         for track in tracks:
             # Get track values
             track_title = track.title.strip()
@@ -995,20 +1032,21 @@ class PlexSync(BeetsPlugin):
             # Calculate individual scores
             title_score = self.calculate_string_similarity(source_title, track_title)
 
-            # Album score (if source has album)
+            # Album score
             album_score = 0.0
-            if source_album:
+            if album_weight > 0:
                 album_score = self.calculate_string_similarity(source_album, track_album)
 
-            # Artist score using set similarity
-            artist_score = self.calculate_artist_similarity(source_artists, track_artists)
+            # Artist score
+            artist_score = 0.0
+            if artist_weight > 0:
+                artist_score = self.calculate_artist_similarity(source_artists, track_artists)
 
-            # Calculate weighted score
-            # Title: 45%, Artist: 35%, Album: 20%
+            # Calculate weighted final score
             final_score = (
-                (0.45 * title_score) +
-                (0.35 * artist_score) +
-                (0.20 * album_score)
+                (title_weight * title_score) +
+                (artist_weight * artist_score) +
+                (album_weight * album_score)
             )
 
             matches.append((track, final_score))
@@ -1016,14 +1054,14 @@ class PlexSync(BeetsPlugin):
             # Debug logging
             self._log.debug(
                 "Match scores for {} - {}:\n"
-                "  Title: {} vs {} (Score: {:.3f})\n"
-                "  Album: {} vs {} (Score: {:.3f})\n"
-                "  Artist: {} vs {} (Score: {:.3f})\n"
+                "  Title: {} vs {} (Score: {:.3f}, Weight: {:.2f})\n"
+                "  Album: {} vs {} (Score: {:.3f}, Weight: {:.2f})\n"
+                "  Artist: {} vs {} (Score: {:.3f}, Weight: {:.2f})\n"
                 "  Final Score: {:.3f}",
                 track_album, track_title,
-                source_title, track_title, title_score,
-                source_album, track_album, album_score,
-                source_artists, track_artists, artist_score,
+                source_title, track_title, title_score, title_weight,
+                source_album, track_album, album_score, album_weight,
+                source_artists, track_artists, artist_score, artist_weight,
                 final_score
             )
 
@@ -1076,11 +1114,6 @@ class PlexSync(BeetsPlugin):
             }
             # Append the dictionary to the list of songs
             song_list.append(song_dict)
-        return song_list
-
-        if (song_list):
-            self.cache.set_playlist_cache(playlist_id, 'apple', song_list)
-
         return song_list
 
     def _plexupdate(self):
