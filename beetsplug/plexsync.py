@@ -26,7 +26,7 @@ import spotipy
 from beets import config, ui
 from beets.dbcore import types
 from beets.dbcore.query import MatchQuery
-from beets.library import DateType
+from beets.library import Item, DateType  # Added Item to import
 from beets.plugins import BeetsPlugin
 from beets.ui import input_, print_
 from bs4 import BeautifulSoup
@@ -40,6 +40,7 @@ from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
 
 from beetsplug.caching import Cache
 from beetsplug.llm import search_track_info
+from beetsplug.matching import plex_track_distance, clean_string
 
 
 class Song(BaseModel):
@@ -998,84 +999,37 @@ class PlexSync(BeetsPlugin):
         """
         matches = []
 
-        # Get source values
-        source_title = song.get('title', '').strip()
-        source_album = song.get('album', '').strip()
-        source_artists = [a.strip() for a in song.get('artist', '').split(',')]
+        # Default config with only title, artist, and album weights
+        config = {
+            'weights': {
+                'title': 0.45,      # Title most important
+                'artist': 0.35,     # Artist next
+                'album': 0.20,      # Album title
+            }
+        }
 
-        # Base weights
-        title_weight = 0.45  # 45%
-        artist_weight = 0.35 # 35%
-        album_weight = 0.20  # 20%
-
-        # Additional score boosts
-        PERFECT_ALBUM_BOOST = 0.15  # Boost when album exactly matches
-        ALBUM_CONTAINS_BOOST = 0.10  # Boost when source album contains target album
-        PERFECT_TITLE_BOOST = 0.15   # Boost for exact title match
-        ARTIST_MATCH_BOOST = 0.10    # Boost for each matching artist
+        # Create a temporary beets Item for comparison
+        temp_item = Item()
+        temp_item.title = song.get('title', '').strip()
+        temp_item.artist = song.get('artist', '').strip()
+        temp_item.album = song.get('album', '').strip() if song.get('album') else ''
 
         for track in tracks:
-            # Get track values
-            track_title = track.title.strip()
-            track_album = track.parentTitle.strip()
-            track_artist = getattr(track, 'originalTitle', None) or track.artist().title
-            track_artists = [a.strip() for a in track_artist.split(',')]
-
-            # Calculate base scores
-            title_score = self.calculate_string_similarity(source_title, track_title)
-            album_score = self.calculate_string_similarity(source_album, track_album) if source_album else 0
-            artist_score = self.calculate_artist_similarity(source_artists, track_artists)
-
-            # Calculate boosts
-            boosts = 0.0
-
-            # Album boosts
-            if source_album and track_album:
-                if source_album.lower() == track_album.lower():
-                    boosts += PERFECT_ALBUM_BOOST
-                elif track_album.lower() in source_album.lower():
-                    # Source album contains target album (e.g. "Kudrat (OST)" contains "Kudrat")
-                    boosts += ALBUM_CONTAINS_BOOST
-                elif source_album.lower() in track_album.lower():
-                    # Target album contains source album
-                    boosts += ALBUM_CONTAINS_BOOST * 0.5  # Half boost for this case
-
-            # Title boost
-            if source_title.lower() == track_title.lower():
-                boosts += PERFECT_TITLE_BOOST
-
-            # Artist boost - for each matching artist
-            matching_artists = set(a.lower() for a in source_artists).intersection(
-                a.lower() for a in track_artists
-            )
-            boosts += ARTIST_MATCH_BOOST * (len(matching_artists) / max(len(source_artists), 1))
-
-            # Calculate weighted base score
-            base_score = (
-                (title_weight * title_score) +
-                (artist_weight * artist_score) +
-                (album_weight * album_score)
-            )
-
-            # Apply boosts (capped at 1.0)
-            final_score = min(1.0, base_score + boosts)
-
-            matches.append((track, final_score))
+            score, dist = plex_track_distance(temp_item, track, config)
+            matches.append((track, score))
 
             # Debug logging
             self._log.debug(
                 "Match scores for {} - {}:\n"
-                "  Title: {} vs {} (Score: {:.3f}, Weight: {:.2f})\n"
-                "  Album: {} vs {} (Score: {:.3f}, Weight: {:.2f})\n"
-                "  Artist: {} vs {} (Score: {:.3f}, Weight: {:.2f})\n"
-                "  Boosts: {:.3f}\n"
+                "  Title: {} vs {} (ratio: {:.3f})\n"
+                "  Album: {} vs {} (ratio: {:.3f})\n"
+                "  Artist: {} vs {} (ratio: {:.3f})\n"
                 "  Final Score: {:.3f}",
-                track_album, track_title,
-                source_title, track_title, title_score, title_weight,
-                source_album, track_album, album_score, album_weight,
-                source_artists, track_artists, artist_score, artist_weight,
-                boosts,
-                final_score
+                track.parentTitle, track.title,
+                temp_item.title, track.title, dist.distance('title'),
+                temp_item.album, track.parentTitle, dist.distance('album'),
+                temp_item.artist, track.artist().title, dist.distance('artist'),
+                score
             )
 
         # Sort by score descending
@@ -1673,7 +1627,7 @@ class PlexSync(BeetsPlugin):
                 )
                 if len(tracks) == 0:
                     # Try with simplified title (no parentheses)
-                    song["title"] = re.sub(r"\(.*\)", "", song["title"]).strip()
+                    song["title"] = clean_string(song["title"])
                     tracks = self.music.searchTracks(**{"track.title": song["title"]}, limit=50)
         except Exception as e:
             self._log.debug(
@@ -1701,15 +1655,11 @@ class PlexSync(BeetsPlugin):
                 # If user skipped, the negative cache was already stored, return None
                 return None
 
-            # Otherwise try automatic matching
-            for track, score in sorted_tracks:
-                if track.originalTitle is not None:
-                    plex_artist = track.originalTitle
-                else:
-                    plex_artist = track.artist().title
-                if artist in plex_artist:
-                    self._cache_result(cache_key, track)
-                    return track
+            # Otherwise try automatic matching with improved threshold
+            best_match = sorted_tracks[0]
+            if best_match[1] >= 0.8:  # Require 80% match score for automatic matching
+                self._cache_result(cache_key, best_match[0])
+                return best_match[0]
 
         # Try LLM cleaning if enabled and not already attempted
         if not llm_attempted and self.search_llm and config["plexsync"]["use_llm_search"].get(bool):
