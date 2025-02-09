@@ -60,7 +60,16 @@ def plex_track_distance(
     config: Optional[dict] = None
 ) -> Tuple[float, hooks.Distance]:
     """Calculate distance between a beets Item and Plex Track."""
+    # Define weights
+    weights = {
+        'title': 0.45,    # Title most important
+        'artist': 0.35,   # Artist next
+        'album': 0.20,    # Album title
+    }
+
+    # Create distance object with initial weights
     dist = hooks.Distance()
+    dist._weights.update(weights)
 
     # Title comparison
     title1 = clean_string(item.title)
