@@ -45,13 +45,13 @@ def artist_distance(str1: str, str2: str) -> float:
     if not artists1 or not artists2:
         return 1.0
 
-    # Calculate best match for each artist using hooks.string_distance
+    # Calculate best match for each artist using hooks.string_dist
     matches = []
     for artist1 in artists1:
-        best_match = min(hooks.string_distance(artist1, artist2) for artist2 in artists2)
+        best_match = min(hooks.string_dist(artist1, artist2) for artist2 in artists2)
         matches.append(best_match)
 
-    # Return average distance (note: hooks.string_distance returns distance, not similarity)
+    # Return average distance (note: hooks.string_dist returns distance, not similarity)
     return sum(matches) / len(matches)
 
 
@@ -85,7 +85,7 @@ def plex_track_distance(
     # Title distance (clean and compare)
     title1 = clean_string(item.title)
     title2 = clean_string(plex_track.title)
-    title_dist = hooks.string_distance(title1, title2)
+    title_dist = hooks.string_dist(title1, title2)
     dist.add_ratio('title', title_dist, 1.0)
 
     # Artist distance (with multiple artist handling)
@@ -97,7 +97,7 @@ def plex_track_distance(
     # Album distance
     album1 = clean_string(item.album)
     album2 = clean_string(plex_track.parentTitle)
-    album_dist = hooks.string_distance(album1, album2)
+    album_dist = hooks.string_dist(album1, album2)
     dist.add_ratio('album', album_dist, 1.0)
 
     # Calculate weighted score
