@@ -1008,19 +1008,11 @@ class PlexSync(BeetsPlugin):
         artist_weight = 0.35 # 35%
         album_weight = 0.20  # 20%
 
-        # Adjust weights if fields are unknown/missing
-        if not source_album or source_album.lower() == "unknown":
-            # Redistribute album weight proportionally
-            total = title_weight + artist_weight
-            title_weight += (album_weight * (title_weight / total))
-            artist_weight += (album_weight * (artist_weight / total))
-            album_weight = 0
-
-        if not source_artists or all(a.lower() == "unknown" for a in source_artists):
-            # Redistribute artist weight to title and album
-            title_weight += artist_weight * 0.7  # Give most to title
-            album_weight += artist_weight * 0.3  # Rest to album
-            artist_weight = 0
+        # Additional score boosts
+        PERFECT_ALBUM_BOOST = 0.15  # Boost when album exactly matches
+        ALBUM_CONTAINS_BOOST = 0.10  # Boost when source album contains target album
+        PERFECT_TITLE_BOOST = 0.15   # Boost for exact title match
+        ARTIST_MATCH_BOOST = 0.10    # Boost for each matching artist
 
         for track in tracks:
             # Get track values
@@ -1029,25 +1021,44 @@ class PlexSync(BeetsPlugin):
             track_artist = getattr(track, 'originalTitle', None) or track.artist().title
             track_artists = [a.strip() for a in track_artist.split(',')]
 
-            # Calculate individual scores
+            # Calculate base scores
             title_score = self.calculate_string_similarity(source_title, track_title)
+            album_score = self.calculate_string_similarity(source_album, track_album) if source_album else 0
+            artist_score = self.calculate_artist_similarity(source_artists, track_artists)
 
-            # Album score
-            album_score = 0.0
-            if album_weight > 0:
-                album_score = self.calculate_string_similarity(source_album, track_album)
+            # Calculate boosts
+            boosts = 0.0
 
-            # Artist score
-            artist_score = 0.0
-            if artist_weight > 0:
-                artist_score = self.calculate_artist_similarity(source_artists, track_artists)
+            # Album boosts
+            if source_album and track_album:
+                if source_album.lower() == track_album.lower():
+                    boosts += PERFECT_ALBUM_BOOST
+                elif track_album.lower() in source_album.lower():
+                    # Source album contains target album (e.g. "Kudrat (OST)" contains "Kudrat")
+                    boosts += ALBUM_CONTAINS_BOOST
+                elif source_album.lower() in track_album.lower():
+                    # Target album contains source album
+                    boosts += ALBUM_CONTAINS_BOOST * 0.5  # Half boost for this case
 
-            # Calculate weighted final score
-            final_score = (
+            # Title boost
+            if source_title.lower() == track_title.lower():
+                boosts += PERFECT_TITLE_BOOST
+
+            # Artist boost - for each matching artist
+            matching_artists = set(a.lower() for a in source_artists).intersection(
+                a.lower() for a in track_artists
+            )
+            boosts += ARTIST_MATCH_BOOST * (len(matching_artists) / max(len(source_artists), 1))
+
+            # Calculate weighted base score
+            base_score = (
                 (title_weight * title_score) +
                 (artist_weight * artist_score) +
                 (album_weight * album_score)
             )
+
+            # Apply boosts (capped at 1.0)
+            final_score = min(1.0, base_score + boosts)
 
             matches.append((track, final_score))
 
@@ -1057,11 +1068,13 @@ class PlexSync(BeetsPlugin):
                 "  Title: {} vs {} (Score: {:.3f}, Weight: {:.2f})\n"
                 "  Album: {} vs {} (Score: {:.3f}, Weight: {:.2f})\n"
                 "  Artist: {} vs {} (Score: {:.3f}, Weight: {:.2f})\n"
+                "  Boosts: {:.3f}\n"
                 "  Final Score: {:.3f}",
                 track_album, track_title,
                 source_title, track_title, title_score, title_weight,
                 source_album, track_album, album_score, album_weight,
                 source_artists, track_artists, artist_score, artist_weight,
+                boosts,
                 final_score
             )
 
