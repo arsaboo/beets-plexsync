@@ -987,6 +987,12 @@ class PlexSync(BeetsPlugin):
         # Reduce score for partial matches
         return 0.8 * (intersection / union if union > 0 else 0)
 
+    def ensure_float(value):
+        """Safely convert a numeric or list of numerics to a float."""
+        if isinstance(value, list):
+            return float(sum(value) / len(value)) if value else 0.0
+        return float(value)
+
     def find_closest_match(self, song, tracks):
         """Find best matching tracks using string similarity with dynamic weights."""
         matches = []
@@ -1016,23 +1022,17 @@ class PlexSync(BeetsPlugin):
                 'trackTitle': track.title,
                 'itemTitle': temp_item.title,
                 'trackTitle2': track.title,
-                'titlePenalty': dist._penalties.get('title', 0.0),
+                'titlePenalty': ensure_float(dist._penalties.get('title', 0.0)),
                 'itemAlbum': temp_item.album,
                 'parentTitle2': track.parentTitle,
-                'albumPenalty': dist._penalties.get('album', 0.0),
+                'albumPenalty': ensure_float(dist._penalties.get('album', 0.0)),
                 'itemArtist': temp_item.artist,
                 'trackArtist': track.artist().title,
-                'artistPenalty': dist._penalties.get('artist', 0.0),
+                'artistPenalty': ensure_float(dist._penalties.get('artist', 0.0)),
                 'score': score
             }
 
             self._log.debug(
-                "Match scores for {parentTitle} - {trackTitle}: Title: {itemTitle} vs {trackTitle2} (ratio: {titlePenalty:.3f}), Album: {itemAlbum} vs {parentTitle2} (ratio: {albumPenalty:.3f}), Artist: {itemArtist} vs {trackArtist} (ratio: {artistPenalty:.3f}), Final Score: {score:.3f}",
-                **log_args
-            )
-
-        # Sort by score descending
-        matches.sort(key=lambda x: x[1], reverse=True)
         return matches
 
     def _plexupdate(self):
