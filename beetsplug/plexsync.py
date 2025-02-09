@@ -2558,34 +2558,37 @@ class PlexSync(BeetsPlugin):
         if not isinstance(filter_config, dict):
             return False, "Filter configuration must be a dictionary"
 
-        # Check exclude/include sections
+        # Check exclude/include sections if they exist
         for section in ['exclude', 'include']:
-            if (section in filter_config) and (not isinstance(filter_config[section], dict)):
-                return False, f"{section} section must be a dictionary"
+            if section in filter_config:
+                if not isinstance(filter_config[section], dict):
+                    return False, f"{section} section must be a dictionary"
 
-            # Validate genres
-            if 'genres' in filter_config[section]:
-                if not isinstance(filter_config[section]['genres'], list):
-                    return False, f"{section}.genres must be a list"
+                section_config = filter_config[section]
 
-            # Validate years
-            if 'years' in filter_config[section]:
-                years = filter_config[section]['years']
-                if not isinstance(years, dict):
-                    return False, f"{section}.years must be a dictionary"
+                # Validate genres if present
+                if 'genres' in section_config:
+                    if not isinstance(section_config['genres'], list):
+                        return False, f"{section}.genres must be a list"
 
-                # Check year values
-                if 'before' in years and not isinstance(years['before'], int):
-                    return False, f"{section}.years.before must be an integer"
-                if 'after' in years and not isinstance(years['after'], int):
-                    return False, f"{section}.years.after must be an integer"
-                if 'between' in years:
-                    if not isinstance(years['between'], list) or len(years['between']) != 2:
-                        return False, f"{section}.years.between must be a list of two integers"
-                    if not all(isinstance(y, int) for y in years['between']):
-                        return False, f"{section}.years.between values must be integers"
+                # Validate years if present
+                if 'years' in section_config:
+                    years = section_config['years']
+                    if not isinstance(years, dict):
+                        return False, f"{section}.years must be a dictionary"
 
-        # Validate min_rating
+                    # Check year values
+                    if 'before' in years and not isinstance(years['before'], int):
+                        return False, f"{section}.years.before must be an integer"
+                    if 'after' in years and not isinstance(years['after'], int):
+                        return False, f"{section}.years.after must be an integer"
+                    if 'between' in years:
+                        if not isinstance(years['between'], list) or len(years['between']) != 2:
+                            return False, f"{section}.years.between must be a list of two integers"
+                        if not all(isinstance(y, int) for y in years['between']):
+                            return False, f"{section}.years.between values must be integers"
+
+        # Validate min_rating if present
         if 'min_rating' in filter_config:
             if not isinstance(filter_config['min_rating'], (int, float)):
                 return False, "min_rating must be a number"
