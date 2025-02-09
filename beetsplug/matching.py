@@ -51,7 +51,6 @@ def artist_distance(str1: str, str2: str) -> float:
         best_match = min(hooks.string_dist(artist1, artist2) for artist2 in artists2)
         matches.append(best_match)
 
-    # Return average distance (note: hooks.string_dist returns distance, not similarity)
     return sum(matches) / len(matches)
 
 
@@ -60,55 +59,27 @@ def plex_track_distance(
     plex_track: Track,
     config: Optional[dict] = None
 ) -> Tuple[float, hooks.Distance]:
-    """Calculate distance between a beets Item and Plex Track.
+    """Calculate distance between a beets Item and Plex Track."""
+    dist = hooks.Distance()
 
-    Args:
-        item: Beets library item
-        plex_track: Plex track
-        config: Optional configuration dict with weights
-
-    Returns:
-        tuple: (final_score, detailed_distance)
-    """
-    # Default weights with only title, artist, and album
-    weights = {
-        'title': 0.45,      # Title most important
-        'artist': 0.35,     # Artist next
-        'album': 0.20,      # Album title
-    }
-
-    if config and 'weights' in config:
-        weights.update(config['weights'])
-
-    # Create Distance object with weights
-    dist = hooks.Distance(weights)
-
-    # Title distance (clean and compare)
+    # Title comparison
     title1 = clean_string(item.title)
     title2 = clean_string(plex_track.title)
-    title_dist = hooks.string_dist(title1, title2)
-    dist.add_ratio('title', title_dist, 1.0)
+    dist.add_string('title', title1, title2)
 
-    # Artist distance (with multiple artist handling)
+    # Artist comparison (using our custom artist_distance)
     artist1 = item.artist
     artist2 = plex_track.originalTitle or plex_track.artist().title
-    artist_dist = artist_distance(artist1, artist2)
-    dist.add_ratio('artist', artist_dist, 1.0)
+    dist.add_ratio('artist', artist_distance(artist1, artist2), 1.0)
 
-    # Album distance
+    # Album comparison
     album1 = clean_string(item.album)
     album2 = clean_string(plex_track.parentTitle)
-    album_dist = hooks.string_dist(album1, album2)
-    dist.add_ratio('album', album_dist, 1.0)
+    dist.add_string('album', album1, album2)
 
-    # Calculate weighted score
-    total_distance = sum(
-        dist.distance(key) * weights[key]
-        for key in weights.keys()
-    )
+    # Distance ranges from 0-1 where 0 is a perfect match
+    # Convert to similarity score where 1 is perfect match
+    score = 1 - dist.distance()
 
-    # Convert distance to similarity score (0-1)
-    final_score = 1 - min(total_distance, 1.0)
-
-    return final_score, dist
+    return score, dist
 
