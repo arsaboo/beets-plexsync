@@ -60,33 +60,66 @@ def plex_track_distance(
     config: Optional[dict] = None
 ) -> Tuple[float, hooks.Distance]:
     """Calculate distance between a beets Item and Plex Track."""
-    # Define weights
-    weights = {
+    # Define base weights that will be adjusted based on available fields
+    base_weights = {
         'title': 0.45,    # Title most important
         'artist': 0.35,   # Artist next
         'album': 0.20,    # Album title
     }
 
-    # Create distance object with initial weights
+    # Create distance object
     dist = hooks.Distance()
+
+    # Check which fields are available
+    has_title = bool(item.title and item.title.strip())
+    has_artist = bool(item.artist and item.artist.strip())
+    has_album = bool(item.album and item.album.strip())
+
+    # Calculate actual weights based on available fields
+    available_fields = []
+    if has_title:
+        available_fields.append('title')
+    if has_artist:
+        available_fields.append('artist')
+    if has_album:
+        available_fields.append('album')
+
+    if not available_fields:
+        return 0.0, dist  # No fields to compare
+
+    # Redistribute weights
+    total_base_weight = sum(base_weights[f] for f in available_fields)
+    weights = {
+        field: base_weights[field] / total_base_weight
+        for field in available_fields
+    }
+
     dist._weights.update(weights)
 
-    # Title comparison
-    title1 = clean_string(item.title)
-    title2 = clean_string(plex_track.title)
-    dist.add_string('title', title1, title2)
+    # Album comparison first (if available)
+    if has_album:
+        album1 = clean_string(item.album)
+        album2 = clean_string(plex_track.parentTitle)
+        album_dist = hooks.string_dist(album1, album2)
+        dist.add_ratio('album', album_dist, 1.0)
 
-    # Artist comparison (using our custom artist_distance)
-    artist1 = item.artist
-    artist2 = plex_track.originalTitle or plex_track.artist().title
-    dist.add_ratio('artist', artist_distance(artist1, artist2), 1.0)
+        # If we only have album and it's a perfect match, return perfect score
+        if len(available_fields) == 1 and album_dist == 0:
+            return 1.0, dist
 
-    # Album comparison
-    album1 = clean_string(item.album)
-    album2 = clean_string(plex_track.parentTitle)
-    dist.add_string('album', album1, album2)
+    # Title comparison (if available)
+    if has_title:
+        title1 = clean_string(item.title)
+        title2 = clean_string(plex_track.title)
+        dist.add_string('title', title1, title2)
 
-    # Get total distance - it's a property, not a method
+    # Artist comparison (if available)
+    if has_artist:
+        artist1 = item.artist
+        artist2 = plex_track.originalTitle or plex_track.artist().title
+        dist.add_ratio('artist', artist_distance(artist1, artist2), 1.0)
+
+    # Get total distance
     total_dist = dist.distance
 
     # Convert to similarity score where 1 is perfect match
