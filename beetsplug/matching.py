@@ -70,8 +70,6 @@ def plex_track_distance(
     Returns:
         tuple: (final_score, detailed_distance)
     """
-    dist = hooks.Distance()
-
     # Default weights with only title, artist, and album
     weights = {
         'title': 0.45,      # Title most important
@@ -81,6 +79,9 @@ def plex_track_distance(
 
     if config and 'weights' in config:
         weights.update(config['weights'])
+
+    # Create Distance object with weights
+    dist = hooks.Distance(weights)
 
     # Title distance (clean and compare)
     title1 = clean_string(item.title)
