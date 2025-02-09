@@ -86,9 +86,11 @@ def plex_track_distance(
     album2 = clean_string(plex_track.parentTitle)
     dist.add_string('album', album1, album2)
 
-    # Distance ranges from 0-1 where 0 is a perfect match
+    # Get total distance - it's a property, not a method
+    total_dist = dist.distance
+
     # Convert to similarity score where 1 is perfect match
-    score = 1 - dist.distance()
+    score = 1 - total_dist
 
     return score, dist
 
