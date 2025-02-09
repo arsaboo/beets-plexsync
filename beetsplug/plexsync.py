@@ -902,7 +902,7 @@ class PlexSync(BeetsPlugin):
         text = ' '.join(text.split())
         return text
 
-    def find_closest_match(self, title, lst):
+    def find_closest_match(self, title, lst, is_soundtrack=False):
         matches = []
         for track in lst:
             # Get raw string values
@@ -949,6 +949,18 @@ class PlexSync(BeetsPlugin):
                 title_weight = 0.4
                 artist_weight = 0.4
                 album_weight = 0.2
+
+            # Adjust weights based on context
+            if is_soundtrack:
+                # For soundtracks, album matching is more important
+                album_weight = 0.5
+                title_weight = 0.3
+                artist_weight = 0.2
+            else:
+                # Standard weights
+                album_weight = 0.2
+                title_weight = 0.5
+                artist_weight = 0.3
 
             # Calculate final score
             combined_score = (
@@ -1353,39 +1365,42 @@ class PlexSync(BeetsPlugin):
         self._log.debug("Searching with title='{}', album='{}', artist='{}'", title, album, artist)
 
         try:
-            # Try different search strategies in order of specificity
+            # Try different search strategies in order
             tracks = []
 
-            if title:
-                # Strategy 1: Search by title only first
-                tracks = self.music.searchTracks(**{"track.title": title}, limit=50)
-                self._log.debug("Title-only search found {} tracks", len(tracks))
+            # Strategy 1: If we have an album name from a movie soundtrack, search by album first
+            if album and any(x in album.lower() for x in ['movie', 'soundtrack', 'original']):
+                tracks = self.music.searchTracks(**{"album.title": album}, limit=100)
+                self._log.debug("Album-first search found {} tracks", len(tracks))
 
-                if not tracks and album:
-                    # Strategy 2: Try album-only search if title search failed
-                    tracks = self.music.searchTracks(**{"album.title": album}, limit=50)
-                    self._log.debug("Album-only search found {} tracks", len(tracks))
+            # Strategy 2: If first strategy didn't work or wasn't applicable, try combined search
+            if not tracks and album and title:
+                tracks = self.music.searchTracks(
+                    **{"album.title": album, "track.title": title},
+                    limit=100
+                )
+                self._log.debug("Combined album-title search found {} tracks", len(tracks))
 
-                if not tracks and artist:
-                    # Strategy 3: Try artist-only search if previous searches failed
-                    tracks = self.music.searchTracks(**{"artist.title": artist}, limit=50)
-                    self._log.debug("Artist-only search found {} tracks", len(tracks))
-
-            elif album:
-                # Strategy 4: Start with album if no title
-                tracks = self.music.searchTracks(**{"album.title": album}, limit=50)
+            # Strategy 3: Try album-only search if no tracks found yet
+            if not tracks and album:
+                tracks = self.music.searchTracks(**{"album.title": album}, limit=100)
                 self._log.debug("Album-only search found {} tracks", len(tracks))
 
-            elif artist:
-                # Strategy 5: Start with artist if no title or album
-                tracks = self.music.searchTracks(**{"artist.title": artist}, limit=50)
+            # Strategy 4: Try title-only search if still no tracks
+            if not tracks and title:
+                tracks = self.music.searchTracks(**{"track.title": title}, limit=100)
+                self._log.debug("Title-only search found {} tracks", len(tracks))
+
+            if not tracks and artist:
+                # Strategy 5: Try artist-only search as last resort
+                tracks = self.music.searchTracks(**{"artist.title": artist}, limit=100)
                 self._log.debug("Artist-only search found {} tracks", len(tracks))
 
             if not tracks:
                 self._log.info("No matching tracks found")
                 return None
 
-            # Filter results manually with more lenient matching
+            # Filter results with more sophisticated matching
             filtered_tracks = []
             for track in tracks:
                 track_artist = getattr(track, 'originalTitle', None) or track.artist().title
@@ -1395,32 +1410,39 @@ class PlexSync(BeetsPlugin):
                 # Debug log each track being considered
                 self._log.debug("Considering track: {} - {} - {}", track_album, track_title, track_artist)
 
-                # More lenient fuzzy matching thresholds
+                # More sophisticated matching thresholds
                 title_match = not title or self.get_fuzzy_score(title.lower(), track_title.lower()) > 0.4
                 album_match = not album or self.get_fuzzy_score(album.lower(), track_album.lower()) > 0.4
 
-                # For artist, split and check each artist name
+                # Handle multiple artists better
                 artist_match = True
                 if artist:
-                    track_artists = [a.strip().lower() for a in track_artist.split(',')]
-                    search_artists = [a.strip().lower() for a in artist.split(',')]
+                    track_artists = set(a.strip().lower() for a in track_artist.split(','))
+                    search_artists = set(a.strip().lower() for a in artist.split(','))
 
-                    # Check if any search artist matches any track artist
-                    artist_match = any(
-                        any(self.get_fuzzy_score(search_a, track_a) > 0.4
-                            for track_a in track_artists)
-                        for search_a in search_artists
-                    )
+                    # Calculate artist match score using intersection
+                    common_artists = track_artists.intersection(search_artists)
+                    total_artists = track_artists.union(search_artists)
+                    artist_score = len(common_artists) / len(total_artists) if total_artists else 0
 
-                # A track matches if either:
-                # 1. It matches all provided criteria (with lower thresholds)
-                # 2. It has a very strong match on at least one criterion
-                strong_title_match = title and self.get_fuzzy_score(title.lower(), track_title.lower()) > 0.8
-                strong_album_match = album and self.get_fuzzy_score(album.lower(), track_album.lower()) > 0.8
+                    # Consider it a match if we have at least 30% artist overlap
+                    artist_match = artist_score >= 0.3
 
-                if (title_match and album_match and artist_match) or strong_title_match or strong_album_match:
+                # Enhanced matching criteria:
+                # 1. Perfect album match (for soundtracks)
+                perfect_album = album and track_album and album.lower() == track_album.lower()
+                # 2. Strong title match
+                strong_title = title and self.get_fuzzy_score(title.lower(), track_title.lower()) > 0.8
+                # 3. Standard criteria
+                standard_match = (title_match and album_match and artist_match)
+
+                if perfect_album or strong_title or standard_match:
                     filtered_tracks.append(track)
-                    self._log.debug("Matched: {} - {} - {}", track_album, track_title, track_artist)
+                    self._log.debug(
+                        "Matched: {} - {} - {} (Perfect album: {}, Strong title: {}, Standard: {})",
+                        track_album, track_title, track_artist,
+                        perfect_album, strong_title, standard_match
+                    )
 
             if not filtered_tracks:
                 self._log.info("No matching tracks found after filtering")
@@ -1433,8 +1455,8 @@ class PlexSync(BeetsPlugin):
                 "artist": artist if artist else "",
             }
 
-            # Sort matches by relevance
-            sorted_tracks = self.find_closest_match(song_dict, filtered_tracks)
+            # Sort matches by relevance with adjusted weights for soundtrack albums
+            sorted_tracks = self.find_closest_match(song_dict, filtered_tracks, is_soundtrack=bool(album))
 
             # Use beets UI formatting for the query header
             print_(ui.colorize('text_highlight', '\nChoose candidates for: ') +
