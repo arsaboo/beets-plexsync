@@ -908,33 +908,69 @@ class PlexSync(BeetsPlugin):
             # Get raw string values
             source_title = title.get('title', '')
             source_album = title.get('album', '')
-            source_artists = [a.strip() for a in title.get('artist', '').split(',')]
+            source_artists = set(a.strip().lower() for a in title.get('artist', '').split(','))
 
+            # Clean up and normalize track title/artists
             track_title = track.title
             track_album = track.parentTitle
-            track_artists = [a.strip() for a in (getattr(track, 'originalTitle', None)
-                            or track.artist().title).split(',')]
+
+            # Clean up feature text from title for better matching
+            clean_track_title = re.sub(r'\s*[\(\[]feat\.[^\)\]]*[\)\]]', '', track_title, flags=re.IGNORECASE)
+            clean_source_title = re.sub(r'\s*[\(\[]feat\.[^\)\]]*[\)\]]', '', source_title, flags=re.IGNORECASE)
+
+            # Get track artists and normalize
+            track_artist_raw = getattr(track, 'originalTitle', None) or track.artist().title
+            track_artists = set(a.strip().lower() for a in track_artist_raw.split(','))
+
+            # Remove common words/markers from artist names
+            artist_stopwords = {'feat', 'ft', 'featuring', '&', 'and'}
+            source_artists = {re.sub(r'\s*(?:feat\.?|ft\.?|&)\s*', '', a.lower()) for a in source_artists}
+            track_artists = {re.sub(r'\s*(?:feat\.?|ft\.?|&)\s*', '', a.lower()) for a in track_artists}
 
             # Calculate scores
-            title_score = self.get_fuzzy_score(source_title, track_title)
+            title_score = self.get_fuzzy_score(clean_source_title, clean_track_title)
             album_score = self.get_fuzzy_score(source_album, track_album) if source_album else 0
 
-            # Calculate artist match score by finding common artists
-            artist_matches = sum(1 for a1 in source_artists
-                               for a2 in track_artists
-                               if self.get_fuzzy_score(a1, a2) > 0.8)
-            max_artists = max(len(source_artists), len(track_artists))
-            artist_score = artist_matches / max_artists if max_artists > 0 else 0
+            # Calculate artist match score using set intersection
+            common_artists = source_artists.intersection(track_artists)
+            total_artists = source_artists.union(track_artists)
+            artist_score = len(common_artists) / len(total_artists) if total_artists else 0
 
-            # Weight the scores (50% title, 30% album, 20% artists)
-            combined_score = (title_score * 0.5) + (album_score * 0.3) + (artist_score * 0.2)
+            # Extra boost if we have exact artist matches
+            if len(common_artists) == len(source_artists):
+                artist_score += 0.2  # Bonus for having all source artists
+
+            # Title matching is more important for exact matches
+            if title_score > 0.9:  # Almost exact title match
+                title_weight = 0.6
+                artist_weight = 0.3
+                album_weight = 0.1
+            else:
+                title_weight = 0.4
+                artist_weight = 0.4
+                album_weight = 0.2
+
+            # Calculate final score
+            combined_score = (
+                (title_score * title_weight) +
+                (artist_score * artist_weight) +
+                (album_score * album_weight)
+            )
 
             matches.append((track, combined_score))
 
             # Debug logging
             self._log.debug(
-                "Match scores for {} - {}: Title={:.2f}, Album={:.2f}, Artist={:.2f}, Combined={:.2f}",
-                track.parentTitle, track.title, title_score, album_score, artist_score, combined_score
+                "Match details for {} - {}:\n"
+                "  Title: {} vs {} (Score: {:.2f})\n"
+                "  Artists: {} vs {} (Score: {:.2f}, Common: {})\n"
+                "  Album: {} vs {} (Score: {:.2f})\n"
+                "  Final Score: {:.2f}",
+                track.parentTitle, track.title,
+                clean_source_title, clean_track_title, title_score,
+                source_artists, track_artists, artist_score, common_artists,
+                source_album, track_album, album_score,
+                combined_score
             )
 
         matches.sort(key=lambda x: x[1], reverse=True)
@@ -1316,23 +1352,40 @@ class PlexSync(BeetsPlugin):
         # Log the search parameters for debugging
         self._log.debug("Searching with title='{}', album='{}', artist='{}'", title, album, artist)
 
-        # Search with minimal parameters first to get a broader result set
-        search_params = {}
-        if title:
-            search_params["track.title"] = title
-
         try:
-            # Do initial search with just title if provided, otherwise use album
-            if search_params:
-                tracks = self.music.searchTracks(**search_params, limit=50)
+            # Try different search strategies in order of specificity
+            tracks = []
+
+            if title:
+                # Strategy 1: Search by title only first
+                tracks = self.music.searchTracks(**{"track.title": title}, limit=50)
+                self._log.debug("Title-only search found {} tracks", len(tracks))
+
+                if not tracks and album:
+                    # Strategy 2: Try album-only search if title search failed
+                    tracks = self.music.searchTracks(**{"album.title": album}, limit=50)
+                    self._log.debug("Album-only search found {} tracks", len(tracks))
+
+                if not tracks and artist:
+                    # Strategy 3: Try artist-only search if previous searches failed
+                    tracks = self.music.searchTracks(**{"artist.title": artist}, limit=50)
+                    self._log.debug("Artist-only search found {} tracks", len(tracks))
+
             elif album:
+                # Strategy 4: Start with album if no title
                 tracks = self.music.searchTracks(**{"album.title": album}, limit=50)
-            else:
+                self._log.debug("Album-only search found {} tracks", len(tracks))
+
+            elif artist:
+                # Strategy 5: Start with artist if no title or album
                 tracks = self.music.searchTracks(**{"artist.title": artist}, limit=50)
+                self._log.debug("Artist-only search found {} tracks", len(tracks))
 
-            self._log.debug("Initial search returned {} tracks", len(tracks))
+            if not tracks:
+                self._log.info("No matching tracks found")
+                return None
 
-            # Filter results manually for better matching
+            # Filter results manually with more lenient matching
             filtered_tracks = []
             for track in tracks:
                 track_artist = getattr(track, 'originalTitle', None) or track.artist().title
@@ -1342,9 +1395,9 @@ class PlexSync(BeetsPlugin):
                 # Debug log each track being considered
                 self._log.debug("Considering track: {} - {} - {}", track_album, track_title, track_artist)
 
-                # Implement fuzzy matching for each field if provided
-                title_match = not title or self.get_fuzzy_score(title.lower(), track_title.lower()) > 0.6
-                album_match = not album or self.get_fuzzy_score(album.lower(), track_album.lower()) > 0.6
+                # More lenient fuzzy matching thresholds
+                title_match = not title or self.get_fuzzy_score(title.lower(), track_title.lower()) > 0.4
+                album_match = not album or self.get_fuzzy_score(album.lower(), track_album.lower()) > 0.4
 
                 # For artist, split and check each artist name
                 artist_match = True
@@ -1354,17 +1407,23 @@ class PlexSync(BeetsPlugin):
 
                     # Check if any search artist matches any track artist
                     artist_match = any(
-                        any(self.get_fuzzy_score(search_a, track_a) > 0.6
+                        any(self.get_fuzzy_score(search_a, track_a) > 0.4
                             for track_a in track_artists)
                         for search_a in search_artists
                     )
 
-                if title_match and album_match and artist_match:
+                # A track matches if either:
+                # 1. It matches all provided criteria (with lower thresholds)
+                # 2. It has a very strong match on at least one criterion
+                strong_title_match = title and self.get_fuzzy_score(title.lower(), track_title.lower()) > 0.8
+                strong_album_match = album and self.get_fuzzy_score(album.lower(), track_album.lower()) > 0.8
+
+                if (title_match and album_match and artist_match) or strong_title_match or strong_album_match:
                     filtered_tracks.append(track)
                     self._log.debug("Matched: {} - {} - {}", track_album, track_title, track_artist)
 
             if not filtered_tracks:
-                self._log.info("No matching tracks found")
+                self._log.info("No matching tracks found after filtering")
                 return None
 
             # Create song_dict for match scoring
