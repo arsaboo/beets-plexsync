@@ -988,15 +988,7 @@ class PlexSync(BeetsPlugin):
         return 0.8 * (intersection / union if union > 0 else 0)
 
     def find_closest_match(self, song, tracks):
-        """Find best matching tracks using string similarity with dynamic weights.
-
-        Args:
-            song: Dictionary containing song metadata
-            tracks: List of Plex tracks to search
-
-        Returns:
-            list: Sorted list of (track, score) tuples
-        """
+        """Find best matching tracks using string similarity with dynamic weights."""
         matches = []
 
         # Default config with only title, artist, and album weights
@@ -1018,7 +1010,7 @@ class PlexSync(BeetsPlugin):
             score, dist = plex_track_distance(temp_item, track, config)
             matches.append((track, score))
 
-            # Debug logging
+            # Debug logging - access penalties directly from dist._penalties
             self._log.debug(
                 "Match scores for {} - {}:\n"
                 "  Title: {} vs {} (ratio: {:.3f})\n"
@@ -1026,9 +1018,9 @@ class PlexSync(BeetsPlugin):
                 "  Artist: {} vs {} (ratio: {:.3f})\n"
                 "  Final Score: {:.3f}",
                 track.parentTitle, track.title,
-                temp_item.title, track.title, dist.distance('title'),
-                temp_item.album, track.parentTitle, dist.distance('album'),
-                temp_item.artist, track.artist().title, dist.distance('artist'),
+                temp_item.title, track.title, dist._penalties.get('title', 0.0),
+                temp_item.album, track.parentTitle, dist._penalties.get('album', 0.0),
+                temp_item.artist, track.artist().title, dist._penalties.get('artist', 0.0),
                 score
             )
 
