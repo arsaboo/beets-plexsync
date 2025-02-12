@@ -26,7 +26,7 @@ import spotipy
 from beets import config, ui
 from beets.dbcore import types
 from beets.dbcore.query import MatchQuery
-from beets.library import DateType
+from beets.library import Item, DateType  # Added Item to import
 from beets.plugins import BeetsPlugin
 from beets.ui import input_, print_
 from bs4 import BeautifulSoup
@@ -40,6 +40,7 @@ from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
 
 from beetsplug.caching import Cache
 from beetsplug.llm import search_track_info
+from beetsplug.matching import plex_track_distance, clean_string
 
 
 class Song(BaseModel):
@@ -986,148 +987,42 @@ class PlexSync(BeetsPlugin):
         # Reduce score for partial matches
         return 0.8 * (intersection / union if union > 0 else 0)
 
+    def ensure_float(value):
+        """Safely convert a numeric or list of numerics to a float."""
+        if isinstance(value, list):
+            return float(sum(value) / len(value)) if value else 0.0
+        return float(value)
+
     def find_closest_match(self, song, tracks):
-        """Find best matching tracks using string similarity with dynamic weights.
-
-        Args:
-            song: Dictionary containing song metadata
-            tracks: List of Plex tracks to search
-
-        Returns:
-            list: Sorted list of (track, score) tuples
-        """
+        """Find best matching tracks using string similarity with dynamic weights."""
         matches = []
 
-        # Get source values
-        source_title = song.get('title', '').strip()
-        source_album = song.get('album', '').strip()
-        source_artists = [a.strip() for a in song.get('artist', '').split(',')]
+        # Default config with only title, artist, and album weights
+        config = {
+            'weights': {
+                'title': 0.45,      # Title most important
+                'artist': 0.35,     # Artist next
+                'album': 0.20,      # Album title
+            }
+        }
 
-        # Base weights
-        title_weight = 0.45  # 45%
-        artist_weight = 0.35 # 35%
-        album_weight = 0.20  # 20%
-
-        # Additional score boosts
-        PERFECT_ALBUM_BOOST = 0.15  # Boost when album exactly matches
-        ALBUM_CONTAINS_BOOST = 0.10  # Boost when source album contains target album
-        PERFECT_TITLE_BOOST = 0.15   # Boost for exact title match
-        ARTIST_MATCH_BOOST = 0.10    # Boost for each matching artist
+        # Create a temporary beets Item for comparison
+        temp_item = Item()
+        temp_item.title = song.get('title', '').strip()
+        temp_item.artist = song.get('artist', '').strip()
+        temp_item.album = song.get('album', '').strip() if song.get('album') else ''
 
         for track in tracks:
-            # Get track values
-            track_title = track.title.strip()
-            track_album = track.parentTitle.strip()
-            track_artist = getattr(track, 'originalTitle', None) or track.artist().title
-            track_artists = [a.strip() for a in track_artist.split(',')]
+            score, dist = plex_track_distance(temp_item, track, config)
+            matches.append((track, score))
 
-            # Calculate base scores
-            title_score = self.calculate_string_similarity(source_title, track_title)
-            album_score = self.calculate_string_similarity(source_album, track_album) if source_album else 0
-            artist_score = self.calculate_artist_similarity(source_artists, track_artists)
-
-            # Calculate boosts
-            boosts = 0.0
-
-            # Album boosts
-            if source_album and track_album:
-                if source_album.lower() == track_album.lower():
-                    boosts += PERFECT_ALBUM_BOOST
-                elif track_album.lower() in source_album.lower():
-                    # Source album contains target album (e.g. "Kudrat (OST)" contains "Kudrat")
-                    boosts += ALBUM_CONTAINS_BOOST
-                elif source_album.lower() in track_album.lower():
-                    # Target album contains source album
-                    boosts += ALBUM_CONTAINS_BOOST * 0.5  # Half boost for this case
-
-            # Title boost
-            if source_title.lower() == track_title.lower():
-                boosts += PERFECT_TITLE_BOOST
-
-            # Artist boost - for each matching artist
-            matching_artists = set(a.lower() for a in source_artists).intersection(
-                a.lower() for a in track_artists
-            )
-            boosts += ARTIST_MATCH_BOOST * (len(matching_artists) / max(len(source_artists), 1))
-
-            # Calculate weighted base score
-            base_score = (
-                (title_weight * title_score) +
-                (artist_weight * artist_score) +
-                (album_weight * album_score)
-            )
-
-            # Apply boosts (capped at 1.0)
-            final_score = min(1.0, base_score + boosts)
-
-            matches.append((track, final_score))
-
-            # Debug logging
-            self._log.debug(
-                "Match scores for {} - {}:\n"
-                "  Title: {} vs {} (Score: {:.3f}, Weight: {:.2f})\n"
-                "  Album: {} vs {} (Score: {:.3f}, Weight: {:.2f})\n"
-                "  Artist: {} vs {} (Score: {:.3f}, Weight: {:.2f})\n"
-                "  Boosts: {:.3f}\n"
-                "  Final Score: {:.3f}",
-                track_album, track_title,
-                source_title, track_title, title_score, title_weight,
-                source_album, track_album, album_score, album_weight,
-                source_artists, track_artists, artist_score, artist_weight,
-                boosts,
-                final_score
-            )
+            # Debug logging - simpler format with positional args
+            self._log.debug("Track: {} - {}, Score: {:.3f}",
+                          track.parentTitle, track.title, score)
 
         # Sort by score descending
         matches.sort(key=lambda x: x[1], reverse=True)
         return matches
-
-    def import_apple_playlist(self, url):
-        """Import Apple Music playlist with caching."""
-        # Generate cache key from URL
-        playlist_id = url.split('/')[-1]
-
-        # Check cache
-        cached_data = self.cache.get_playlist_cache(playlist_id, 'apple')
-        if (cached_data):
-            self._log.info("Using cached Apple Music playlist data")
-            return cached_data
-
-        song_list = []
-
-        # Send a GET request to the URL and get the HTML content
-        response = requests.get(url)
-        content = response.text
-
-        # Create a BeautifulSoup object with the HTML content
-        soup = BeautifulSoup(content, "html.parser")
-        try:
-            data = soup.find("script", id="serialized-server-data").text
-        except AttributeError:
-            self._log.debug("Error parsing Apple Music playlist")
-            return None
-        # load the data as a JSON object
-        data = json.loads(data)
-        songs = data[0]["data"]["sections"][1]["items"]
-
-        # Create an empty list to store the songs
-        song_list = []
-        # Loop through each song element
-        for song in songs:
-            # Find and store the song title
-            title = song["title"].strip()
-            album = song["tertiaryLinks"][0]["title"]
-            # Find and store the song artist
-            artist = song["subtitleLinks"][0]["title"]
-            # Create a dictionary with the song information
-            song_dict = {
-                "title": title.strip(),
-                "album": album.strip(),
-                "artist": artist.strip(),
-            }
-            # Append the dictionary to the list of songs
-            song_list.append(song_dict)
-        return song_list
 
     def _plexupdate(self):
         """Update Plex music library."""
@@ -1673,7 +1568,7 @@ class PlexSync(BeetsPlugin):
                 )
                 if len(tracks) == 0:
                     # Try with simplified title (no parentheses)
-                    song["title"] = re.sub(r"\(.*\)", "", song["title"]).strip()
+                    song["title"] = clean_string(song["title"])
                     tracks = self.music.searchTracks(**{"track.title": song["title"]}, limit=50)
         except Exception as e:
             self._log.debug(
@@ -1701,15 +1596,11 @@ class PlexSync(BeetsPlugin):
                 # If user skipped, the negative cache was already stored, return None
                 return None
 
-            # Otherwise try automatic matching
-            for track, score in sorted_tracks:
-                if track.originalTitle is not None:
-                    plex_artist = track.originalTitle
-                else:
-                    plex_artist = track.artist().title
-                if artist in plex_artist:
-                    self._cache_result(cache_key, track)
-                    return track
+            # Otherwise try automatic matching with improved threshold
+            best_match = sorted_tracks[0]
+            if best_match[1] >= 0.8:  # Require 80% match score for automatic matching
+                self._cache_result(cache_key, best_match[0])
+                return best_match[0]
 
         # Try LLM cleaning if enabled and not already attempted
         if not llm_attempted and self.search_llm and config["plexsync"]["use_llm_search"].get(bool):
@@ -2667,20 +2558,22 @@ class PlexSync(BeetsPlugin):
         if not isinstance(filter_config, dict):
             return False, "Filter configuration must be a dictionary"
 
-        # Check exclude/include sections
+        # Check exclude/include sections if they exist
         for section in ['exclude', 'include']:
             if section in filter_config:
                 if not isinstance(filter_config[section], dict):
                     return False, f"{section} section must be a dictionary"
 
-                # Validate genres
-                if 'genres' in filter_config[section]:
-                    if not isinstance(filter_config[section]['genres'], list):
+                section_config = filter_config[section]
+
+                # Validate genres if present
+                if 'genres' in section_config:
+                    if not isinstance(section_config['genres'], list):
                         return False, f"{section}.genres must be a list"
 
-                # Validate years
-                if 'years' in filter_config[section]:
-                    years = filter_config[section]['years']
+                # Validate years if present
+                if 'years' in section_config:
+                    years = section_config['years']
                     if not isinstance(years, dict):
                         return False, f"{section}.years must be a dictionary"
 
@@ -2695,7 +2588,7 @@ class PlexSync(BeetsPlugin):
                         if not all(isinstance(y, int) for y in years['between']):
                             return False, f"{section}.years.between values must be integers"
 
-        # Validate min_rating
+        # Validate min_rating if present
         if 'min_rating' in filter_config:
             if not isinstance(filter_config['min_rating'], (int, float)):
                 return False, "min_rating must be a number"
