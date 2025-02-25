@@ -38,6 +38,7 @@ Use `beet plex_smartplaylists` to generate or manage custom playlists in Plex. T
       - Import playlists from external services (Spotify, Apple Music, YouTube, etc.) and local M3U8 files
       - Configure multiple source URLs and file paths per playlist
       - For M3U8 files, use paths relative to beets config directory or absolute paths
+      - Support for custom HTTP POST requests to fetch playlists
       - Control playlist behavior with options:
         - `manual_search`: Enable/disable manual matching for unmatched tracks
         - `clear_playlist`: Clear existing playlist before adding new tracks
@@ -54,9 +55,26 @@ You can use config filters to finetune any playlist. You can specify the `genre`
 - **Playlist Clear**: `beet plexplaylistclear` clears a Plex playlist. Use the `-m` flag to specify the playlist name.
 
 ### Playlist Import
-- **Playlist Import**: `beet plexplaylistimport` imports individual playlists from Spotify, Apple Music, Gaana.com, JioSaavn, Youtube, Tidal, and M3U8 files. Use the `-m` flag to specify the playlist name and:
+- **Playlist Import**: `beet plexplaylistimport` imports individual playlists from Spotify, Apple Music, Gaana.com, JioSaavn, Youtube, Tidal, M3U8 files, and custom APIs. Use the `-m` flag to specify the playlist name and:
   - For online services: use the `-u` flag to supply the full playlist url
   - For M3U8 files: use the `-u` flag with the file path (relative to beets config directory or absolute path)
+  - For custom APIs: configure POST requests in config.yaml (see Configuration section)
+
+  You can define multiple sources per playlist in your config including custom POST endpoints:
+  ```yaml
+  - name: "Mixed Sources Playlist"
+    type: "imported"
+    sources:
+      - "https://open.spotify.com/playlist/37i9dQZF1DX0kbJZpiYdZl"  # Spotify
+      - "playlists/local.m3u8"                                      # Local M3U8
+      - type: "post"                                                # Custom API
+        server_url: "http://localhost:8000/api/playlist"
+        headers:
+          Authorization: "Bearer your-token"
+        payload:
+          playlist_url: "https://example.com/playlist/123"
+  ```
+
   For each import session, a detailed log file is created in your beets config directory (named `<playlist_name>_import.log`) that records:
   - Tracks that couldn't be found in your Plex library
   - Low-rated tracks that were skipped
@@ -141,6 +159,42 @@ spotify:
   You can get started with `beet plexsonic -p "YOUR_PROMPT"` to create the playlist based on YOUR_PROMPT. The default playlist name is `SonicSage` (wink wink), you can modify it using `-m` flag. By default, it requests 10 tracks from the AI model. Use the `-n` flag to change the number of tracks requested. Finally, if you prefer to clear the playlist before adding the new songs, you can add `-c` flag. So, to create a new classical music playlist, you can use something like `beet plexsonic -c -n 10 -p "classical music, romanticism era, like Schubert, Chopin, Liszt"`.
 
   Please note that not all tracks returned by the AI model may be available in your library or matched perfectly, affecting the size of the playlist created. The command will log the tracks that could not be found on your library. You can improve the matching by enabling `manual_search` (see Advanced Usage). This is working extremely well for me. I would love to hear your comments/feedback to improve this feature.
+
+* To configure imported playlists, you can use various source types including custom POST requests:
+
+  ```yaml
+  plexsync:
+    playlists:
+      items:
+        - name: "Custom Playlist"
+          type: "imported"
+          sources:
+            # Standard URL sources
+            - "https://open.spotify.com/playlist/37i9dQZF1DX0kbJZpiYdZl"
+            - "playlists/local_hits.m3u8"
+            # POST request source
+            - type: "post"
+              server_url: "http://localhost:8000/api/playlist"
+              headers:
+                Authorization: "Bearer your-token"
+                Content-Type: "application/json"
+              payload:
+                playlist_url: "https://example.com/playlist/123"
+  ```
+
+  The POST request expects a JSON response with this format:
+  ```json
+  {
+      "song_list": [
+          {
+              "title": "Song Title",
+              "artist": "Artist Name",
+              "album": "Album Name",  # Optional
+              "year": "2024"         # Optional
+          }
+      ]
+  }
+  ```
 
 * `beet plexsync [-f]`: allows you to import all the data from your Plex library inside beets. Run the command `beet plexsync` and it will obtain `guid`, `ratingkey`, `userrating`, `skipcount`, `viewcount`, `lastviewedat`, `lastratedat`, and `plex_updated`. See details about these attributes [here][plaxapi]. By default, `plexsync` will not overwrite information for tracks that are already rated. If you want to overwrite all the details again, use the `-f` flag, i.e., `beet plexsync -f` will force update the entire library with fresh information from Plex. This can be useful if you have made significant changes to your Plex library (e.g., updated ratings).
 
