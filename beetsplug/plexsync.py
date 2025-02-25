@@ -3141,6 +3141,75 @@ class PlexSync(BeetsPlugin):
             self._log.error("Error importing M3U8 playlist {}: {}", filepath, e)
             return []
 
+    def import_post_playlist(self, source_config):
+        """Import playlist from a POST request endpoint with caching."""
+        # Generate cache key from URL in payload
+        playlist_url = source_config.get("payload", {}).get("playlist_url")
+        if not playlist_url:
+            self._log.error("No playlist_url provided in POST request payload")
+            return []
+
+        playlist_id = playlist_url.split('/')[-1]
+
+        # Check cache
+        cached_data = self.cache.get_playlist_cache(playlist_id, 'post')
+        if (cached_data):
+            self._log.info("Using cached POST request playlist data")
+            return cached_data
+
+        server_url = source_config.get("server_url")
+        if not server_url:
+            self._log.error("No server_url provided for POST request")
+            return []
+
+        headers = source_config.get("headers", {})
+        payload = source_config.get("payload", {})
+
+        try:
+            response = requests.post(server_url, headers=headers, json=payload)
+            response.raise_for_status()  # Raise exception for non-200 status codes
+
+            data = response.json()
+            if not isinstance(data, dict) or "song_list" not in data:
+                self._log.error("Invalid response format. Expected 'song_list' in JSON response")
+                return []
+
+            # Convert response to our standard format
+            song_list = []
+            for song in data["song_list"]:
+                song_dict = {
+                    "title": song.get("title", "").strip(),
+                    "artist": song.get("artist", "").strip(),
+                    "album": song.get("album", "").strip() if song.get("album") else None,
+                }
+                # Add year if available
+                if "year" in song and song["year"]:
+                    try:
+                        year = int(song["year"])
+                        song_dict["year"] = year
+                    except (ValueError, TypeError):
+                        pass
+
+                if song_dict["title"] and song_dict["artist"]:  # Only add if we have minimum required fields
+                    song_list.append(song_dict)
+
+            # Cache successful results
+            if song_list:
+                self.cache.set_playlist_cache(playlist_id, 'post', song_list)
+                self._log.info("Cached {} tracks from POST request playlist", len(song_list))
+
+            return song_list
+
+        except requests.exceptions.RequestException as e:
+            self._log.error("Error making POST request: {}", e)
+            return []
+        except ValueError as e:
+            self._log.error("Error parsing JSON response: {}", e)
+            return []
+        except Exception as e:
+            self._log.error("Unexpected error during POST request: {}", e)
+            return []
+
     def generate_imported_playlist(self, lib, playlist_config, plex_lookup=None):
         """Generate a playlist by importing from external sources."""
         playlist_name = playlist_config.get("name", "Imported Playlist")
@@ -3206,12 +3275,14 @@ class PlexSync(BeetsPlugin):
                     else:
                         self._log.warning("Unsupported source: {}", source)
                         continue
-
-                    if tracks:
-                        all_tracks.extend(tracks)
+                elif isinstance(source, dict) and source.get("type") == "post":
+                    tracks = self.import_post_playlist(source)
                 else:
                     self._log.warning("Invalid source format: {}", source)
                     continue
+
+                if tracks:
+                    all_tracks.extend(tracks)
 
             except Exception as e:
                 self._log.error("Error importing from {}: {}", source, e)
