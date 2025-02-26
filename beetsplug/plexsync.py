@@ -1350,8 +1350,9 @@ class PlexSync(BeetsPlugin):
                 score_color = 'text_error'      # Low match
 
             # Format the line with matching and index colors
+            # Simply use the index number without colorizing
             print_(
-                f"{ui.colorize('action', str(i))}. {highlighted_album} - {highlighted_title} - "
+                f"{i}. {highlighted_album} - {highlighted_title} - "
                 f"{highlighted_artist} (Match: {ui.colorize(score_color, f'{score:.2f}')})"
             )
 
