@@ -33,9 +33,6 @@ def clean_string(s: str) -> str:
     # Improve handling of common variations in Indian movie titles
     s = s.replace("andaaz", "andaz")  # Normalize common spelling variations
 
-    # Handle common soundtrack title formats
-    s = re.sub(r"^(.*?)\s*-\s*(.*)$", r"\1 \2", s)  # "Album - Track" → "Album Track" for better matching
-
     return s.strip()
 
 
@@ -113,7 +110,7 @@ def plex_track_distance(
         # Use string_dist for album but normalize properly
         album_dist = hooks.string_dist(album1, album2)
 
-        # Check if album is contained within the other (for partial matches like "greatest hits" vs "greatest hits of the 80s")
+        # Check if album is contained within the other (for partial matches like "Andaz" in "Andaaz (1971)")
         if album1 in album2 or album2 in album1:
             # Apply a bonus for partial containment
             album_dist = max(0.0, album_dist - 0.3)
@@ -129,7 +126,7 @@ def plex_track_distance(
         title1 = clean_string(item.title)
         title2 = clean_string(plex_track.title)
 
-        # Check if one title contains the other (for partial matches like "remix" vs "remix 2020")
+        # Check if one title contains the other (for partial matches)
         if (title1 and title2) and (title1 in title2 or title2 in title1):
             # Calculate string distance
             title_dist = hooks.string_dist(title1, title2)
