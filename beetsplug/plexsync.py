@@ -1267,28 +1267,32 @@ class PlexSync(BeetsPlugin):
                 if source is None or target is None:
                     return target or ""
 
-                # Simple approach: Directly operate on the whole string
-                result = target
-                source = source.lower()
-
-                # First look for the exact source in the target
+                # Work with case-insensitive comparisons but preserve original case in output
+                source_lower = source.lower()
                 target_lower = target.lower()
+                result = target
 
-                # Try to match the whole phrase first
-                if source in target_lower:
-                    start_idx = target_lower.find(source)
-                    end_idx = start_idx + len(source)
+                # Try to match the entire source string first
+                if source_lower in target_lower:
+                    start_idx = target_lower.find(source_lower)
+                    end_idx = start_idx + len(source_lower)
                     # Use the actual case from target
                     matched_text = target[start_idx:end_idx]
-                    # Highlight the matched text
-                    highlighted = ui.colorize('action', matched_text)
+                    # Highlight using text_success (green) instead of action (blue)
+                    highlighted = ui.colorize('text_success', matched_text)
                     # Replace the match with highlighted version
                     result = target[:start_idx] + highlighted + target[end_idx:]
                     return result
 
-                # If whole phrase didn't match, try individual words
-                # Convert source and target to lists of words
-                source_words = [word for word in source.split() if len(word) > 1]
+                # Try the reverse - target string in source (especially for album titles)
+                # This ensures that if the album name appears in the source, we highlight it
+                if target_lower in source_lower:
+                    # Highlight the entire target as it's found in source
+                    return ui.colorize('text_success', target)
+
+                # If whole string matching didn't work, try individual words
+                # Convert source to list of words, excluding very short words
+                source_words = [word for word in source_lower.split() if len(word) > 2]
 
                 # For each word in source, find matches in target
                 for word in source_words:
@@ -1300,21 +1304,13 @@ class PlexSync(BeetsPlugin):
                         start, end = match.span()
                         # Get the actual case from target
                         matched_word = target[start:end]
-                        # Create highlighted version
-                        highlighted = ui.colorize('action', matched_word)
+                        # Use text_success (green) for highlighting
+                        highlighted = ui.colorize('text_success', matched_word)
 
-                        # Make sure we're not affecting any previous highlights
-                        # by recalculating positions based on current result
-                        current_lower = result.lower()
-                        offset = 0
-
-                        # Find the word in the current result
-                        match_pos = current_lower.find(word, start)
-                        if match_pos != -1:
-                            # Account for any previous highlighting that might have shifted positions
-                            prefix = result[:match_pos]
-                            suffix = result[match_pos+len(word):]
-                            result = prefix + highlighted + suffix
+                        # Apply the highlight to the result
+                        prefix = result[:start]
+                        suffix = result[end:]
+                        result = prefix + highlighted + suffix
 
                 return result
 
