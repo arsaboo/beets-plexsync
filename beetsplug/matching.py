@@ -27,6 +27,15 @@ def clean_string(s: str) -> str:
     s = re.sub(r"[&,/\\]", " and ", s)
     s = re.sub(r"\s+", " ", s)  # Normalize whitespace
 
+    # Add handling for year variations
+    s = re.sub(r"\s*\d{4}\s*$", "", s)  # Remove year at end
+
+    # Improve handling of common variations in Indian movie titles
+    s = s.replace("andaaz", "andaz")  # Normalize common spelling variations
+
+    # Handle common soundtrack title formats
+    s = re.sub(r"^(.*?)\s*-\s*(.*)$", r"\1 \2", s)  # "Album - Track" → "Album Track" for better matching
+
     return s.strip()
 
 
@@ -62,9 +71,9 @@ def plex_track_distance(
     """Calculate distance between a beets Item and Plex Track."""
     # Define base weights that will be adjusted based on available fields
     base_weights = {
-        'title': 0.45,    # Title most important
-        'artist': 0.35,   # Artist next
-        'album': 0.20,    # Album title
+        'title': 0.40,    # Title important, but slightly reduced
+        'artist': 0.30,   # Artist next
+        'album': 0.30,    # Album title - increased to match importance
     }
 
     # Create distance object
@@ -100,7 +109,15 @@ def plex_track_distance(
     if has_album:
         album1 = clean_string(item.album)
         album2 = clean_string(plex_track.parentTitle)
+
+        # Use string_dist for album but normalize properly
         album_dist = hooks.string_dist(album1, album2)
+
+        # Check if album is contained within the other (for partial matches like "greatest hits" vs "greatest hits of the 80s")
+        if album1 in album2 or album2 in album1:
+            # Apply a bonus for partial containment
+            album_dist = max(0.0, album_dist - 0.3)
+
         dist.add_ratio('album', album_dist, 1.0)
 
         # If we only have album and it's a perfect match, return perfect score
@@ -111,7 +128,19 @@ def plex_track_distance(
     if has_title:
         title1 = clean_string(item.title)
         title2 = clean_string(plex_track.title)
-        dist.add_string('title', title1, title2)
+
+        # Check if one title contains the other (for partial matches like "remix" vs "remix 2020")
+        if (title1 and title2) and (title1 in title2 or title2 in title1):
+            # Calculate string distance
+            title_dist = hooks.string_dist(title1, title2)
+
+            # Apply a bonus for partial containment
+            title_dist = max(0.0, title_dist - 0.2)
+
+            dist.add_ratio('title', title_dist, 1.0)
+        else:
+            # Use standard string comparison
+            dist.add_string('title', title1, title2)
 
     # Artist comparison (if available)
     if has_artist:
