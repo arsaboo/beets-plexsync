@@ -1267,50 +1267,72 @@ class PlexSync(BeetsPlugin):
                 if source is None or target is None:
                     return target or ""
 
-                # Work with case-insensitive comparisons but preserve original case in output
-                source_lower = source.lower()
-                target_lower = target.lower()
-                result = target
+                # Create normalized versions for comparison but keep original for display
+                def normalize(text):
+                    """Normalize text for better matching by removing common separators and extra spaces."""
+                    if not text:
+                        return ""
+                    # Convert to lowercase and replace separators with spaces
+                    text = text.lower()
+                    text = re.sub(r'[,;&/]', ' ', text)  # Replace separators with space
+                    text = re.sub(r'\s+', ' ', text)      # Normalize whitespace
+                    return text.strip()
 
-                # Try to match the entire source string first
-                if source_lower in target_lower:
-                    start_idx = target_lower.find(source_lower)
-                    end_idx = start_idx + len(source_lower)
+                source_norm = normalize(source)
+                target_norm = normalize(target)
+
+                # Try to match the normalized strings first
+                if source_norm in target_norm:
+                    # Find the actual position in the original string
+                    start_idx = target_norm.find(source_norm)
+
+                    # If it's a full match or close to it (allowing for small differences in separators)
+                    if start_idx == 0 and abs(len(target_norm) - len(source_norm)) <= 3:
+                        # Highlight the entire target since it's essentially the same as source
+                        return ui.colorize('text_success', target)
+
+                # Try to match in reverse (target in source)
+                if target_norm in source_norm:
+                    # If target is a significant portion of source
+                    if len(target_norm) > len(source_norm) * 0.7:
+                        return ui.colorize('text_success', target)
+
+                # Try direct substring matching with original strings
+                if source.lower() in target.lower():
+                    start_idx = target.lower().find(source.lower())
+                    end_idx = start_idx + len(source)
                     # Use the actual case from target
                     matched_text = target[start_idx:end_idx]
-                    # Highlight using text_success (green) instead of action (blue)
+                    # Highlight using text_success (green)
                     highlighted = ui.colorize('text_success', matched_text)
                     # Replace the match with highlighted version
-                    result = target[:start_idx] + highlighted + target[end_idx:]
-                    return result
+                    return target[:start_idx] + highlighted + target[end_idx:]
 
-                # Try the reverse - target string in source (especially for album titles)
-                # This ensures that if the album name appears in the source, we highlight it
-                if target_lower in source_lower:
-                    # Highlight the entire target as it's found in source
-                    return ui.colorize('text_success', target)
+                # For artist names, try to match individual parts (for "FirstName LastName" cases)
+                if ' ' in source_norm or ',' in source:
+                    source_parts = re.split(r'[\s,]+', source.lower())
+                    result = target
 
-                # If whole string matching didn't work, try individual words
-                # Convert source to list of words, excluding very short words
-                source_words = [word for word in source_lower.split() if len(word) > 2]
+                    for part in source_parts:
+                        if len(part) > 2:  # Only consider meaningful parts
+                            # Case-insensitive search with word boundaries
+                            pattern = re.compile(r'\b' + re.escape(part) + r'\b', re.IGNORECASE)
+                            result = pattern.sub(lambda m: ui.colorize('text_success', m.group(0)), result)
 
-                # For each word in source, find matches in target
+                    # If we made any replacements, return the result
+                    if result != target:
+                        return result
+
+                # If no good matches found yet, try word-by-word matching as fallback
+                source_words = [w for w in source_norm.split() if len(w) > 2]
+                result = target
+
                 for word in source_words:
-                    # Look for word boundaries to avoid partial matches
-                    pattern = r'\b' + re.escape(word) + r'\b'
+                    # Look for the word with word boundaries
+                    pattern = re.compile(r'\b' + re.escape(word) + r'\b', re.IGNORECASE)
 
-                    # Search for the pattern in target_lower
-                    for match in re.finditer(pattern, target_lower):
-                        start, end = match.span()
-                        # Get the actual case from target
-                        matched_word = target[start:end]
-                        # Use text_success (green) for highlighting
-                        highlighted = ui.colorize('text_success', matched_word)
-
-                        # Apply the highlight to the result
-                        prefix = result[:start]
-                        suffix = result[end:]
-                        result = prefix + highlighted + suffix
+                    # Replace all occurrences with highlighted version
+                    result = pattern.sub(lambda m: ui.colorize('text_success', m.group(0)), result)
 
                 return result
 
