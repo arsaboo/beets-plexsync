@@ -1267,56 +1267,54 @@ class PlexSync(BeetsPlugin):
                 if source is None or target is None:
                     return target or ""
 
-                # Work with case-insensitive comparisons but preserve original case in output
-                source_lower = source.lower()
-                target_lower = target.lower()
+                # Simple approach: Directly operate on the whole string
                 result = target
+                source = source.lower()
 
-                # First check for direct word matches (complete words)
-                source_words = set(word for word in source_lower.split() if len(word) > 1)
+                # First look for the exact source in the target
+                target_lower = target.lower()
 
-                # Find and highlight each matching word
+                # Try to match the whole phrase first
+                if source in target_lower:
+                    start_idx = target_lower.find(source)
+                    end_idx = start_idx + len(source)
+                    # Use the actual case from target
+                    matched_text = target[start_idx:end_idx]
+                    # Highlight the matched text
+                    highlighted = ui.colorize('action', matched_text)
+                    # Replace the match with highlighted version
+                    result = target[:start_idx] + highlighted + target[end_idx:]
+                    return result
+
+                # If whole phrase didn't match, try individual words
+                # Convert source and target to lists of words
+                source_words = [word for word in source.split() if len(word) > 1]
+
+                # For each word in source, find matches in target
                 for word in source_words:
-                    if len(word) < 2:  # Skip very short words
-                        continue
-
-                    # Use regex to find word boundaries for more accurate highlighting
+                    # Look for word boundaries to avoid partial matches
                     pattern = r'\b' + re.escape(word) + r'\b'
+
+                    # Search for the pattern in target_lower
                     for match in re.finditer(pattern, target_lower):
                         start, end = match.span()
-                        # Get the actual case from the original target
-                        original_word = target[start:end]
-                        highlighted_word = ui.colorize('action', original_word)
+                        # Get the actual case from target
+                        matched_word = target[start:end]
+                        # Create highlighted version
+                        highlighted = ui.colorize('action', matched_word)
 
-                        # Replace in the result, adjusting for any length changes from previous replacements
-                        prefix = result[:start]
-                        suffix = result[end:]
-                        result = prefix + highlighted_word + suffix
+                        # Make sure we're not affecting any previous highlights
+                        # by recalculating positions based on current result
+                        current_lower = result.lower()
+                        offset = 0
 
-                # Then check for phrases (multi-word matches)
-                if len(source_words) > 1:
-                    # Try longer phrases first (2+ words)
-                    source_phrases = []
-                    words = source_lower.split()
-                    for i in range(len(words)):
-                        for j in range(i+1, min(i+4, len(words))+1):  # Limit phrase length to 4 words
-                            if j - i >= 2:  # Only phrases of 2+ words
-                                phrase = ' '.join(words[i:j])
-                                if len(phrase) > 3:  # Only meaningful phrases
-                                    source_phrases.append(phrase)
-
-                    # Sort by length, longest first
-                    source_phrases.sort(key=len, reverse=True)
-
-                    for phrase in source_phrases:
-                        idx = target_lower.find(phrase)
-                        if idx >= 0:
-                            original_phrase = target[idx:idx+len(phrase)]
-                            highlighted_phrase = ui.colorize('action', original_phrase)
-                            # Update result, accounting for previous replacements
-                            prefix = result[:idx]
-                            suffix = result[idx+len(phrase):]
-                            result = prefix + highlighted_phrase + suffix
+                        # Find the word in the current result
+                        match_pos = current_lower.find(word, start)
+                        if match_pos != -1:
+                            # Account for any previous highlighting that might have shifted positions
+                            prefix = result[:match_pos]
+                            suffix = result[match_pos+len(word):]
+                            result = prefix + highlighted + suffix
 
                 return result
 
