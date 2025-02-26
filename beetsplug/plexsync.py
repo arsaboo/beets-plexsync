@@ -1263,27 +1263,62 @@ class PlexSync(BeetsPlugin):
 
             # Use beets' similarity detection for highlighting
             def highlight_matches(source, target):
-                """Highlight exact matching parts between source and target strings."""
+                """Highlight matching parts between source and target strings."""
                 if source is None or target is None:
-                    return target or "Unknown"
+                    return target or ""
 
-                # Split both strings into words while preserving spaces
-                source_words = source.replace(',', ' ,').split()
-                target_words = target.replace(',', ' ,').split()
+                # Work with case-insensitive comparisons but preserve original case in output
+                source_lower = source.lower()
+                target_lower = target.lower()
+                result = target
 
-                # Process each target word
-                highlighted_words = []
-                for target_word in target_words:
-                    word_matched = False
-                    for source_word in source_words:
-                        if self.get_fuzzy_score(source_word.lower(), target_word.lower()) > 0.8:
-                            highlighted_words.append(ui.colorize('added_highlight', target_word))
-                            word_matched = True
-                            break
-                    if not word_matched:
-                        highlighted_words.append(target_word)
+                # First check for direct word matches (complete words)
+                source_words = set(word for word in source_lower.split() if len(word) > 1)
 
-                return ' '.join(highlighted_words)
+                # Find and highlight each matching word
+                for word in source_words:
+                    if len(word) < 2:  # Skip very short words
+                        continue
+
+                    # Use regex to find word boundaries for more accurate highlighting
+                    pattern = r'\b' + re.escape(word) + r'\b'
+                    for match in re.finditer(pattern, target_lower):
+                        start, end = match.span()
+                        # Get the actual case from the original target
+                        original_word = target[start:end]
+                        highlighted_word = ui.colorize('action', original_word)
+
+                        # Replace in the result, adjusting for any length changes from previous replacements
+                        prefix = result[:start]
+                        suffix = result[end:]
+                        result = prefix + highlighted_word + suffix
+
+                # Then check for phrases (multi-word matches)
+                if len(source_words) > 1:
+                    # Try longer phrases first (2+ words)
+                    source_phrases = []
+                    words = source_lower.split()
+                    for i in range(len(words)):
+                        for j in range(i+1, min(i+4, len(words))+1):  # Limit phrase length to 4 words
+                            if j - i >= 2:  # Only phrases of 2+ words
+                                phrase = ' '.join(words[i:j])
+                                if len(phrase) > 3:  # Only meaningful phrases
+                                    source_phrases.append(phrase)
+
+                    # Sort by length, longest first
+                    source_phrases.sort(key=len, reverse=True)
+
+                    for phrase in source_phrases:
+                        idx = target_lower.find(phrase)
+                        if idx >= 0:
+                            original_phrase = target[idx:idx+len(phrase)]
+                            highlighted_phrase = ui.colorize('action', original_phrase)
+                            # Update result, accounting for previous replacements
+                            prefix = result[:idx]
+                            suffix = result[idx+len(phrase):]
+                            result = prefix + highlighted_phrase + suffix
+
+                return result
 
             # Highlight matching parts
             highlighted_title = highlight_matches(source_title, track.title)

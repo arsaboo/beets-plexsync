@@ -30,9 +30,6 @@ def clean_string(s: str) -> str:
     # Add handling for year variations
     s = re.sub(r"\s*\d{4}\s*$", "", s)  # Remove year at end
 
-    # Improve handling of common variations in Indian movie titles
-    s = s.replace("andaaz", "andaz")  # Normalize common spelling variations
-
     return s.strip()
 
 
