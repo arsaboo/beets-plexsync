@@ -1263,78 +1263,32 @@ class PlexSync(BeetsPlugin):
 
             # Use beets' similarity detection for highlighting
             def highlight_matches(source, target):
-                """Highlight matching parts between source and target strings."""
+                """Highlight exact matching parts between source and target strings."""
                 if source is None or target is None:
-                    return target or ""
+                    return target or "Unknown"
 
-                # Create normalized versions for comparison but keep original for display
-                def normalize(text):
-                    """Normalize text for better matching by removing common separators and extra spaces."""
-                    if not text:
-                        return ""
-                    # Convert to lowercase and replace separators with spaces
-                    text = text.lower()
-                    text = re.sub(r'[,;&/]', ' ', text)  # Replace separators with space
-                    text = re.sub(r'\s+', ' ', text)      # Normalize whitespace
-                    return text.strip()
+                # Much simpler approach that handles soundtracks better
+                # First check for complete containment with high similarity
+                if source and target and (source.lower() in target.lower() or target.lower() in source.lower()):
+                    return ui.colorize('text_success', target)
 
-                source_norm = normalize(source)
-                target_norm = normalize(target)
+                # If no direct containment, fall back to word-by-word matching
+                source_words = source.replace(',', ' ,').split() if source else []
+                target_words = target.replace(',', ' ,').split() if target else []
 
-                # Try to match the normalized strings first
-                if source_norm in target_norm:
-                    # Find the actual position in the original string
-                    start_idx = target_norm.find(source_norm)
+                # Process each target word
+                highlighted_words = []
+                for target_word in target_words:
+                    word_matched = False
+                    for source_word in source_words:
+                        if self.get_fuzzy_score(source_word.lower(), target_word.lower()) > 0.8:
+                            highlighted_words.append(ui.colorize('text_success', target_word))
+                            word_matched = True
+                            break
+                    if not word_matched:
+                        highlighted_words.append(target_word)
 
-                    # If it's a full match or close to it (allowing for small differences in separators)
-                    if start_idx == 0 and abs(len(target_norm) - len(source_norm)) <= 3:
-                        # Highlight the entire target since it's essentially the same as source
-                        return ui.colorize('text_success', target)
-
-                # Try to match in reverse (target in source)
-                if target_norm in source_norm:
-                    # If target is a significant portion of source
-                    if len(target_norm) > len(source_norm) * 0.7:
-                        return ui.colorize('text_success', target)
-
-                # Try direct substring matching with original strings
-                if source.lower() in target.lower():
-                    start_idx = target.lower().find(source.lower())
-                    end_idx = start_idx + len(source)
-                    # Use the actual case from target
-                    matched_text = target[start_idx:end_idx]
-                    # Highlight using text_success (green)
-                    highlighted = ui.colorize('text_success', matched_text)
-                    # Replace the match with highlighted version
-                    return target[:start_idx] + highlighted + target[end_idx:]
-
-                # For artist names, try to match individual parts (for "FirstName LastName" cases)
-                if ' ' in source_norm or ',' in source:
-                    source_parts = re.split(r'[\s,]+', source.lower())
-                    result = target
-
-                    for part in source_parts:
-                        if len(part) > 2:  # Only consider meaningful parts
-                            # Case-insensitive search with word boundaries
-                            pattern = re.compile(r'\b' + re.escape(part) + r'\b', re.IGNORECASE)
-                            result = pattern.sub(lambda m: ui.colorize('text_success', m.group(0)), result)
-
-                    # If we made any replacements, return the result
-                    if result != target:
-                        return result
-
-                # If no good matches found yet, try word-by-word matching as fallback
-                source_words = [w for w in source_norm.split() if len(w) > 2]
-                result = target
-
-                for word in source_words:
-                    # Look for the word with word boundaries
-                    pattern = re.compile(r'\b' + re.escape(word) + r'\b', re.IGNORECASE)
-
-                    # Replace all occurrences with highlighted version
-                    result = pattern.sub(lambda m: ui.colorize('text_success', m.group(0)), result)
-
-                return result
+                return ' '.join(highlighted_words)
 
             # Highlight matching parts
             highlighted_title = highlight_matches(source_title, track.title)
@@ -1350,7 +1304,6 @@ class PlexSync(BeetsPlugin):
                 score_color = 'text_error'      # Low match
 
             # Format the line with matching and index colors
-            # Simply use the index number without colorizing
             print_(
                 f"{i}. {highlighted_album} - {highlighted_title} - "
                 f"{highlighted_artist} (Match: {ui.colorize(score_color, f'{score:.2f}')})"
