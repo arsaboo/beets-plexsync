@@ -1267,26 +1267,33 @@ class PlexSync(BeetsPlugin):
                 if source is None or target is None:
                     return target or "Unknown"
 
-                # Much simpler approach that handles soundtracks better
-                # First check for complete containment with high similarity
-                if source and target and (source.lower() in target.lower() or target.lower() in source.lower()):
+                # Modified approach that's more precise with word boundaries
+                # First check for whole word matches
+                source_words = source.lower().split() if source else []
+                target_words = target.lower().split() if target else []
+
+                # If source and target are identical (case-insensitive), highlight the whole thing
+                if source and target and source.lower() == target.lower():
                     return ui.colorize('text_success', target)
 
-                # If no direct containment, fall back to word-by-word matching
-                source_words = source.replace(',', ' ,').split() if source else []
-                target_words = target.replace(',', ' ,').split() if target else []
-
-                # Process each target word
+                # Process each target word individually for precise highlighting
                 highlighted_words = []
-                for target_word in target_words:
+                for i, target_word in enumerate(target_words):
                     word_matched = False
+                    clean_target_word = re.sub(r'[^\w]', '', target_word.lower())
+
                     for source_word in source_words:
-                        if self.get_fuzzy_score(source_word.lower(), target_word.lower()) > 0.8:
-                            highlighted_words.append(ui.colorize('text_success', target_word))
+                        clean_source_word = re.sub(r'[^\w]', '', source_word.lower())
+                        # Only match on actual words, not substrings within words
+                        if (clean_source_word == clean_target_word or
+                            self.get_fuzzy_score(clean_source_word, clean_target_word) > 0.8):
+                            # Use the original formatting from target
+                            highlighted_words.append(ui.colorize('text_success', target.split()[i]))
                             word_matched = True
                             break
+
                     if not word_matched:
-                        highlighted_words.append(target_word)
+                        highlighted_words.append(target.split()[i])
 
                 return ' '.join(highlighted_words)
 
