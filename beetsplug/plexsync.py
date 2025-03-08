@@ -1569,27 +1569,58 @@ class PlexSync(BeetsPlugin):
                 except Exception as e:
                     self._log.debug("Failed to fetch cached item {}: {}", cached_result, e)
 
-        # Try regular search
-        artist = song["artist"].split(",")[0]
+        self._log.debug('Cache miss for query: {}', cache_key)
+
+        # Validate song dictionary to avoid searching with empty values
+        if isinstance(song, dict):
+            # Check for minimal required data
+            if not song.get('title'):
+                self._log.debug("Skipping search with empty title")
+                self._cache_result(cache_key, None)
+                return None
+
+            # Use first artist if there are multiple separated by commas
+            artist = song.get("artist", "").split(",")[0].strip()
+        else:
+            self._log.debug("Invalid song format: {}", song)
+            self._cache_result(cache_key, None)
+            return None
+
+        # Try regular search with timeout
         try:
-            if song["album"] is None:
-                tracks = self.music.searchTracks(**{"track.title": song["title"]}, limit=50)
+            timeout = 10  # 10 second timeout to prevent hanging
+            if not song.get("album"):
+                self._log.debug("Searching by title only: {}", song["title"])
+                tracks = self.music.searchTracks(**{"track.title": song["title"]}, limit=50, timeout=timeout)
             else:
+                self._log.debug("Searching by album and title: {}/{}", song["album"], song["title"])
                 tracks = self.music.searchTracks(
-                    **{"album.title": song["album"], "track.title": song["title"]}, limit=50
+                    **{"album.title": song["album"], "track.title": song["title"]},
+                    limit=50,
+                    timeout=timeout
                 )
                 if len(tracks) == 0:
                     # Try with simplified title (no parentheses)
                     song["title"] = clean_string(song["title"])
-                    tracks = self.music.searchTracks(**{"track.title": song["title"]}, limit=50)
+                    self._log.debug("Retrying with cleaned title: {}", song["title"])
+                    tracks = self.music.searchTracks(**{"track.title": song["title"]}, limit=50, timeout=timeout)
         except Exception as e:
             self._log.debug(
                 "Error searching for {} - {}. Error: {}",
-                song["album"],
-                song["title"],
+                song.get("album", "Unknown"),
+                song.get("title", "Unknown"),
                 e,
             )
-            return None
+            # If search fails, try once more with just the title as fallback
+            try:
+                if song.get("title"):
+                    self._log.debug("Attempting fallback search with title only: {}", song["title"])
+                    tracks = self.music.searchTracks(**{"track.title": song["title"]}, limit=25, timeout=timeout)
+                else:
+                    tracks = []
+            except Exception as e2:
+                self._log.debug("Fallback search failed too: {}", e2)
+                tracks = []
 
         # Process search results
         if len(tracks) == 1:
@@ -1648,6 +1679,7 @@ class PlexSync(BeetsPlugin):
 
         # Store negative result if nothing found
         self._cache_result(cache_key, None)
+        self._log.debug("No match found, returning None")
         return None
 
     def _process_matches(self, tracks, song, manual_search):
