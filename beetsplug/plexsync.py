@@ -1586,24 +1586,22 @@ class PlexSync(BeetsPlugin):
             self._cache_result(cache_key, None)
             return None
 
-        # Try regular search with timeout
+        # Try regular search without timeout parameter
         try:
-            timeout = 10  # 10 second timeout to prevent hanging
             if not song.get("album"):
                 self._log.debug("Searching by title only: {}", song["title"])
-                tracks = self.music.searchTracks(**{"track.title": song["title"]}, limit=50, timeout=timeout)
+                tracks = self.music.searchTracks(**{"track.title": song["title"]}, limit=50)
             else:
                 self._log.debug("Searching by album and title: {}/{}", song["album"], song["title"])
                 tracks = self.music.searchTracks(
                     **{"album.title": song["album"], "track.title": song["title"]},
-                    limit=50,
-                    timeout=timeout
+                    limit=50
                 )
                 if len(tracks) == 0:
                     # Try with simplified title (no parentheses)
                     song["title"] = clean_string(song["title"])
                     self._log.debug("Retrying with cleaned title: {}", song["title"])
-                    tracks = self.music.searchTracks(**{"track.title": song["title"]}, limit=50, timeout=timeout)
+                    tracks = self.music.searchTracks(**{"track.title": song["title"]}, limit=50)
         except Exception as e:
             self._log.debug(
                 "Error searching for {} - {}. Error: {}",
@@ -1615,7 +1613,7 @@ class PlexSync(BeetsPlugin):
             try:
                 if song.get("title"):
                     self._log.debug("Attempting fallback search with title only: {}", song["title"])
-                    tracks = self.music.searchTracks(**{"track.title": song["title"]}, limit=25, timeout=timeout)
+                    tracks = self.music.searchTracks(**{"track.title": song["title"]}, limit=25)
                 else:
                     tracks = []
             except Exception as e2:
