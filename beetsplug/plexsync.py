@@ -42,6 +42,10 @@ from beetsplug.caching import Cache
 from beetsplug.llm import search_track_info
 from beetsplug.matching import plex_track_distance, clean_string
 
+import threading
+import concurrent.futures
+from plexapi.exceptions import NotFound
+
 
 class Song(BaseModel):
     title: str
@@ -1361,35 +1365,34 @@ class PlexSync(BeetsPlugin):
         self._log.debug("Searching with title='{}', album='{}', artist='{}'", title, album, artist)
 
         try:
-            # Try different search strategies in order
+            # Try different search strategies in order with timeout
             tracks = []
+            timeout_seconds = 15  # Longer timeout for manual search
 
             # Strategy 1: If we have an album name from a movie soundtrack, search by album first
             if album and any(x in album.lower() for x in ['movie', 'soundtrack', 'original']):
-                tracks = self.music.searchTracks(**{"album.title": album}, limit=100)
+                tracks = self.search_plex_with_timeout({"album.title": album}, limit=100, timeout=timeout_seconds)
                 self._log.debug("Album-first search found {} tracks", len(tracks))
 
             # Strategy 2: If first strategy didn't work or wasn't applicable, try combined search
             if not tracks and album and title:
-                tracks = self.music.searchTracks(
-                    **{"album.title": album, "track.title": title},
-                    limit=100
-                )
+                search_params = {"album.title": album, "track.title": title}
+                tracks = self.search_plex_with_timeout(search_params, limit=100, timeout=timeout_seconds)
                 self._log.debug("Combined album-title search found {} tracks", len(tracks))
 
             # Strategy 3: Try album-only search if no tracks found yet
             if not tracks and album:
-                tracks = self.music.searchTracks(**{"album.title": album}, limit=100)
+                tracks = self.search_plex_with_timeout({"album.title": album}, limit=100, timeout=timeout_seconds)
                 self._log.debug("Album-only search found {} tracks", len(tracks))
 
             # Strategy 4: Try title-only search if still no tracks
             if not tracks and title:
-                tracks = self.music.searchTracks(**{"track.title": title}, limit=100)
+                tracks = self.search_plex_with_timeout({"track.title": title}, limit=100, timeout=timeout_seconds)
                 self._log.debug("Title-only search found {} tracks", len(tracks))
 
             if not tracks and artist:
                 # Strategy 5: Try artist-only search as last resort
-                tracks = self.music.searchTracks(**{"artist.title": artist}, limit=100)
+                tracks = self.search_plex_with_timeout({"artist.title": artist}, limit=100, timeout=timeout_seconds)
                 self._log.debug("Artist-only search found {} tracks", len(tracks))
 
             if not tracks:
@@ -1539,6 +1542,37 @@ class PlexSync(BeetsPlugin):
             self._log.error("Error during manual search: {}", e)
             return None
 
+    def search_plex_with_timeout(self, search_params, limit=50, timeout=10):
+        """Search Plex with a timeout to prevent getting stuck.
+
+        Args:
+            search_params: Dictionary of search parameters
+            limit: Maximum number of results
+            timeout: Timeout in seconds
+
+        Returns:
+            List of tracks or empty list on timeout/error
+        """
+        def search_task():
+            try:
+                return self.music.searchTracks(**search_params, limit=limit)
+            except Exception as e:
+                self._log.debug("Error in search task: {}", e)
+                return []
+
+        # Create a future with our search task
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future = executor.submit(search_task)
+            try:
+                # Wait for the result with timeout
+                return future.result(timeout=timeout)
+            except concurrent.futures.TimeoutError:
+                self._log.warning("Search timed out after {} seconds for: {}", timeout, search_params)
+                return []
+            except Exception as e:
+                self._log.error("Search failed: {}", e)
+                return []
+
     def search_plex_song(self, song, manual_search=None, llm_attempted=False):
         """Fetch the Plex track key with fallback options."""
         if manual_search is None:
@@ -1586,22 +1620,26 @@ class PlexSync(BeetsPlugin):
             self._cache_result(cache_key, None)
             return None
 
-        # Try regular search without timeout parameter
+        # Try regular search with timeout using our new timeout function
+        timeout_seconds = 10  # 10 second timeout
+        tracks = []
+
         try:
             if not song.get("album"):
                 self._log.debug("Searching by title only: {}", song["title"])
-                tracks = self.music.searchTracks(**{"track.title": song["title"]}, limit=50)
+                search_params = {"track.title": song["title"]}
+                tracks = self.search_plex_with_timeout(search_params, limit=50, timeout=timeout_seconds)
             else:
                 self._log.debug("Searching by album and title: {}/{}", song["album"], song["title"])
-                tracks = self.music.searchTracks(
-                    **{"album.title": song["album"], "track.title": song["title"]},
-                    limit=50
-                )
+                search_params = {"album.title": song["album"], "track.title": song["title"]}
+                tracks = self.search_plex_with_timeout(search_params, limit=50, timeout=timeout_seconds)
+
                 if len(tracks) == 0:
                     # Try with simplified title (no parentheses)
                     song["title"] = clean_string(song["title"])
                     self._log.debug("Retrying with cleaned title: {}", song["title"])
-                    tracks = self.music.searchTracks(**{"track.title": song["title"]}, limit=50)
+                    search_params = {"track.title": song["title"]}
+                    tracks = self.search_plex_with_timeout(search_params, limit=50, timeout=timeout_seconds)
         except Exception as e:
             self._log.debug(
                 "Error searching for {} - {}. Error: {}",
@@ -1609,16 +1647,15 @@ class PlexSync(BeetsPlugin):
                 song.get("title", "Unknown"),
                 e,
             )
+
             # If search fails, try once more with just the title as fallback
             try:
                 if song.get("title"):
                     self._log.debug("Attempting fallback search with title only: {}", song["title"])
-                    tracks = self.music.searchTracks(**{"track.title": song["title"]}, limit=25)
-                else:
-                    tracks = []
+                    search_params = {"track.title": song["title"]}
+                    tracks = self.search_plex_with_timeout(search_params, limit=25, timeout=timeout_seconds)
             except Exception as e2:
                 self._log.debug("Fallback search failed too: {}", e2)
-                tracks = []
 
         # Process search results
         if len(tracks) == 1:

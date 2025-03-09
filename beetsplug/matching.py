@@ -1,152 +1,164 @@
-"""Custom matching utilities for PlexSync plugin."""
+"""Track matching utilities for PlexSync."""
 
 import re
-from typing import Optional, Tuple
+import difflib
+import unicodedata
+import logging
 
-from beets.autotag import hooks
-from beets.library import Item
-from plexapi.audio import Track
+logger = logging.getLogger('beets')
 
+def clean_string(input_string):
+    """Clean a string for better matching by removing parentheses and standardizing format.
 
-def clean_string(s: str) -> str:
-    """Clean a string for comparison by removing common variations."""
-    if not s:
+    Args:
+        input_string: The string to clean
+
+    Returns:
+        str: The cleaned string
+    """
+    if not input_string:
         return ""
 
-    s = s.lower()
+    # Remove content in parentheses
+    cleaned = re.sub(r'\([^)]*\)', '', input_string)
 
-    # Remove common prefixes/suffixes
-    s = re.sub(r"^the\s+", "", s)
-    s = re.sub(r"\s*\([^)]*\)", "", s)  # Remove parentheses and contents
-    s = re.sub(r"\s*\[[^\]]*\]", "", s)  # Remove brackets and contents
-    s = re.sub(r"\s*feat\.?\s.*$", "", s, flags=re.IGNORECASE)  # Remove featuring
-    s = re.sub(r"\s*ft\.?\s.*$", "", s, flags=re.IGNORECASE)  # Remove ft.
-    s = re.sub(r"\s*with\s.*$", "", s, flags=re.IGNORECASE)  # Remove with...
+    # Remove content in brackets
+    cleaned = re.sub(r'\[[^\]]*\]', '', cleaned)
 
-    # Normalize separators
-    s = re.sub(r"[&,/\\]", " and ", s)
-    s = re.sub(r"\s+", " ", s)  # Normalize whitespace
+    # Remove common features and remix indicators
+    cleaned = re.sub(r'(?i)\s*(?:feat\.?|ft\.?|featuring)\s+.*$', '', cleaned)
+    cleaned = re.sub(r'(?i)\s*(?:[-–]\s*)?(?:remix|version|edit|mix).*$', '', cleaned)
 
-    # Add handling for year variations
-    s = re.sub(r"\s*\d{4}\s*$", "", s)  # Remove year at end
+    # Normalize whitespace
+    cleaned = ' '.join(cleaned.split())
 
-    return s.strip()
+    return cleaned.strip()
 
+def normalize_for_comparison(text):
+    """Normalize text for consistent comparison.
 
-def artist_distance(str1: str, str2: str) -> float:
-    """Calculate artist name distance with special handling for multiple artists."""
+    Args:
+        text: The text to normalize
+
+    Returns:
+        str: Normalized text
+    """
+    if not text:
+        return ""
+
+    # Convert to lowercase
+    text = text.lower()
+
+    # Normalize unicode characters
+    text = unicodedata.normalize('NFKD', text)
+
+    # Remove non-alphanumeric characters
+    text = re.sub(r'[^\w\s]', ' ', text)
+
+    # Normalize whitespace
+    text = ' '.join(text.split())
+
+    return text
+
+def fuzzy_match_score(str1, str2):
+    """Calculate fuzzy match score between two strings.
+
+    Args:
+        str1: First string
+        str2: Second string
+
+    Returns:
+        float: Match score between 0-1
+    """
     if not str1 or not str2:
+        return 0
+
+    # Normalize strings for comparison
+    norm1 = normalize_for_comparison(str1)
+    norm2 = normalize_for_comparison(str2)
+
+    # If either string is empty after normalization
+    if not norm1 or not norm2:
+        return 0
+
+    # Exact match after normalization
+    if norm1 == norm2:
         return 1.0
 
-    # Split artists on common separators
-    def split_artists(s):
-        return {clean_string(a) for a in re.split(r"[,;&/]|\s+and\s+|\s+&\s+", s) if a}
+    # Check if one is a substring of the other
+    if norm1 in norm2:
+        return 0.9 * (len(norm1) / len(norm2))
 
-    artists1 = split_artists(str1)
-    artists2 = split_artists(str2)
+    if norm2 in norm1:
+        return 0.9 * (len(norm2) / len(norm1))
 
-    if not artists1 or not artists2:
-        return 1.0
+    # Calculate sequence matcher ratio
+    return difflib.SequenceMatcher(None, norm1, norm2).ratio()
 
-    # Calculate best match for each artist using hooks.string_dist
-    matches = []
-    for artist1 in artists1:
-        best_match = min(hooks.string_dist(artist1, artist2) for artist2 in artists2)
-        matches.append(best_match)
+def plex_track_distance(beets_item, plex_track, config=None):
+    """Calculate distance between a Beets item and a Plex track.
 
-    return sum(matches) / len(matches)
+    Args:
+        beets_item: Beets Item object
+        plex_track: Plex Track object
+        config: Optional config with weights
 
+    Returns:
+        tuple: (match_score, distance_components)
+    """
+    if config is None:
+        config = {
+            'weights': {
+                'title': 0.45,
+                'artist': 0.35,
+                'album': 0.20,
+            }
+        }
 
-def plex_track_distance(
-    item: Item,
-    plex_track: Track,
-    config: Optional[dict] = None
-) -> Tuple[float, hooks.Distance]:
-    """Calculate distance between a beets Item and Plex Track."""
-    # Define base weights that will be adjusted based on available fields
-    base_weights = {
-        'title': 0.40,    # Title important, but slightly reduced
-        'artist': 0.30,   # Artist next
-        'album': 0.30,    # Album title - increased to match importance
+    # Extract track properties
+    plex_title = getattr(plex_track, 'title', '')
+    plex_album = getattr(plex_track, 'parentTitle', '')
+
+    # Get artist, handling different possible properties
+    if hasattr(plex_track, 'originalTitle') and plex_track.originalTitle:
+        plex_artist = plex_track.originalTitle
+    else:
+        try:
+            plex_artist = plex_track.artist().title if hasattr(plex_track, 'artist') else ''
+        except Exception:
+            plex_artist = ''
+
+    # Calculate component scores
+    title_score = fuzzy_match_score(beets_item.title, plex_title)
+    artist_score = fuzzy_match_score(beets_item.artist, plex_artist)
+
+    # Album is optional
+    album_score = 0
+    if hasattr(beets_item, 'album') and beets_item.album and plex_album:
+        album_score = fuzzy_match_score(beets_item.album, plex_album)
+
+    # Apply weights from config
+    weights = config['weights']
+    weighted_score = (
+        title_score * weights['title'] +
+        artist_score * weights['artist'] +
+        album_score * weights['album']
+    )
+
+    # Compile distance components for debugging
+    distance_components = {
+        'title': (title_score, weights['title']),
+        'artist': (artist_score, weights['artist']),
+        'album': (album_score, weights['album']),
     }
 
-    # Create distance object
-    dist = hooks.Distance()
+    # Log detailed comparison for debugging
+    logger.debug(
+        "Match comparison: beets='{} - {} - {}', plex='{} - {} - {}', scores=(title:{:.2f}, artist:{:.2f}, album:{:.2f}), total:{:.2f}",
+        getattr(beets_item, 'album', ''), beets_item.title, beets_item.artist,
+        plex_album, plex_title, plex_artist,
+        title_score, artist_score, album_score, weighted_score
+    )
 
-    # Check which fields are available
-    has_title = bool(item.title and item.title.strip())
-    has_artist = bool(item.artist and item.artist.strip())
-    has_album = bool(item.album and item.album.strip())
-
-    # Calculate actual weights based on available fields
-    available_fields = []
-    if has_title:
-        available_fields.append('title')
-    if has_artist:
-        available_fields.append('artist')
-    if has_album:
-        available_fields.append('album')
-
-    if not available_fields:
-        return 0.0, dist  # No fields to compare
-
-    # Redistribute weights
-    total_base_weight = sum(base_weights[f] for f in available_fields)
-    weights = {
-        field: base_weights[field] / total_base_weight
-        for field in available_fields
-    }
-
-    dist._weights.update(weights)
-
-    # Album comparison first (if available)
-    if has_album:
-        album1 = clean_string(item.album)
-        album2 = clean_string(plex_track.parentTitle)
-
-        # Use string_dist for album but normalize properly
-        album_dist = hooks.string_dist(album1, album2)
-
-        # Check if album is contained within the other (for partial matches like "Andaz" in "Andaaz (1971)")
-        if album1 in album2 or album2 in album1:
-            # Apply a bonus for partial containment
-            album_dist = max(0.0, album_dist - 0.3)
-
-        dist.add_ratio('album', album_dist, 1.0)
-
-        # If we only have album and it's a perfect match, return perfect score
-        if len(available_fields) == 1 and album_dist == 0:
-            return 1.0, dist
-
-    # Title comparison (if available)
-    if has_title:
-        title1 = clean_string(item.title)
-        title2 = clean_string(plex_track.title)
-
-        # Check if one title contains the other (for partial matches)
-        if (title1 and title2) and (title1 in title2 or title2 in title1):
-            # Calculate string distance
-            title_dist = hooks.string_dist(title1, title2)
-
-            # Apply a bonus for partial containment
-            title_dist = max(0.0, title_dist - 0.2)
-
-            dist.add_ratio('title', title_dist, 1.0)
-        else:
-            # Use standard string comparison
-            dist.add_string('title', title1, title2)
-
-    # Artist comparison (if available)
-    if has_artist:
-        artist1 = item.artist
-        artist2 = plex_track.originalTitle or plex_track.artist().title
-        dist.add_ratio('artist', artist_distance(artist1, artist2), 1.0)
-
-    # Get total distance
-    total_dist = dist.distance
-
-    # Convert to similarity score where 1 is perfect match
-    score = 1 - total_dist
-
-    return score, dist
+    return weighted_score, distance_components
 
