@@ -1573,6 +1573,30 @@ class PlexSync(BeetsPlugin):
                 self._log.error("Search failed: {}", e)
                 return []
 
+    def is_problematic_search(self, song):
+        """Detect search parameters likely to cause issues.
+
+        Args:
+            song: Dictionary with song metadata
+
+        Returns:
+            bool: True if search looks problematic
+        """
+        # Check for actor list pattern in title (comma-separated names)
+        if song.get('title'):
+            title = song['title']
+            # Check if title contains multiple commas and looks like a list of names
+            if title.count(',') > 0 and re.search(r'[A-Z][a-z]+,\s+[A-Z][a-z]+', title):
+                self._log.debug("Detected problematic title (appears to be actor list): {}", title)
+                return True
+
+            # Check for unusually long titles
+            if len(title) > 100:
+                self._log.debug("Detected problematic title (very long): {}", title)
+                return True
+
+        return False
+
     def search_plex_song(self, song, manual_search=None, llm_attempted=False):
         """Fetch the Plex track key with fallback options."""
         if manual_search is None:
@@ -1613,6 +1637,18 @@ class PlexSync(BeetsPlugin):
                 self._cache_result(cache_key, None)
                 return None
 
+            # Check if search parameters look problematic before proceeding
+            if self.is_problematic_search(song):
+                self._log.warning("Detected problematic search pattern that might hang: {}", song.get('title'))
+                if manual_search:
+                    self._log.info("\nPotentially problematic search detected. Would you like to search manually?")
+                    if ui.input_yn(ui.colorize('text_highlight', "\nSearch manually?") + " (Y/n)"):
+                        return self.manual_track_search(song)
+
+                # If we don't do manual search, cache a negative result and return None
+                self._cache_result(cache_key, None)
+                return None
+
             # Use first artist if there are multiple separated by commas
             artist = song.get("artist", "").split(",")[0].strip()
         else:
@@ -1627,7 +1663,14 @@ class PlexSync(BeetsPlugin):
         try:
             if not song.get("album"):
                 self._log.debug("Searching by title only: {}", song["title"])
-                search_params = {"track.title": song["title"]}
+
+                # Use just the first part of the title if it contains commas (likely actors)
+                search_title = song["title"]
+                if ',' in search_title:
+                    search_title = search_title.replace(',', ' ').strip()
+                    self._log.debug("Removing comma from the title: {}", search_title)
+
+                search_params = {"track.title": search_title}
                 tracks = self.search_plex_with_timeout(search_params, limit=50, timeout=timeout_seconds)
             else:
                 self._log.debug("Searching by album and title: {}/{}", song["album"], song["title"])
