@@ -964,20 +964,51 @@ class PlexSync(BeetsPlugin):
         """Build a lookup dictionary from Plex ratingKey to beets Item."""
         plex_lookup = {}
 
-        # Get all items with plex_ratingkey
-        items = lib.items('plex_ratingkey:?')
+        try:
+            # Try different query approaches
+            try:
+                # Method 1: Try to get all items with non-null plex_ratingkey
+                items = lib.items('plex_ratingkey:+')
+            except Exception:
+                try:
+                    # Method 2: Try using MatchQuery directly
+                    from beets.dbcore.query import MatchQuery
+                    items = lib.items(MatchQuery('plex_ratingkey', 0, '>', True))
+                except Exception:
+                    # Method 3: Fallback to getting all items and filtering
+                    self._log.debug("Falling back to loading all items and filtering")
+                    items = []
+                    # Get items in batches to avoid memory issues
+                    for item in lib.items():
+                        if hasattr(item, 'plex_ratingkey') and item.plex_ratingkey is not None:
+                            items.append(item)
 
-        for item in items:
-            plex_lookup[item.plex_ratingkey] = item
+            # Build the lookup table
+            for item in items:
+                if hasattr(item, 'plex_ratingkey') and item.plex_ratingkey is not None:
+                    plex_lookup[item.plex_ratingkey] = item
 
-        self._log.debug("Built Plex lookup with {} items", len(plex_lookup))
+            self._log.debug("Built Plex lookup with {} items", len(plex_lookup))
+        except Exception as e:
+            self._log.error("Error building Plex lookup: {}", e)
+
         return plex_lookup
 
     def setup_llm(self):
         """Set up LLM client for search cleaning."""
         try:
-            from beetsplug.llm import setup_llm_client
-            self.llm_client = setup_llm_client(self._log)
+            # Create a simple client wrapper for search_track_info
+            class SimpleLLMClient:
+                def __init__(self, logger):
+                    self.logger = logger
+                    logger.debug("SimpleLLMClient initialized")
+
+                def __call__(self, prompt):
+                    from beetsplug.llm import search_track_info
+                    return search_track_info(prompt)
+
+            self._log.debug("Creating SimpleLLMClient for LLM integration")
+            self.llm_client = SimpleLLMClient(self._log)
         except Exception as e:
             self._log.error("Failed to set up LLM client: {}", e)
             self.llm_client = None
