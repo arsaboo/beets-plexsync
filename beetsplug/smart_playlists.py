@@ -619,7 +619,7 @@ def get_filtered_library_tracks(plugin, preferred_genres, config_filters, exclus
 
 def generate_daily_discovery(plugin, lib, dd_config, plex_lookup, preferred_genres, similar_tracks):
     """Generate Daily Discovery playlist with improved track selection."""
-    from beetsplug.playlist_handlers import _plex_clear_playlist, _plex_add_playlist_item
+    from beetsplug.playlist_handlers import plex_clear_playlist, plex_add_playlist_item
 
     playlist_name = dd_config.get("name", "Daily Discovery")
     plugin._log.info("Generating {} playlist", playlist_name)
@@ -722,12 +722,12 @@ def generate_daily_discovery(plugin, lib, dd_config, plex_lookup, preferred_genr
 
     # Create/update playlist
     try:
-        _plex_clear_playlist(plugin, playlist_name)
+        plex_clear_playlist(plugin, playlist_name)
         plugin._log.info("Cleared existing Daily Discovery playlist")
     except Exception:
         plugin._log.debug("No existing Daily Discovery playlist found")
 
-    _plex_add_playlist_item(plugin, selected_tracks, playlist_name)
+    plex_add_playlist_item(plugin, selected_tracks, playlist_name)
 
     plugin._log.info(
         "Successfully updated {} playlist with {} tracks",
@@ -738,7 +738,7 @@ def generate_daily_discovery(plugin, lib, dd_config, plex_lookup, preferred_genr
 
 def generate_forgotten_gems(plugin, lib, ug_config, plex_lookup, preferred_genres, similar_tracks):
     """Generate a Forgotten Gems playlist with improved discovery."""
-    from beetsplug.playlist_handlers import _plex_clear_playlist, _plex_add_playlist_item
+    from beetsplug.playlist_handlers import plex_clear_playlist, plex_add_playlist_item
 
     playlist_name = ug_config.get("name", "Forgotten Gems")
     plugin._log.info("Generating {} playlist", playlist_name)
@@ -845,19 +845,19 @@ def generate_forgotten_gems(plugin, lib, ug_config, plex_lookup, preferred_genre
 
     # Create/update playlist
     try:
-        _plex_clear_playlist(plugin, playlist_name)
+        plex_clear_playlist(plugin, playlist_name)
         plugin._log.info("Cleared existing Forgotten Gems playlist")
     except Exception:
         plugin._log.debug("No existing Forgotten Gems playlist found")
 
-    _plex_add_playlist_item(plugin, selected_tracks, playlist_name)
+    plex_add_playlist_item(plugin, selected_tracks, playlist_name)
 
     plugin._log.info("Successfully updated {} playlist with {} tracks", playlist_name, len(selected_tracks))
 
 
 def generate_imported_playlist(plugin, lib, playlist_config, plex_lookup=None):
     """Generate a playlist by importing from external sources."""
-    from beetsplug.playlist_handlers import _plex_clear_playlist, _plex_add_playlist_item
+    from beetsplug.playlist_handlers import plex_clear_playlist, plex_add_playlist_item
 
     playlist_name = playlist_config.get("name", "Imported Playlist")
     sources = playlist_config.get("sources", [])
@@ -882,7 +882,11 @@ def generate_imported_playlist(plugin, lib, playlist_config, plex_lookup=None):
         defaults_cfg = {}
 
     manual_search = get_config_value(
-        plugin, playlist_config, defaults_cfg, "manual_search", plugin.config["plexsync"]["manual_search"].get(bool)
+        plugin,
+        playlist_config,
+        defaults_cfg,
+        "manual_search",
+        False  # Default value directly provided
     )
     clear_playlist = get_config_value(
         plugin, playlist_config, defaults_cfg, "clear_playlist", False
@@ -1050,13 +1054,13 @@ def generate_imported_playlist(plugin, lib, playlist_config, plex_lookup=None):
     # Create or update playlist based on clear_playlist setting
     if clear_playlist:
         try:
-            _plex_clear_playlist(plugin, playlist_name)
+            plex_clear_playlist(plugin, playlist_name)
             plugin._log.info("Cleared existing playlist {}", playlist_name)
         except Exception:
             plugin._log.debug("No existing playlist {} found", playlist_name)
 
     if unique_matched:
-        _plex_add_playlist_item(plugin, unique_matched, playlist_name)
+        plex_add_playlist_item(plugin, unique_matched, playlist_name)
         plugin._log.info(
             "Successfully created playlist {} with {} tracks",
             playlist_name,

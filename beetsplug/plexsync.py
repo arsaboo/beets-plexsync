@@ -35,9 +35,9 @@ from beetsplug.matching import plex_track_distance, clean_string
 from beetsplug.playlist_handlers import (
     import_spotify_playlist, process_spotify_track, import_apple_playlist,
     import_jiosaavn_playlist, import_m3u8_playlist, import_post_playlist,
-    add_songs_to_plex, _plex_add_playlist_item, _plex_remove_playlist_item,
-    _plex_clear_playlist, _plex_playlist_to_collection, _plex_import_playlist,
-    _plex_import_search, _plex2spotify, add_tracks_to_spotify_playlist,
+    add_songs_to_plex, plex_add_playlist_item, plex_remove_playlist_item,
+    plex_clear_playlist, plex_playlist_to_collection, plex_import_playlist,
+    plex_import_search, _plex2spotify, add_tracks_to_spotify_playlist,
     get_playlist_id, get_playlist_tracks, authenticate_spotify, process_import_logs
 )
 from beetsplug.smart_playlists import (
@@ -46,7 +46,7 @@ from beetsplug.smart_playlists import (
     select_tracks_weighted, calculate_playlist_proportions, validate_filter_config,
     _apply_exclusion_filters, _apply_inclusion_filters, apply_playlist_filters,
     get_filtered_library_tracks, generate_daily_discovery, generate_forgotten_gems,
-    generate_imported_playlist, plex_smartplaylists  # Changed from _plex_smartplaylists
+    generate_imported_playlist, plex_smartplaylists
 )
 from beetsplug.utils import (
     clean_string, get_fuzzy_score, clean_text_for_matching,
@@ -1137,3 +1137,26 @@ class PlexSync(BeetsPlugin):
             "Created playlist '{}' with {} tracks",
             playlist, len(found_tracks)
         )
+
+    def _plex_add_playlist_item(self, items, playlist):
+        """For backward compatibility, calls the standalone function."""
+        from beetsplug.playlist_handlers import plex_add_playlist_item
+        return plex_add_playlist_item(self, items, playlist)
+
+
+    def _plex_remove_playlist_item(self, items, playlist):
+        """For backward compatibility, calls the standalone function."""
+        from beetsplug.playlist_handlers import plex_remove_playlist_item
+        return plex_remove_playlist_item(self, items, playlist)
+
+
+    def _plex_clear_playlist(self, playlist):
+        """For backward compatibility, calls the standalone function."""
+        from beetsplug.playlist_handlers import plex_clear_playlist
+        return plex_clear_playlist(self, playlist)
+
+
+    def _plex_playlist_to_collection(self, playlist):
+        """For backward compatibility, calls the standalone function."""
+        from beetsplug.playlist_handlers import plex_playlist_to_collection
+        return plex_playlist_to_collection(self, playlist)

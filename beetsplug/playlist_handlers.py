@@ -353,7 +353,7 @@ def import_m3u8_playlist(self, filepath):
                         }
                 elif line.startswith('#EXTALB:'):
                     # Extract album info
-                    current_song['album'] = line[8:].strip()
+                    current_song['album'] = line[8:].trip()
                 elif not line.startswith('#'):
                     # This is a file path line - finalize the song entry
                     if current_song and all(k in current_song for k in ['title', 'artist']):
@@ -463,10 +463,10 @@ def add_songs_to_plex(self, playlist, songs, manual_search):
         self._log.warning("No songs found to add to playlist {}", playlist)
         return
 
-    self._plex_add_playlist_item(song_list, playlist)
+    plex_add_playlist_item(self, song_list, playlist)
 
 
-def _plex_add_playlist_item(plugin, items, playlist):
+def plex_add_playlist_item(plugin, items, playlist):
     """Add items to Plex playlist."""
     if not items:
         plugin._log.warning("No items to add to playlist {}", playlist)
@@ -508,7 +508,7 @@ def _plex_add_playlist_item(plugin, items, playlist):
     plugin.sort_plex_playlist(playlist, "lastViewedAt")
 
 
-def _plex_remove_playlist_item(plugin, items, playlist):
+def plex_remove_playlist_item(plugin, items, playlist):
     """Remove items from Plex playlist."""
     plex_set = set()
     try:
@@ -533,7 +533,7 @@ def _plex_remove_playlist_item(plugin, items, playlist):
     plst.removeItems(items=list(to_remove))
 
 
-def _plex_clear_playlist(plugin, playlist):
+def plex_clear_playlist(plugin, playlist):
     """Clear Plex playlist."""
     # Get the playlist
     plist = plugin.plex.playlist(playlist)
@@ -545,102 +545,102 @@ def _plex_clear_playlist(plugin, playlist):
         plist.removeItems(track)
 
 
-def _plex_playlist_to_collection(self, playlist):
+def plex_playlist_to_collection(plugin, playlist):
     """Convert a Plex playlist to a Plex collection."""
     try:
-        plst = self.music.playlist(playlist)
+        plst = plugin.music.playlist(playlist)
         playlist_set = set(plst.items())
     except exceptions.NotFound:
-        self._log.error("{} playlist not found", playlist)
+        plugin._log.error("{} playlist not found", playlist)
         return
     try:
-        col = self.music.collection(playlist)
+        col = plugin.music.collection(playlist)
         collection_set = set(col.items())
     except exceptions.NotFound:
         col = None
         collection_set = set()
     to_add = playlist_set - collection_set
-    self._log.info("Adding {} tracks to {} collection", len(to_add), playlist)
+    plugin._log.info("Adding {} tracks to {} collection", len(to_add), playlist)
     if col is None:
-        self._log.info("{} collection will be created", playlist)
-        self.music.createCollection(playlist, items=list(to_add))
+        plugin._log.info("{} collection will be created", playlist)
+        plugin.music.createCollection(playlist, items=list(to_add))
     else:
         try:
             col.addItems(items=list(to_add))
         except exceptions.BadRequest as e:
-            self._log.error(
+            plugin._log.error(
                 "Error adding items to {} collection. Error: {}",
                 playlist,
                 e,
             )
 
 
-def _plex_import_playlist(self, playlist, playlist_url=None, listenbrainz=False):
+def plex_import_playlist(plugin, playlist, playlist_url=None, listenbrainz=False):
     """Import playlist into Plex."""
     if listenbrainz:
         try:
             from beetsplug.listenbrainz import ListenBrainzPlugin
         except ModuleNotFoundError:
-            self._log.error("ListenBrainz plugin not installed")
+            plugin._log.error("ListenBrainz plugin not installed")
             return
         try:
             lb = ListenBrainzPlugin()
         except Exception as e:
-            self._log.error(
+            plugin._log.error(
                 "Unable to initialize ListenBrainz plugin. Error: {}", e
             )
             return
         # there are 2 playlists to be imported. 1. Weekly jams 2. Weekly exploration
         # get the weekly jams playlist
-        self._log.info("Importing weekly jams playlist")
+        plugin._log.info("Importing weekly jams playlist")
         weekly_jams = lb.get_weekly_jams()
-        self._log.info("Importing {} songs from Weekly Jams", len(weekly_jams))
-        self.add_songs_to_plex("Weekly Jams", weekly_jams, self.config["plexsync"]["manual_search"].get(bool))
+        plugin._log.info("Importing {} songs from Weekly Jams", len(weekly_jams))
+        plugin.add_songs_to_plex("Weekly Jams", weekly_jams, plugin.config["plexsync"]["manual_search"].get(bool))
 
-        self._log.info("Importing weekly exploration playlist")
+        plugin._log.info("Importing weekly exploration playlist")
         weekly_exploration = lb.get_weekly_exploration()
-        self._log.info(
+        plugin._log.info(
             "Importing {} songs from Weekly Exploration", len(weekly_exploration)
         )
-        self.add_songs_to_plex("Weekly Exploration", weekly_exploration, self.config["plexsync"]["manual_search"].get(bool))
+        plugin.add_songs_to_plex("Weekly Exploration", weekly_exploration, plugin.config["plexsync"]["manual_search"].get(bool))
     else:
         if playlist_url is None or (
             "http://" not in playlist_url and "https://" not in playlist_url
         ):
             raise ui.UserError("Playlist URL not provided")
         if "apple" in playlist_url:
-            songs = self.import_apple_playlist(playlist_url)
+            songs = plugin.import_apple_playlist(playlist_url)
         elif "jiosaavn" in playlist_url:
-            songs = self.import_jiosaavn_playlist(playlist_url)
+            songs = plugin.import_jiosaavn_playlist(playlist_url)
         elif "gaana.com" in playlist_url:
-            songs = self.import_gaana_playlist(playlist_url)
+            songs = plugin.import_gaana_playlist(playlist_url)
         elif "spotify" in playlist_url:
-            songs = self.import_spotify_playlist(self.get_playlist_id(playlist_url))
+            songs = plugin.import_spotify_playlist(plugin.get_playlist_id(playlist_url))
         elif "youtube" in playlist_url:
-            songs = self.import_yt_playlist(playlist_url)
+            songs = plugin.import_yt_playlist(playlist_url)
         elif "tidal" in playlist_url:
-            songs = self.import_tidal_playlist(playlist_url)
+            songs = plugin.import_tidal_playlist(playlist_url)
         else:
             songs = []
-            self._log.error("Playlist URL not supported")
-        self._log.info("Importing {} songs from {}", len(songs), playlist_url)
-        self.add_songs_to_plex(playlist, songs, self.config["plexsync"]["manual_search"].get(bool))
+            plugin._log.error("Playlist URL not supported")
+        plugin._log.info("Importing {} songs from {}", len(songs), playlist_url)
+        plugin.add_songs_to_plex(playlist, songs, plugin.config["plexsync"]["manual_search"].get(bool))
 
 
-def _plex_import_search(self, playlist, search, limit=10):
+def plex_import_search(plugin, playlist, search, limit=10):
     """Import search results into Plex."""
-    self._log.info("Searching for {}", search)
-    songs = self.import_yt_search(search, limit)
+    plugin._log.info("Searching for {}", search)
+    songs = plugin.import_yt_search(search, limit)
     song_list = []
     if songs:
         for song in songs:
-            found = self.search_plex_song(song)
+            found = plugin.search_plex_song(song)
             if found is not None:
                 song_list.append(found)
-    self._plex_add_playlist_item(song_list, playlist)
+    plugin.plex_add_playlist_item(song_list, playlist)
 
 
-def _plex2spotify(self, lib, playlist):
+def plex2spotify(self, lib, playlist):
     """Transfer Plex playlist to Spotify using plex_lookup."""
     self.authenticate_spotify()
     plex_playlist = self.plex.playlist(playlist)
@@ -911,7 +911,7 @@ def process_import_logs(self, lib, specific_log=None):
                     total_failed += 1
 
             if matched_tracks:
-                self._plex_add_playlist_item(matched_tracks, playlist_name)
+                self.plex_add_playlist_item(matched_tracks, playlist_name)
                 self._log.info("Added {} tracks to playlist {}",
                              len(matched_tracks), playlist_name)
 
