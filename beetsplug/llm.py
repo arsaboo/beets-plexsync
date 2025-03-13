@@ -14,16 +14,26 @@ from pydantic import ValidationError
 logger = logging.getLogger('beets')
 
 
-def search_track_info(query: str):
+def search_track_info(query):
     """
     Sends a search query to the Perplexica Search API and extracts structured track information.
 
     Args:
-        query (str): The user-provided search query for a song.
+        query (dict or str): The query containing track info or search string.
 
     Returns:
         dict: A dictionary containing the track's Title, Album, and Artist, with missing fields set to None.
     """
+    # Format the query - handle both string and dictionary inputs
+    formatted_query = ""
+    if isinstance(query, dict):
+        parts = []
+        if query.get("title"): parts.append(f"Title: {query['title']}")
+        if query.get("artist"): parts.append(f"Artist: {query['artist']}")
+        if query.get("album"): parts.append(f"Album: {query['album']}")
+        formatted_query = ", ".join(parts)
+    else:
+        formatted_query = str(query)
 
     payload = {
         "chatModel": {
@@ -41,7 +51,7 @@ def search_track_info(query: str):
         Do not include any explanations, markdown formatting, or additional text.
         Ensure the JSON contains the exact extracted details.
 
-        Query: {query}
+        Query: {formatted_query}
 
         Return JSON in this exact structure:
         {{

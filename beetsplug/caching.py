@@ -324,6 +324,12 @@ class Cache:
                 if row:
                     plex_ratingkey, cleaned_metadata_json = row
 
+                    # Explicitly check for None values
+                    if plex_ratingkey is None:
+                        logger.warning('Null rating key in cache for query: {}, treating as cache miss',
+                                      self._sanitize_query_for_log(cache_key))
+                        return None
+
                     # Ensure we're returning just the integer rating key
                     if isinstance(plex_ratingkey, str) and plex_ratingkey.isdigit():
                         plex_ratingkey = int(plex_ratingkey)

@@ -828,6 +828,10 @@ class PlexSync(BeetsPlugin):
 
             try:
                 # Ensure cached_result is an integer
+                if cached_result is None:
+                    self._log.debug("Cached result is None, will search again")
+                    return None
+
                 rating_key = int(cached_result) if isinstance(cached_result, (int, str)) else None
                 if rating_key:
                     return self.plex.fetchItem(rating_key)
@@ -852,7 +856,8 @@ class PlexSync(BeetsPlugin):
         cleaned_metadata = None
         if self.search_llm:
             try:
-                cleaned_metadata = search_track_info(self.search_llm, song)
+                # Pass just the song dictionary, not self.search_llm
+                cleaned_metadata = search_track_info(song)
                 if cleaned_metadata:
                     self._log.debug("LLM cleaned metadata: {}", cleaned_metadata)
                     # Use cleaned metadata for search
