@@ -323,13 +323,21 @@ class Cache:
 
                 if row:
                     plex_ratingkey, cleaned_metadata_json = row
+
+                    # Ensure we're returning just the integer rating key
+                    if isinstance(plex_ratingkey, str) and plex_ratingkey.isdigit():
+                        plex_ratingkey = int(plex_ratingkey)
+                    elif plex_ratingkey != -1 and not isinstance(plex_ratingkey, int):
+                        logger.warning('Invalid rating key in cache: {}, treating as cache miss', plex_ratingkey)
+                        return None
+
                     cleaned_metadata = json.loads(cleaned_metadata_json) if cleaned_metadata_json else None
 
                     logger.debug('Cache hit for query: {} (rating_key: {}, cleaned: {})',
                                self._sanitize_query_for_log(cache_key),
                                plex_ratingkey,
                                cleaned_metadata)
-                    return (plex_ratingkey, cleaned_metadata)
+                    return plex_ratingkey
 
                 logger.debug('Cache miss for query: {}',
                             self._sanitize_query_for_log(cache_key))
@@ -356,8 +364,15 @@ class Cache:
             # Also store normalized version
             normalized_key = self._make_cache_key(query)
 
-            # Use -1 for negative cache entries (when plex_ratingkey is None)
-            rating_key = -1 if plex_ratingkey is None else int(plex_ratingkey)
+            # Ensure plex_ratingkey is an integer or -1 for negative cache
+            if plex_ratingkey is None:
+                rating_key = -1
+            else:
+                try:
+                    rating_key = int(plex_ratingkey)
+                except (ValueError, TypeError):
+                    logger.warning('Invalid rating key: {}, using negative cache', plex_ratingkey)
+                    rating_key = -1
 
             # Store cleaned metadata as JSON string
             cleaned_json = json.dumps(cleaned_metadata, default=datetime_handler) if cleaned_metadata else None

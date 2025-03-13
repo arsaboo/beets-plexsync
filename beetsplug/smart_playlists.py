@@ -952,27 +952,33 @@ def generate_imported_playlist(plugin, lib, playlist_config, plex_lookup=None):
         f.write("-" * 80 + "\n")
 
     for track in all_tracks:
-        found = plugin.search_plex_song(track, manual_search)
-        if found:
-            # Just use Plex rating directly
-            plex_rating = float(getattr(found, "userRating", 0) or 0)
+        try:
+            found = plugin.search_plex_song(track, manual_search)
+            if found:
+                # Just use Plex rating directly
+                plex_rating = float(getattr(found, "userRating", 0) or 0)
 
-            if plex_rating == 0 or plex_rating > 2:  # Include unrated or rating > 2
-                matched_songs.append(found)
-                plugin._log.debug(
-                    "Matched in Plex: {} - {} - {} (Rating: {})",
-                    track.get('artist', 'Unknown'),
-                    track.get('parentTitle', 'Unknown'),
-                    track.get('title', 'Unknown'),
-                    plex_rating
-                )
+                if plex_rating == 0 or plex_rating > 2:  # Include unrated or rating > 2
+                    matched_songs.append(found)
+                    plugin._log.debug(
+                        "Matched in Plex: {} - {} - {} (Rating: {})",
+                        getattr(found, 'artist', lambda: {'tag': 'Unknown'})().tag,
+                        getattr(found, 'parentTitle', 'Unknown'),
+                        getattr(found, 'title', 'Unknown'),
+                        plex_rating
+                    )
+                else:
+                    with open(log_file, 'a', encoding='utf-8') as f:
+                        f.write(f"Low rated ({plex_rating}): {track.get('artist', 'Unknown')} - {track.get('album', 'Unknown')} - {track.get('title', 'Unknown')}\n")
             else:
+                not_found_count += 1
                 with open(log_file, 'a', encoding='utf-8') as f:
-                    f.write(f"Low rated ({plex_rating}): {track.get('artist', 'Unknown')} - {track.get('parentTitle', 'Unknown')} - {track.get('title', 'Unknown')}\n")
-        else:
+                    f.write(f"Not found: {track.get('artist', 'Unknown')} - {track.get('album', 'Unknown')} - {track.get('title', 'Unknown')}\n")
+        except Exception as e:
+            plugin._log.error("Error processing track {}: {}", track.get('title', 'Unknown'), e)
             not_found_count += 1
             with open(log_file, 'a', encoding='utf-8') as f:
-                f.write(f"Not found: {track.get('artist', 'Unknown')} - {track.get('parentTitle', 'Unknown')} - {track.get('title', 'Unknown')}\n")
+                f.write(f"Error: {track.get('artist', 'Unknown')} - {track.get('album', 'Unknown')} - {track.get('title', 'Unknown')} ({str(e)})\n")
 
     # Get filters from config and apply them
     filters = playlist_config.get("filters", {})

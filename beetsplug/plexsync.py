@@ -827,10 +827,17 @@ class PlexSync(BeetsPlugin):
                 return None
 
             try:
-                return self.plex.fetchItem(cached_result)
+                # Ensure cached_result is an integer
+                rating_key = int(cached_result) if isinstance(cached_result, (int, str)) else None
+                if rating_key:
+                    return self.plex.fetchItem(rating_key)
+                else:
+                    self._log.debug("Invalid cached result: {}, will search again", cached_result)
+            except (TypeError, ValueError) as e:
+                self._log.debug("Error parsing cached rating key {}: {}", cached_result, e)
             except exceptions.NotFound:
                 self._log.debug("Cached item not found in Plex, will search again")
-                # Continue with search since cached item wasn't found
+            # Continue with search since cached item wasn't found or was invalid
 
         # Extract song metadata
         title = song.get("title", "")
