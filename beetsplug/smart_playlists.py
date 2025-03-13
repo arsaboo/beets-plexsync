@@ -1057,20 +1057,21 @@ def generate_imported_playlist(self, lib, playlist_config, plex_lookup=None):
         self._log.warning("No tracks remaining after filtering for {}", playlist_name)
 
 
-def plex_smartplaylists(self, lib, playlists_config):
+def plex_smartplaylists(plugin, lib, playlists_config):
     """Process all playlists at once with a single lookup dictionary."""
     # Build lookup once for all playlists
-    self._log.info("Building Plex lookup dictionary...")
-    plex_lookup = self.build_plex_lookup(lib)
-    self._log.debug("Found {} tracks in lookup dictionary", len(plex_lookup))
+    plugin._log.info("Building Plex lookup dictionary...")
+    # Use the plugin's own build_plex_lookup method instead of trying to import it
+    plex_lookup = plugin.build_plex_lookup(lib)
+    plugin._log.debug("Found {} tracks in lookup dictionary", len(plex_lookup))
 
     # Get preferred attributes once if needed for smart playlists
     preferred_genres = None
     similar_tracks = None
     if any(p.get("id") in ["daily_discovery", "forgotten_gems"] for p in playlists_config):
-        preferred_genres, similar_tracks = self.get_preferred_attributes()
-        self._log.debug("Using preferred genres: {}", preferred_genres)
-        self._log.debug("Processing {} pre-filtered similar tracks", len(similar_tracks))
+        preferred_genres, similar_tracks = get_preferred_attributes(plugin)
+        plugin._log.debug("Using preferred genres: {}", preferred_genres)
+        plugin._log.debug("Processing {} pre-filtered similar tracks", len(similar_tracks))
 
     # Process each playlist
     for p in playlists_config:
@@ -1079,14 +1080,14 @@ def plex_smartplaylists(self, lib, playlists_config):
         playlist_name = p.get("name", "Unnamed playlist")
 
         if (playlist_type == "imported"):
-            self.generate_imported_playlist(lib, p, plex_lookup)  # Pass plex_lookup
+            generate_imported_playlist(plugin, lib, p, plex_lookup)  # Pass plex_lookup
         elif playlist_id in ["daily_discovery", "forgotten_gems"]:
             if playlist_id == "daily_discovery":
-                self.generate_daily_discovery(lib, p, plex_lookup, preferred_genres, similar_tracks)
+                generate_daily_discovery(plugin, lib, p, plex_lookup, preferred_genres, similar_tracks)
             else:  # forgotten_gems
-                self.generate_forgotten_gems(lib, p, plex_lookup, preferred_genres, similar_tracks)
+                generate_forgotten_gems(plugin, lib, p, plex_lookup, preferred_genres, similar_tracks)
         else:
-            self._log.warning(
+            plugin._log.warning(
                 "Unrecognized playlist configuration '{}' - type: '{}', id: '{}'. "
                 "Valid types are 'imported' or 'smart'. "
                 "Valid smart playlist IDs are 'daily_discovery' and 'forgotten_gems'.",
