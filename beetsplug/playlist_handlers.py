@@ -466,15 +466,15 @@ def add_songs_to_plex(self, playlist, songs, manual_search):
     self._plex_add_playlist_item(song_list, playlist)
 
 
-def _plex_add_playlist_item(self, items, playlist):
+def _plex_add_playlist_item(plugin, items, playlist):
     """Add items to Plex playlist."""
     if not items:
-        self._log.warning("No items to add to playlist {}", playlist)
+        plugin._log.warning("No items to add to playlist {}", playlist)
         return
 
     plex_set = set()
     try:
-        plst = self.plex.playlist(playlist)
+        plst = plugin.plex.playlist(playlist)
         playlist_set = set(plst.items())
     except exceptions.NotFound:
         plst = None
@@ -484,59 +484,59 @@ def _plex_add_playlist_item(self, items, playlist):
             # Check for both plex_ratingkey and ratingKey
             rating_key = getattr(item, 'plex_ratingkey', None) or getattr(item, 'ratingKey', None)
             if rating_key:
-                plex_set.add(self.plex.fetchItem(rating_key))
+                plex_set.add(plugin.plex.fetchItem(rating_key))
             else:
-                self._log.warning("{} does not have plex_ratingkey or ratingKey attribute. Item details: {}", item, vars(item))
+                plugin._log.warning("{} does not have plex_ratingkey or ratingKey attribute. Item details: {}", item, vars(item))
         except (exceptions.NotFound, AttributeError) as e:
-            self._log.warning("{} not found in Plex library. Error: {}", item, e)
+            plugin._log.warning("{} not found in Plex library. Error: {}", item, e)
             continue
     to_add = plex_set - playlist_set
-    self._log.info("Adding {} tracks to {} playlist", len(to_add), playlist)
+    plugin._log.info("Adding {} tracks to {} playlist", len(to_add), playlist)
     if plst is None:
-        self._log.info("{} playlist will be created", playlist)
-        self.plex.createPlaylist(playlist, items=list(to_add))
+        plugin._log.info("{} playlist will be created", playlist)
+        plugin.plex.createPlaylist(playlist, items=list(to_add))
     else:
         try:
             plst.addItems(items=list(to_add))
         except exceptions.BadRequest as e:
-            self._log.error(
+            plugin._log.error(
                 "Error adding items {} to {} playlist. Error: {}",
                 items,
                 playlist,
                 e,
             )
-    self.sort_plex_playlist(playlist, "lastViewedAt")
+    plugin.sort_plex_playlist(playlist, "lastViewedAt")
 
 
-def _plex_remove_playlist_item(self, items, playlist):
+def _plex_remove_playlist_item(plugin, items, playlist):
     """Remove items from Plex playlist."""
     plex_set = set()
     try:
-        plst = self.plex.playlist(playlist)
+        plst = plugin.plex.playlist(playlist)
         playlist_set = set(plst.items())
     except exceptions.NotFound:
-        self._log.error("{} playlist not found", playlist)
+        plugin._log.error("{} playlist not found", playlist)
         return
     for item in items:
         try:
-            plex_set.add(self.plex.fetchItem(item.plex_ratingkey))
+            plex_set.add(plugin.plex.fetchItem(item.plex_ratingkey))
         except (
             exceptions.NotFound,
             AttributeError,
             requests.exceptions.ContentDecodingError,
             requests.exceptions.ConnectionError,
         ) as e:
-            self._log.warning("{} not found in Plex library. Error: {}", item, e)
+            plugin._log.warning("{} not found in Plex library. Error: {}", item, e)
             continue
     to_remove = plex_set.intersection(playlist_set)
-    self._log.info("Removing {} tracks from {} playlist", len(to_remove), playlist)
+    plugin._log.info("Removing {} tracks from {} playlist", len(to_remove), playlist)
     plst.removeItems(items=list(to_remove))
 
 
-def _plex_clear_playlist(self, playlist):
+def _plex_clear_playlist(plugin, playlist):
     """Clear Plex playlist."""
     # Get the playlist
-    plist = self.plex.playlist(playlist)
+    plist = plugin.plex.playlist(playlist)
     # Get a list of all the tracks in the playlist
     tracks = plist.items()
     # Loop through each track
