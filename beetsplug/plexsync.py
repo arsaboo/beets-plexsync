@@ -46,7 +46,7 @@ from beetsplug.smart_playlists import (
     select_tracks_weighted, calculate_playlist_proportions, validate_filter_config,
     _apply_exclusion_filters, _apply_inclusion_filters, apply_playlist_filters,
     get_filtered_library_tracks, generate_daily_discovery, generate_forgotten_gems,
-    generate_imported_playlist, _plex_smartplaylists
+    generate_imported_playlist, plex_smartplaylists  # Changed from _plex_smartplaylists
 )
 from beetsplug.utils import (
     clean_string, get_fuzzy_score, clean_text_for_matching,
@@ -461,7 +461,7 @@ class PlexSync(BeetsPlugin):
                 return
 
             # Process all playlists at once
-            self._plex_smartplaylists(lib, playlists_config)
+            plex_smartplaylists(self, lib, playlists_config)
 
         plex_smartplaylists_cmd.func = func_plex_smartplaylists
 

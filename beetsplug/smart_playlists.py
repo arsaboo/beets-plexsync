@@ -153,7 +153,7 @@ def calculate_track_score(self, track, base_time=None, tracks_context=None):
     release_year = getattr(track, 'year', None)
 
     # Convert release year to age
-    if release_year:
+    if (release_year):
         try:
             release_year = int(release_year)
             age = base_time.year - release_year
@@ -163,7 +163,7 @@ def calculate_track_score(self, track, base_time=None, tracks_context=None):
         age = 0  # Default to 0 if year is missing
 
     # For never played tracks, use exponential random distribution
-    if last_played is None:
+    if (last_played is None):
         # Use exponential distribution with mean=365 days
         days_since_played = np.random.exponential(365)
     else:
@@ -172,7 +172,7 @@ def calculate_track_score(self, track, base_time=None, tracks_context=None):
         days_since_played = min(days, 1095)  # Cap at 3 years
 
     # If we have context tracks, calculate means and stds
-    if tracks_context:
+    if (tracks_context):
         # Get values for all tracks
         all_ratings = [float(getattr(t, 'plex_userrating', 0)) for t in tracks_context]
         all_days = [
@@ -210,7 +210,7 @@ def calculate_track_score(self, track, base_time=None, tracks_context=None):
     is_rated = rating > 0
 
     # Apply weights based on rating status
-    if is_rated:
+    if (is_rated):
         # For rated tracks: rating=50%, recency=10%, popularity=10%, age=20%
         weighted_score = (z_rating * 0.5) + (z_recency * 0.1) + (z_popularity * 0.1) + (z_age * 0.2)
     else:
@@ -226,7 +226,7 @@ def calculate_track_score(self, track, base_time=None, tracks_context=None):
     final_score = final_score + noise
 
     # Apply a minimum threshold of 50 for unrated tracks to ensure quality
-    if not is_rated and final_score < 50:
+    if (not is_rated and final_score < 50):
         final_score = 50 + (final_score / 2)  # Scale lower scores up but keep relative ordering
 
     # Debug logging
@@ -1057,7 +1057,7 @@ def generate_imported_playlist(self, lib, playlist_config, plex_lookup=None):
         self._log.warning("No tracks remaining after filtering for {}", playlist_name)
 
 
-def _plex_smartplaylists(self, lib, playlists_config):
+def plex_smartplaylists(self, lib, playlists_config):
     """Process all playlists at once with a single lookup dictionary."""
     # Build lookup once for all playlists
     self._log.info("Building Plex lookup dictionary...")
