@@ -54,6 +54,9 @@ from beetsplug.utils import (
     parse_title, clean_album_name, clean_title, get_color_for_score
 )
 
+# Import build_plex_lookup from core.py to avoid duplication
+from beetsplug.core import build_plex_lookup
+
 
 class Song(BaseModel):
     title: str
@@ -961,38 +964,8 @@ class PlexSync(BeetsPlugin):
         return track
 
     def build_plex_lookup(self, lib):
-        """Build a lookup dictionary from Plex ratingKey to beets Item."""
-        plex_lookup = {}
-
-        try:
-            # Try different query approaches
-            try:
-                # Method 1: Try to get all items with non-null plex_ratingkey
-                items = lib.items('plex_ratingkey:+')
-            except Exception:
-                try:
-                    # Method 2: Try using MatchQuery directly
-                    from beets.dbcore.query import MatchQuery
-                    items = lib.items(MatchQuery('plex_ratingkey', 0, '>', True))
-                except Exception:
-                    # Method 3: Fallback to getting all items and filtering
-                    self._log.debug("Falling back to loading all items and filtering")
-                    items = []
-                    # Get items in batches to avoid memory issues
-                    for item in lib.items():
-                        if hasattr(item, 'plex_ratingkey') and item.plex_ratingkey is not None:
-                            items.append(item)
-
-            # Build the lookup table
-            for item in items:
-                if hasattr(item, 'plex_ratingkey') and item.plex_ratingkey is not None:
-                    plex_lookup[item.plex_ratingkey] = item
-
-            self._log.debug("Built Plex lookup with {} items", len(plex_lookup))
-        except Exception as e:
-            self._log.error("Error building Plex lookup: {}", e)
-
-        return plex_lookup
+        """Wrapper method that calls the core function."""
+        return build_plex_lookup(self, lib)
 
     def setup_llm(self):
         """Set up LLM client for search cleaning."""

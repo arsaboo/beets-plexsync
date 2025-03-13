@@ -1,4 +1,4 @@
-"""General utility functions for PlexSync plugin."""
+"""General utility functions that have no dependencies on other plugin modules."""
 
 import re
 from difflib import SequenceMatcher

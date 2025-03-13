@@ -7,6 +7,9 @@ from datetime import datetime, timedelta
 import numpy as np
 from scipy import stats
 
+# Import core shared function
+from beetsplug.core import build_plex_lookup
+
 
 def get_preferred_attributes(self):
     """Determine preferred genres and similar tracks based on user listening habits."""
@@ -1061,8 +1064,8 @@ def plex_smartplaylists(plugin, lib, playlists_config):
     """Process all playlists at once with a single lookup dictionary."""
     # Build lookup once for all playlists
     plugin._log.info("Building Plex lookup dictionary...")
-    # Use the plugin's own build_plex_lookup method instead of trying to import it
-    plex_lookup = plugin.build_plex_lookup(lib)
+    # Use the function from core.py
+    plex_lookup = build_plex_lookup(plugin, lib)
     plugin._log.debug("Found {} tracks in lookup dictionary", len(plex_lookup))
 
     # Get preferred attributes once if needed for smart playlists

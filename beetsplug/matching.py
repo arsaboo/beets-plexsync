@@ -4,7 +4,8 @@ import re
 from difflib import SequenceMatcher
 
 from beetsplug.utils import (
-    clean_string, calculate_string_similarity, calculate_artist_similarity
+    clean_string, calculate_string_similarity, calculate_artist_similarity,
+    clean_text_for_matching, get_fuzzy_score
 )
 
 
