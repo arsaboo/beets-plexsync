@@ -960,9 +960,23 @@ def generate_imported_playlist(plugin, lib, playlist_config, plex_lookup=None):
 
                 if plex_rating == 0 or plex_rating > 2:  # Include unrated or rating > 2
                     matched_songs.append(found)
+                    # Fix the artist access issue - safely extract artist name
+                    artist_name = "Unknown"
+                    try:
+                        if hasattr(found, 'artist') and callable(found.artist):
+                            artist_obj = found.artist()
+                            if hasattr(artist_obj, 'title'):
+                                artist_name = artist_obj.title
+                            elif hasattr(artist_obj, 'name'):
+                                artist_name = artist_obj.name
+                        elif hasattr(found, 'originalTitle'):
+                            artist_name = found.originalTitle
+                    except Exception:
+                        pass
+
                     plugin._log.debug(
                         "Matched in Plex: {} - {} - {} (Rating: {})",
-                        getattr(found, 'artist', lambda: {'tag': 'Unknown'})().tag,
+                        artist_name,
                         getattr(found, 'parentTitle', 'Unknown'),
                         getattr(found, 'title', 'Unknown'),
                         plex_rating
