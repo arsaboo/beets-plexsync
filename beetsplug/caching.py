@@ -303,61 +303,54 @@ class Cache:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                # Normalize the query for lookup
                 cache_key = self._make_cache_key(query)
 
-                # Try exact match first
+                # Try both original and normalized query in a single SQL query with OR
                 cursor.execute(
-                    'SELECT plex_ratingkey, cleaned_query FROM cache WHERE query = ?',
-                    (json.dumps(query) if isinstance(query, dict) else query,)
+                    '''SELECT plex_ratingkey, cleaned_query FROM cache
+                       WHERE query = ? OR query = ?''',
+                    (
+                        json.dumps(query) if isinstance(query, dict) else query,
+                        cache_key
+                    )
                 )
                 row = cursor.fetchone()
-
-                if not row:
-                    # Try normalized match if exact match fails
-                    cursor.execute(
-                        'SELECT plex_ratingkey, cleaned_query FROM cache WHERE query = ?',
-                        (cache_key,)
-                    )
-                    row = cursor.fetchone()
 
                 if row:
                     plex_ratingkey, cleaned_metadata_json = row
 
-                    # Explicitly check for None values and skip entirely
-                    if plex_ratingkey is None:
-                        logger.warning('Null rating key in cache for query: {}, treating as cache miss',
-                                      self._sanitize_query_for_log(cache_key))
-                        # Delete the invalid entry
-                        cursor.execute('DELETE FROM cache WHERE query = ?', (cache_key,))
+                    # Handle invalid values - simplified validation
+                    if plex_ratingkey is None or (plex_ratingkey != -1 and
+                                                not isinstance(plex_ratingkey, int) and
+                                                not (isinstance(plex_ratingkey, str) and plex_ratingkey.isdigit())):
+                        logger.warning('Invalid rating key in cache: {}, removing entry', plex_ratingkey)
+                        self._remove_invalid_cache_entry(cursor, cache_key)
                         conn.commit()
                         return None
 
-                    # Ensure we're returning just the integer rating key
+                    # Convert string to int if needed
                     if isinstance(plex_ratingkey, str) and plex_ratingkey.isdigit():
                         plex_ratingkey = int(plex_ratingkey)
-                    elif plex_ratingkey != -1 and not isinstance(plex_ratingkey, int):
-                        logger.warning('Invalid rating key in cache: {}, treating as cache miss', plex_ratingkey)
-                        # Delete the invalid entry
-                        cursor.execute('DELETE FROM cache WHERE query = ?', (cache_key,))
-                        conn.commit()
-                        return None
 
+                    # Process metadata
                     cleaned_metadata = json.loads(cleaned_metadata_json) if cleaned_metadata_json else None
-
-                    logger.debug('Cache hit for query: {} (rating_key: {}, cleaned: {})',
-                               self._sanitize_query_for_log(cache_key),
-                               plex_ratingkey,
-                               cleaned_metadata)
+                    logger.debug('Cache hit for query: {} (rating_key: {})',
+                               self._sanitize_query_for_log(cache_key), plex_ratingkey)
                     return plex_ratingkey
 
-                logger.debug('Cache miss for query: {}',
-                            self._sanitize_query_for_log(cache_key))
+                logger.debug('Cache miss for query: {}', self._sanitize_query_for_log(cache_key))
                 return None
 
         except Exception as e:
             logger.error('Cache lookup failed: {}', str(e))
             return None
+
+    def _remove_invalid_cache_entry(self, cursor, cache_key):
+        """Helper method to remove invalid cache entries."""
+        try:
+            cursor.execute('DELETE FROM cache WHERE query = ?', (cache_key,))
+        except Exception as e:
+            logger.error('Error removing invalid cache entry: {}', e)
 
     def set(self, query, plex_ratingkey, cleaned_metadata=None):
         """Store both original and cleaned metadata in cache."""

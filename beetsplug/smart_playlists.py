@@ -946,53 +946,8 @@ def generate_imported_playlist(plugin, lib, playlist_config, plex_lookup=None):
         return
 
     # Process tracks through Plex first
-    matched_songs = []
-    with open(log_file, 'a', encoding='utf-8') as f:
-        f.write("\nTracks not found in Plex library:\n")
-        f.write("-" * 80 + "\n")
-
-    for track in all_tracks:
-        try:
-            found = plugin.search_plex_song(track, manual_search)
-            if found:
-                # Just use Plex rating directly
-                plex_rating = float(getattr(found, "userRating", 0) or 0)
-
-                if plex_rating == 0 or plex_rating > 2:  # Include unrated or rating > 2
-                    matched_songs.append(found)
-                    # Fix the artist access issue - safely extract artist name
-                    artist_name = "Unknown"
-                    try:
-                        if hasattr(found, 'artist') and callable(found.artist):
-                            artist_obj = found.artist()
-                            if hasattr(artist_obj, 'title'):
-                                artist_name = artist_obj.title
-                            elif hasattr(artist_obj, 'name'):
-                                artist_name = artist_obj.name
-                        elif hasattr(found, 'originalTitle'):
-                            artist_name = found.originalTitle
-                    except Exception:
-                        pass
-
-                    plugin._log.debug(
-                        "Matched in Plex: {} - {} - {} (Rating: {})",
-                        artist_name,
-                        getattr(found, 'parentTitle', 'Unknown'),
-                        getattr(found, 'title', 'Unknown'),
-                        plex_rating
-                    )
-                else:
-                    with open(log_file, 'a', encoding='utf-8') as f:
-                        f.write(f"Low rated ({plex_rating}): {track.get('artist', 'Unknown')} - {track.get('album', 'Unknown')} - {track.get('title', 'Unknown')}\n")
-            else:
-                not_found_count += 1
-                with open(log_file, 'a', encoding='utf-8') as f:
-                    f.write(f"Not found: {track.get('artist', 'Unknown')} - {track.get('album', 'Unknown')} - {track.get('title', 'Unknown')}\n")
-        except Exception as e:
-            plugin._log.error("Error processing track {}: {}", track.get('title', 'Unknown'), e)
-            not_found_count += 1
-            with open(log_file, 'a', encoding='utf-8') as f:
-                f.write(f"Error: {track.get('artist', 'Unknown')} - {track.get('album', 'Unknown')} - {track.get('title', 'Unknown')} ({str(e)})\n")
+    matched_songs, not_found_count = _process_imported_tracks(
+        plugin, all_tracks, manual_search, log_file)
 
     # Get filters from config and apply them
     filters = playlist_config.get("filters", {})
@@ -1088,6 +1043,80 @@ def generate_imported_playlist(plugin, lib, playlist_config, plex_lookup=None):
         )
     else:
         plugin._log.warning("No tracks remaining after filtering for {}", playlist_name)
+
+
+def _process_imported_tracks(plugin, tracks, manual_search, log_file):
+    """Process imported tracks to find matches in Plex."""
+    matched_songs = []
+    not_found_count = 0
+
+    with open(log_file, 'a', encoding='utf-8') as f:
+        f.write("\nTracks not found in Plex library:\n")
+        f.write("-" * 80 + "\n")
+
+    for track in tracks:
+        try:
+            found = plugin.search_plex_song(track, manual_search)
+            if found:
+                # Just use Plex rating directly
+                plex_rating = float(getattr(found, "userRating", 0) or 0)
+
+                if plex_rating == 0 or plex_rating > 2:  # Include unrated or rating > 2
+                    matched_songs.append(found)
+                    # Get artist name safely
+                    artist_name = _get_safe_artist_name(found)
+
+                    plugin._log.debug(
+                        "Matched in Plex: {} - {} - {} (Rating: {})",
+                        artist_name,
+                        getattr(found, 'parentTitle', 'Unknown'),
+                        getattr(found, 'title', 'Unknown'),
+                        plex_rating
+                    )
+                else:
+                    _log_low_rated_track(track, plex_rating, log_file)
+            else:
+                not_found_count += 1
+                _log_not_found_track(track, log_file)
+        except Exception as e:
+            plugin._log.error("Error processing track {}: {}", track.get('title', 'Unknown'), e)
+            not_found_count += 1
+            _log_error_track(track, e, log_file)
+
+    return matched_songs, not_found_count
+
+def _get_safe_artist_name(track):
+    """Extract artist name safely from track object."""
+    try:
+        if hasattr(track, 'artist') and callable(track.artist):
+            artist_obj = track.artist()
+            if hasattr(artist_obj, 'title'):
+                return artist_obj.title
+            elif hasattr(artist_obj, 'name'):
+                return artist_obj.name
+        if hasattr(track, 'originalTitle'):
+            return track.originalTitle
+    except Exception:
+        pass
+    return "Unknown"
+
+def _log_low_rated_track(track, rating, log_file):
+    """Log low-rated track to file."""
+    with open(log_file, 'a', encoding='utf-8') as f:
+        f.write(f"Low rated ({rating}): {track.get('artist', 'Unknown')} - "
+                f"{track.get('album', 'Unknown')} - {track.get('title', 'Unknown')}\n")
+
+def _log_not_found_track(track, log_file):
+    """Log not found track to file."""
+    with open(log_file, 'a', encoding='utf-8') as f:
+        f.write(f"Not found: {track.get('artist', 'Unknown')} - "
+                f"{track.get('album', 'Unknown')} - {track.get('title', 'Unknown')}\n")
+
+def _log_error_track(track, error, log_file):
+    """Log error track to file."""
+    with open(log_file, 'a', encoding='utf-8') as f:
+        f.write(f"Error: {track.get('artist', 'Unknown')} - "
+                f"{track.get('album', 'Unknown')} - {track.get('title', 'Unknown')} ({str(error)})\n")
 
 
 def plex_smartplaylists(plugin, lib, playlists_config):

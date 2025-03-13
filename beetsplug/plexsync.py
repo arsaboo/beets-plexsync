@@ -852,12 +852,11 @@ class PlexSync(BeetsPlugin):
             self._log.debug("Missing required metadata: title={}, artist={}", title, artist)
             return None
 
-        # Try to clean up the metadata using LLM if enabled
+        # Try to clean up the metadata using LLM if enabled - simplified approach
         cleaned_metadata = None
         if self.search_llm:
             try:
-                # Pass just the song dictionary directly to the function
-                from beetsplug.llm import search_track_info
+                # Direct function call without unnecessary wrapper class
                 cleaned_metadata = search_track_info(song)
                 if cleaned_metadata:
                     self._log.debug("LLM cleaned metadata: {}", cleaned_metadata)
@@ -981,9 +980,9 @@ class PlexSync(BeetsPlugin):
         return build_plex_lookup(self, lib)
 
     def setup_llm(self):
-        """Set up LLM client for search cleaning."""
+        """Set up LLM client for search cleaning - simplified approach."""
         try:
-            # No need for a client wrapper class, just reference the function directly
+            # Simplify LLM integration by just setting a flag
             self._log.debug("Setting up LLM integration")
             self.llm_client = True  # Just a flag to indicate LLM is available
         except Exception as e:
