@@ -324,10 +324,13 @@ class Cache:
                 if row:
                     plex_ratingkey, cleaned_metadata_json = row
 
-                    # Explicitly check for None values
+                    # Explicitly check for None values and skip entirely
                     if plex_ratingkey is None:
                         logger.warning('Null rating key in cache for query: {}, treating as cache miss',
                                       self._sanitize_query_for_log(cache_key))
+                        # Delete the invalid entry
+                        cursor.execute('DELETE FROM cache WHERE query = ?', (cache_key,))
+                        conn.commit()
                         return None
 
                     # Ensure we're returning just the integer rating key
@@ -335,6 +338,9 @@ class Cache:
                         plex_ratingkey = int(plex_ratingkey)
                     elif plex_ratingkey != -1 and not isinstance(plex_ratingkey, int):
                         logger.warning('Invalid rating key in cache: {}, treating as cache miss', plex_ratingkey)
+                        # Delete the invalid entry
+                        cursor.execute('DELETE FROM cache WHERE query = ?', (cache_key,))
+                        conn.commit()
                         return None
 
                     cleaned_metadata = json.loads(cleaned_metadata_json) if cleaned_metadata_json else None

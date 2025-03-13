@@ -35,37 +35,44 @@ def search_track_info(query):
     else:
         formatted_query = str(query)
 
-    payload = {
-        "chatModel": {
-            "provider": config["llm"]["search"]["provider"].get(),
-            "model": config["llm"]["search"]["model"].get()
-        },
-        "embeddingModel": {
-            "provider": config["llm"]["search"]["provider"].get(),
-            "model": config["llm"]["search"]["embedding_model"].get()
-        },
-        "optimizationMode": "balanced",
-        "focusMode": "webSearch",
-        "query": f"""
-        Extract structured music metadata from the following query and return ONLY in JSON format.
-        Do not include any explanations, markdown formatting, or additional text.
-        Ensure the JSON contains the exact extracted details.
-
-        Query: {formatted_query}
-
-        Return JSON in this exact structure:
-        {{
-            "Title": "<track title>",
-            "Album": "<album name>",
-            "Artist": "<artist name>"
-        }}
-        """,
-        "history": []
-    }
-
-    base_url = config["llm"]["search"]["base_url"].get()
+    # For debugging
+    logger.debug("Processing query: {}", formatted_query)
 
     try:
+        # Get API configuration
+        base_url = config["llm"]["search"]["base_url"].get()
+        provider = config["llm"]["search"]["provider"].get()
+        model = config["llm"]["search"]["model"].get()
+        embed_model = config["llm"]["search"]["embedding_model"].get()
+
+        payload = {
+            "chatModel": {
+                "provider": provider,
+                "model": model
+            },
+            "embeddingModel": {
+                "provider": provider,
+                "model": embed_model
+            },
+            "optimizationMode": "balanced",
+            "focusMode": "webSearch",
+            "query": f"""
+            Extract structured music metadata from the following query and return ONLY in JSON format.
+            Do not include any explanations, markdown formatting, or additional text.
+            Ensure the JSON contains the exact extracted details.
+
+            Query: {formatted_query}
+
+            Return JSON in this exact structure:
+            {{
+                "Title": "<track title>",
+                "Album": "<album name>",
+                "Artist": "<artist name>"
+            }}
+            """,
+            "history": []
+        }
+
         response = requests.post(base_url, json=payload, timeout=30)
         logger.debug("API Response: {}", response.json().get("message"))
         if not response.text.strip():
@@ -103,6 +110,10 @@ def search_track_info(query):
     except requests.exceptions.RequestException as e:
         logger.error("Request Error: {}", str(e))
         return None  # Return None on API failure
+
+    except Exception as e:
+        logger.error("LLM search error: {}", str(e))
+        return None
 
 def clean_json_string(json_string: str):
     """
