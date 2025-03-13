@@ -1,152 +1,161 @@
-"""Custom matching utilities for PlexSync plugin."""
+"""Track matching and search functionality for PlexSync plugin."""
 
 import re
-from typing import Optional, Tuple
+from difflib import SequenceMatcher
 
-from beets.autotag import hooks
-from beets.library import Item
-from plexapi.audio import Track
-
-
-def clean_string(s: str) -> str:
-    """Clean a string for comparison by removing common variations."""
-    if not s:
-        return ""
-
-    s = s.lower()
-
-    # Remove common prefixes/suffixes
-    s = re.sub(r"^the\s+", "", s)
-    s = re.sub(r"\s*\([^)]*\)", "", s)  # Remove parentheses and contents
-    s = re.sub(r"\s*\[[^\]]*\]", "", s)  # Remove brackets and contents
-    s = re.sub(r"\s*feat\.?\s.*$", "", s, flags=re.IGNORECASE)  # Remove featuring
-    s = re.sub(r"\s*ft\.?\s.*$", "", s, flags=re.IGNORECASE)  # Remove ft.
-    s = re.sub(r"\s*with\s.*$", "", s, flags=re.IGNORECASE)  # Remove with...
-
-    # Normalize separators
-    s = re.sub(r"[&,/\\]", " and ", s)
-    s = re.sub(r"\s+", " ", s)  # Normalize whitespace
-
-    # Add handling for year variations
-    s = re.sub(r"\s*\d{4}\s*$", "", s)  # Remove year at end
-
-    return s.strip()
+from beetsplug.utils import (
+    clean_string, calculate_string_similarity, calculate_artist_similarity
+)
 
 
-def artist_distance(str1: str, str2: str) -> float:
-    """Calculate artist name distance with special handling for multiple artists."""
-    if not str1 or not str2:
-        return 1.0
+def plex_track_distance(track, title, album, artist):
+    """Calculate distance between a Plex track and provided metadata.
 
-    # Split artists on common separators
-    def split_artists(s):
-        return {clean_string(a) for a in re.split(r"[,;&/]|\s+and\s+|\s+&\s+", s) if a}
+    Args:
+        track: Plex track object
+        title: Title to match
+        album: Album to match
+        artist: Artist to match
 
-    artists1 = split_artists(str1)
-    artists2 = split_artists(str2)
+    Returns:
+        float: Distance score (0.0-1.0, lower is better)
+    """
+    # Get track metadata
+    track_title = track.title
+    track_album = track.parentTitle
+    track_artist = getattr(track, 'originalTitle', None) or track.artist().title
 
-    if not artists1 or not artists2:
-        return 1.0
+    # Calculate individual similarities
+    title_sim = calculate_string_similarity(title, track_title)
 
-    # Calculate best match for each artist using hooks.string_dist
-    matches = []
-    for artist1 in artists1:
-        best_match = min(hooks.string_dist(artist1, artist2) for artist2 in artists2)
-        matches.append(best_match)
+    # Album similarity - handle None values
+    if album and track_album:
+        album_sim = calculate_string_similarity(album, track_album)
+    elif not album and not track_album:
+        album_sim = 1.0  # Both are None/empty, perfect match
+    else:
+        album_sim = 0.0  # One is None, the other isn't
 
-    return sum(matches) / len(matches)
+    # Artist similarity
+    artist_sim = calculate_artist_similarity(artist, track_artist)
 
-
-def plex_track_distance(
-    item: Item,
-    plex_track: Track,
-    config: Optional[dict] = None
-) -> Tuple[float, hooks.Distance]:
-    """Calculate distance between a beets Item and Plex Track."""
-    # Define base weights that will be adjusted based on available fields
-    base_weights = {
-        'title': 0.40,    # Title important, but slightly reduced
-        'artist': 0.30,   # Artist next
-        'album': 0.30,    # Album title - increased to match importance
-    }
-
-    # Create distance object
-    dist = hooks.Distance()
-
-    # Check which fields are available
-    has_title = bool(item.title and item.title.strip())
-    has_artist = bool(item.artist and item.artist.strip())
-    has_album = bool(item.album and item.album.strip())
-
-    # Calculate actual weights based on available fields
-    available_fields = []
-    if has_title:
-        available_fields.append('title')
-    if has_artist:
-        available_fields.append('artist')
-    if has_album:
-        available_fields.append('album')
-
-    if not available_fields:
-        return 0.0, dist  # No fields to compare
-
-    # Redistribute weights
-    total_base_weight = sum(base_weights[f] for f in available_fields)
+    # Calculate weighted distance
+    # Title and artist are more important than album
     weights = {
-        field: base_weights[field] / total_base_weight
-        for field in available_fields
+        'title': 0.5,
+        'album': 0.2,
+        'artist': 0.3
     }
 
-    dist._weights.update(weights)
+    # Convert similarities to distances (1.0 - similarity)
+    title_dist = 1.0 - title_sim
+    album_dist = 1.0 - album_sim
+    artist_dist = 1.0 - artist_sim
 
-    # Album comparison first (if available)
-    if has_album:
-        album1 = clean_string(item.album)
-        album2 = clean_string(plex_track.parentTitle)
+    # Calculate weighted distance
+    distance = (
+        weights['title'] * title_dist +
+        weights['album'] * album_dist +
+        weights['artist'] * artist_dist
+    )
 
-        # Use string_dist for album but normalize properly
-        album_dist = hooks.string_dist(album1, album2)
+    return distance
 
-        # Check if album is contained within the other (for partial matches like "Andaz" in "Andaaz (1971)")
-        if album1 in album2 or album2 in album1:
-            # Apply a bonus for partial containment
-            album_dist = max(0.0, album_dist - 0.3)
 
-        dist.add_ratio('album', album_dist, 1.0)
+def get_best_match(tracks, title, album, artist, threshold=0.4):
+    """Get the best matching track from a list of tracks.
 
-        # If we only have album and it's a perfect match, return perfect score
-        if len(available_fields) == 1 and album_dist == 0:
-            return 1.0, dist
+    Args:
+        tracks: List of Plex track objects
+        title: Title to match
+        album: Album to match
+        artist: Artist to match
+        threshold: Maximum distance for a match (lower is stricter)
 
-    # Title comparison (if available)
-    if has_title:
-        title1 = clean_string(item.title)
-        title2 = clean_string(plex_track.title)
+    Returns:
+        tuple: (best_match, distance) or (None, 1.0) if no match found
+    """
+    if not tracks:
+        return None, 1.0
 
-        # Check if one title contains the other (for partial matches)
-        if (title1 and title2) and (title1 in title2 or title2 in title1):
-            # Calculate string distance
-            title_dist = hooks.string_dist(title1, title2)
+    # Calculate distances for all tracks
+    track_distances = []
+    for track in tracks:
+        distance = plex_track_distance(track, title, album, artist)
+        track_distances.append((track, distance))
 
-            # Apply a bonus for partial containment
-            title_dist = max(0.0, title_dist - 0.2)
+    # Sort by distance (lower is better)
+    track_distances.sort(key=lambda x: x[1])
 
-            dist.add_ratio('title', title_dist, 1.0)
-        else:
-            # Use standard string comparison
-            dist.add_string('title', title1, title2)
+    # Get best match
+    best_match, best_distance = track_distances[0]
 
-    # Artist comparison (if available)
-    if has_artist:
-        artist1 = item.artist
-        artist2 = plex_track.originalTitle or plex_track.artist().title
-        dist.add_ratio('artist', artist_distance(artist1, artist2), 1.0)
+    # Return best match if it's below threshold
+    if best_distance <= threshold:
+        return best_match, best_distance
 
-    # Get total distance
-    total_dist = dist.distance
+    return None, 1.0
 
-    # Convert to similarity score where 1 is perfect match
-    score = 1 - total_dist
 
-    return score, dist
+def search_tracks_by_metadata(music, title, album=None, artist=None, limit=20):
+    """Search for tracks in Plex library by metadata.
 
+    Args:
+        music: Plex music library section
+        title: Track title to search for
+        album: Optional album title
+        artist: Optional artist name
+        limit: Maximum number of results
+
+    Returns:
+        list: List of matching Plex track objects
+    """
+    search_params = {}
+
+    # Add search parameters if provided
+    if title:
+        search_params["track.title"] = title
+    if album:
+        search_params["album.title"] = album
+    if artist:
+        search_params["artist.title"] = artist
+
+    # If no parameters provided, return empty list
+    if not search_params:
+        return []
+
+    # Search for tracks
+    try:
+        return music.searchTracks(**search_params, limit=limit)
+    except Exception as e:
+        print(f"Error searching for tracks: {e}")
+        return []
+
+
+def filter_tracks_by_similarity(tracks, title, album=None, artist=None, threshold=0.3):
+    """Filter tracks by similarity to provided metadata.
+
+    Args:
+        tracks: List of Plex track objects
+        title: Title to match
+        album: Album to match
+        artist: Artist to match
+        threshold: Maximum distance for a match (lower is stricter)
+
+    Returns:
+        list: List of (track, distance) tuples for tracks below threshold
+    """
+    if not tracks:
+        return []
+
+    # Calculate distances for all tracks
+    track_distances = []
+    for track in tracks:
+        distance = plex_track_distance(track, title, album, artist)
+        if distance <= threshold:
+            track_distances.append((track, distance))
+
+    # Sort by distance (lower is better)
+    track_distances.sort(key=lambda x: x[1])
+
+    return track_distances

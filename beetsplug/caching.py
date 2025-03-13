@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from plexapi.audio import Track
 from plexapi.server import PlexServer
 from plexapi.video import Video
+from xml.etree.ElementTree import Element  # Add missing import for Element class
 
 # Initialize logger with plexsync prefix
 logger = logging.getLogger('beets')
