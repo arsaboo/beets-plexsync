@@ -37,7 +37,7 @@ from beetsplug.playlist_handlers import (
     import_jiosaavn_playlist, import_m3u8_playlist, import_post_playlist,
     add_songs_to_plex, plex_add_playlist_item, plex_remove_playlist_item,
     plex_clear_playlist, plex_playlist_to_collection, plex_import_playlist,
-    plex_import_search, _plex2spotify, add_tracks_to_spotify_playlist,
+    plex_import_search, plex2spotify, add_tracks_to_spotify_playlist,  # Changed from _plex2spotify to plex2spotify
     get_playlist_id, get_playlist_tracks, authenticate_spotify, process_import_logs
 )
 from beetsplug.smart_playlists import (
@@ -1160,3 +1160,8 @@ class PlexSync(BeetsPlugin):
         """For backward compatibility, calls the standalone function."""
         from beetsplug.playlist_handlers import plex_playlist_to_collection
         return plex_playlist_to_collection(self, playlist)
+
+    def _plex2spotify(self, lib, playlist):
+        """For backward compatibility, calls the standalone function."""
+        from beetsplug.playlist_handlers import plex2spotify
+        return plex2spotify(self, lib, playlist)
