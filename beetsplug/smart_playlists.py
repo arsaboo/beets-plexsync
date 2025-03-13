@@ -11,26 +11,26 @@ from scipy import stats
 from beetsplug.core import build_plex_lookup
 
 
-def get_preferred_attributes(self):
+def get_preferred_attributes(plugin):
     """Determine preferred genres and similar tracks based on user listening habits."""
     # Get history period from config
     if (
-        "playlists" in self.config["plexsync"]
-        and "defaults" in self.config["plexsync"]["playlists"]
+        "playlists" in plugin.config["plexsync"]
+        and "defaults" in plugin.config["plexsync"]["playlists"]
     ):
-        defaults_cfg = self.config["plexsync"]["playlists"]["defaults"].get({})
+        defaults_cfg = plugin.config["plexsync"]["playlists"]["defaults"].get({})
     else:
         defaults_cfg = {}
 
-    history_days = self.get_config_value(
-        self.config["plexsync"], defaults_cfg, "history_days", 15
+    history_days = get_config_value(
+        plugin, plugin.config["plexsync"], defaults_cfg, "history_days", 15
     )
-    exclusion_days = self.get_config_value(
-        self.config["plexsync"], defaults_cfg, "exclusion_days", 30
+    exclusion_days = get_config_value(
+        plugin, plugin.config["plexsync"], defaults_cfg, "exclusion_days", 30
     )
 
     # Fetch tracks played in the configured period
-    tracks = self.music.search(
+    tracks = plugin.music.search(
         filters={"track.lastViewedAt>>": f"{history_days}d"}, libtype="track"
     )
 
@@ -40,7 +40,7 @@ def get_preferred_attributes(self):
 
     recently_played = set(
         track.ratingKey
-        for track in self.music.search(
+        for track in plugin.music.search(
             filters={"track.lastViewedAt>>": f"{exclusion_days}d"}, libtype="track"
         )
     )
@@ -72,19 +72,19 @@ def get_preferred_attributes(self):
                 ):  # Rating criteria including None
                     similar_tracks.add(match)
         except Exception as e:
-            self._log.debug(
+            plugin._log.debug(
                 "Error getting similar tracks for {}: {}", track.title, e
             )
 
     # Sort genres by count
     sorted_genres = sorted(genre_counts, key=genre_counts.get, reverse=True)[:5]
-    self._log.debug("Top genres: {}", sorted_genres)
-    self._log.debug("Found {} similar tracks after filtering", len(similar_tracks))
+    plugin._log.debug("Top genres: {}", sorted_genres)
+    plugin._log.debug("Found {} similar tracks after filtering", len(similar_tracks))
 
     return sorted_genres, list(similar_tracks)
 
 
-def get_config_value(self, item_cfg, defaults_cfg, key, code_default):
+def get_config_value(plugin, item_cfg, defaults_cfg, key, code_default):
     """Get configuration value with fallbacks."""
     if key in item_cfg:
         val = item_cfg[key]
@@ -96,7 +96,7 @@ def get_config_value(self, item_cfg, defaults_cfg, key, code_default):
         return code_default
 
 
-def calculate_rating_score(self, rating):
+def calculate_rating_score(plugin, rating):
     """Calculate score based on rating (60% weight)."""
     if not rating or rating <= 0:
         return 0
@@ -110,7 +110,7 @@ def calculate_rating_score(self, rating):
     return score_map.get(int(rating), 0) * 0.6
 
 
-def calculate_last_played_score(self, last_played):
+def calculate_last_played_score(plugin, last_played):
     """Calculate score based on last played date (20% weight)."""
     if not last_played:
         return 100 * 0.2  # Never played gets max score
@@ -127,7 +127,7 @@ def calculate_last_played_score(self, last_played):
         return 20 * 0.2
 
 
-def calculate_play_count_score(self, play_count):
+def calculate_play_count_score(plugin, play_count):
     """Calculate score based on play count (20% weight)."""
     if not play_count or play_count < 0:
         play_count = 0
@@ -144,7 +144,7 @@ def calculate_play_count_score(self, play_count):
         return 20 * 0.2
 
 
-def calculate_track_score(self, track, base_time=None, tracks_context=None):
+def calculate_track_score(plugin, track, base_time=None, tracks_context=None):
     """Calculate comprehensive score for a track using standardized variables."""
     if base_time is None:
         base_time = datetime.now()
@@ -233,7 +233,7 @@ def calculate_track_score(self, track, base_time=None, tracks_context=None):
         final_score = 50 + (final_score / 2)  # Scale lower scores up but keep relative ordering
 
     # Debug logging
-    self._log.debug(
+    plugin._log.debug(
         "Score components for {}: rating={:.2f} (z={:.2f}), days={:.0f} (z={:.2f}), "
         "popularity={:.2f} (z={:.2f}), age={:.0f} (z={:.2f}), final={:.2f}",
         track.title,
@@ -251,14 +251,14 @@ def calculate_track_score(self, track, base_time=None, tracks_context=None):
     return max(0, min(100, final_score))  # Clamp between 0 and 100
 
 
-def select_tracks_weighted(self, tracks, num_tracks):
+def select_tracks_weighted(plugin, tracks, num_tracks):
     """Select tracks using weighted probability based on scores."""
     if not tracks:
         return []
 
     # Calculate scores for all tracks
     base_time = datetime.now()
-    track_scores = [(track, self.calculate_track_score(track, base_time)) for track in tracks]
+    track_scores = [(track, calculate_track_score(plugin, track, base_time)) for track in tracks]
 
     # Convert scores to probabilities using softmax
     scores = np.array([score for _, score in track_scores])
@@ -277,7 +277,7 @@ def select_tracks_weighted(self, tracks, num_tracks):
     # Log selection details for debugging
     for i, track in enumerate(selected_tracks):
         score = track_scores[selected_indices[i]][1]
-        self._log.debug(
+        plugin._log.debug(
             "Selected: {} - {} (Score: {:.2f}, Rating: {}, Plays: {})",
             track.album,
             track.title,
@@ -289,7 +289,7 @@ def select_tracks_weighted(self, tracks, num_tracks):
     return selected_tracks
 
 
-def calculate_playlist_proportions(self, max_tracks, discovery_ratio):
+def calculate_playlist_proportions(plugin, max_tracks, discovery_ratio):
     """Calculate number of rated vs unrated tracks based on discovery ratio.
 
     Args:
@@ -304,7 +304,7 @@ def calculate_playlist_proportions(self, max_tracks, discovery_ratio):
     return unrated_tracks_count, rated_tracks_count
 
 
-def validate_filter_config(self, filter_config):
+def validate_filter_config(plugin, filter_config):
     """Validate the filter configuration structure and values.
 
     Args:
@@ -356,7 +356,7 @@ def validate_filter_config(self, filter_config):
     return True, ""
 
 
-def _apply_exclusion_filters(self, tracks, exclude_config):
+def _apply_exclusion_filters(plugin, tracks, exclude_config):
     """Apply exclusion filters to tracks."""
     filtered_tracks = tracks[:]
     original_count = len(filtered_tracks)
@@ -371,7 +371,7 @@ def _apply_exclusion_filters(self, tracks, exclude_config):
                 for g in track.genres
             )
         ]
-        self._log.debug(
+        plugin._log.debug(
             "Genre exclusion filter: {} -> {} tracks",
             exclude_genres,
             len(filtered_tracks)
@@ -389,7 +389,7 @@ def _apply_exclusion_filters(self, tracks, exclude_config):
                 track.year is None or
                 track.year >= year_before
             ]
-            self._log.debug(
+            plugin._log.debug(
                 "Year before {} filter: {} tracks",
                 year_before,
                 len(filtered_tracks)
@@ -403,20 +403,20 @@ def _apply_exclusion_filters(self, tracks, exclude_config):
                 track.year is None or
                 track.year <= year_after
             ]
-            self._log.debug(
+            plugin._log.debug(
                 "Year after {} filter: {} tracks",
                 year_after,
                 len(filtered_tracks)
             )
 
-    self._log.debug(
+    plugin._log.debug(
         "Exclusion filters removed {} tracks",
         original_count - len(filtered_tracks)
     )
     return filtered_tracks
 
 
-def _apply_inclusion_filters(self, tracks, include_config):
+def _apply_inclusion_filters(plugin, tracks, include_config):
     """Apply inclusion filters to tracks."""
     filtered_tracks = tracks[:]
     original_count = len(filtered_tracks)
@@ -431,7 +431,7 @@ def _apply_inclusion_filters(self, tracks, include_config):
                 for g in track.genres
             )
         ]
-        self._log.debug(
+        plugin._log.debug(
             "Genre inclusion filter: {} -> {} tracks",
             include_genres,
             len(filtered_tracks)
@@ -449,21 +449,21 @@ def _apply_inclusion_filters(self, tracks, include_config):
                 track.year is not None and
                 start_year <= track.year <= end_year
             ]
-            self._log.debug(
+            plugin._log.debug(
                 "Year between {}-{} filter: {} tracks",
                 start_year,
                 end_year,
                 len(filtered_tracks)
             )
 
-    self._log.debug(
+    plugin._log.debug(
         "Inclusion filters removed {} tracks",
         original_count - len(filtered_tracks)
     )
     return filtered_tracks
 
 
-def apply_playlist_filters(self, tracks, filter_config):
+def apply_playlist_filters(plugin, tracks, filter_config):
     """Apply configured filters to a list of tracks.
 
     Args:
@@ -477,23 +477,23 @@ def apply_playlist_filters(self, tracks, filter_config):
         return tracks
 
     # Validate filter configuration
-    is_valid, error = self.validate_filter_config(filter_config)
+    is_valid, error = validate_filter_config(plugin, filter_config)
     if not is_valid:
-        self._log.error("Invalid filter configuration: {}", error)
+        plugin._log.error("Invalid filter configuration: {}", error)
         return tracks
 
-    self._log.debug("Applying filters to {} tracks", len(tracks))
+    plugin._log.debug("Applying filters to {} tracks", len(tracks))
     filtered_tracks = tracks[:]
 
     # Apply exclusion filters first
     if 'exclude' in filter_config:
-        self._log.debug("Applying exclusion filters...")
-        filtered_tracks = self._apply_exclusion_filters(filtered_tracks, filter_config['exclude'])
+        plugin._log.debug("Applying exclusion filters...")
+        filtered_tracks = _apply_exclusion_filters(plugin, filtered_tracks, filter_config['exclude'])
 
     # Then apply inclusion filters
     if 'include' in filter_config:
-        self._log.debug("Applying inclusion filters...")
-        filtered_tracks = self._apply_inclusion_filters(filtered_tracks, filter_config['include'])
+        plugin._log.debug("Applying inclusion filters...")
+        filtered_tracks = _apply_inclusion_filters(plugin, filtered_tracks, filter_config['include'])
 
     # Apply rating filter if specified, but preserve unrated tracks
     if 'min_rating' in filter_config:
@@ -517,7 +517,7 @@ def apply_playlist_filters(self, tracks, filter_config):
 
         filtered_tracks = rated_tracks + unrated_tracks
 
-        self._log.debug(
+        plugin._log.debug(
             "Rating filter (>= {}): {} -> {} tracks ({} rated, {} unrated)",
             min_rating,
             original_count,
@@ -526,7 +526,7 @@ def apply_playlist_filters(self, tracks, filter_config):
             len(unrated_tracks)
         )
 
-    self._log.debug(
+    plugin._log.debug(
         "Filter application complete: {} -> {} tracks",
         len(tracks),
         len(filtered_tracks)
@@ -534,7 +534,7 @@ def apply_playlist_filters(self, tracks, filter_config):
     return filtered_tracks
 
 
-def get_filtered_library_tracks(self, preferred_genres, config_filters, exclusion_days=30):
+def get_filtered_library_tracks(plugin, preferred_genres, config_filters, exclusion_days=30):
     """Get filtered library tracks using Plex's advanced filters in a single query."""
     try:
         # Build advanced filters structure
@@ -600,12 +600,12 @@ def get_filtered_library_tracks(self, preferred_genres, config_filters, exclusio
         if exclusion_days > 0:
             advanced_filters['and'].append({'lastViewedAt<<': f"-{exclusion_days}d"})
 
-        self._log.debug("Using advanced filters: {}", advanced_filters)
+        plugin._log.debug("Using advanced filters: {}", advanced_filters)
 
         # Use searchTracks with advanced filters
-        tracks = self.music.searchTracks(filters=advanced_filters)
+        tracks = plugin.music.searchTracks(filters=advanced_filters)
 
-        self._log.debug(
+        plugin._log.debug(
             "Found {} tracks matching all criteria in a single query",
             len(tracks)
         )
@@ -613,23 +613,23 @@ def get_filtered_library_tracks(self, preferred_genres, config_filters, exclusio
         return tracks
 
     except Exception as e:
-        self._log.error("Error searching with advanced filters: {}. Filter: {}", e, advanced_filters)
+        plugin._log.error("Error searching with advanced filters: {}. Filter: {}", e, advanced_filters)
         return []
 
 
-def generate_daily_discovery(self, lib, dd_config, plex_lookup, preferred_genres, similar_tracks):
+def generate_daily_discovery(plugin, lib, dd_config, plex_lookup, preferred_genres, similar_tracks):
     """Generate Daily Discovery playlist with improved track selection."""
     playlist_name = dd_config.get("name", "Daily Discovery")
-    self._log.info("Generating {} playlist", playlist_name)
+    plugin._log.info("Generating {} playlist", playlist_name)
 
     # Get base configuration
-    if "playlists" in self.config["plexsync"] and "defaults" in self.config["plexsync"]["playlists"]:
-        defaults_cfg = self.config["plexsync"]["playlists"]["defaults"].get({})
+    if "playlists" in plugin.config["plexsync"] and "defaults" in plugin.config["plexsync"]["playlists"]:
+        defaults_cfg = plugin.config["plexsync"]["playlists"]["defaults"].get({})
     else:
         defaults_cfg = {}
 
-    max_tracks = self.get_config_value(dd_config, defaults_cfg, "max_tracks", 20)
-    discovery_ratio = self.get_config_value(dd_config, defaults_cfg, "discovery_ratio", 30)
+    max_tracks = get_config_value(plugin, dd_config, defaults_cfg, "max_tracks", 20)
+    discovery_ratio = get_config_value(plugin, dd_config, defaults_cfg, "discovery_ratio", 30)
 
     # Use lookup dictionary to convert similar tracks to beets items first
     matched_tracks = []
@@ -639,23 +639,23 @@ def generate_daily_discovery(self, lib, dd_config, plex_lookup, preferred_genres
             if beets_item:
                 matched_tracks.append(plex_track)  # Keep Plex track object for filtering
         except Exception as e:
-            self._log.debug("Error processing track {}: {}", plex_track.title, e)
+            plugin._log.debug("Error processing track {}: {}", plex_track.title, e)
             continue
 
-    self._log.debug("Found {} initial tracks", len(matched_tracks))
+    plugin._log.debug("Found {} initial tracks", len(matched_tracks))
 
     # Get filters from config
     filters = dd_config.get("filters", {})
 
     # Apply filters to matched tracks
     if filters:
-        self._log.debug("Applying filters to {} tracks...", len(matched_tracks))
-        filtered_tracks = self.apply_playlist_filters(matched_tracks, filters)
-        self._log.debug("After filtering: {} tracks", len(filtered_tracks))
+        plugin._log.debug("Applying filters to {} tracks...", len(matched_tracks))
+        filtered_tracks = apply_playlist_filters(plugin, matched_tracks, filters)
+        plugin._log.debug("After filtering: {} tracks", len(filtered_tracks))
     else:
         filtered_tracks = matched_tracks
 
-    self._log.debug("Processing {} filtered tracks", len(filtered_tracks))
+    plugin._log.debug("Processing {} filtered tracks", len(filtered_tracks))
 
     # Now convert filtered Plex tracks to beets items for final processing
     final_tracks = []
@@ -665,9 +665,9 @@ def generate_daily_discovery(self, lib, dd_config, plex_lookup, preferred_genres
             if beets_item:
                 final_tracks.append(beets_item)
         except Exception as e:
-            self._log.debug("Error converting track {}: {}", track.title, e)
+            plugin._log.debug("Error converting track {}: {}", track.title, e)
 
-    self._log.debug("Found {} tracks matching all criteria", len(final_tracks))
+    plugin._log.debug("Found {} tracks matching all criteria", len(final_tracks))
 
     # Split tracks into rated and unrated
     rated_tracks = []
@@ -679,17 +679,17 @@ def generate_daily_discovery(self, lib, dd_config, plex_lookup, preferred_genres
         else:  # Only truly unrated tracks
             unrated_tracks.append(track)
 
-    self._log.debug("Split into {} rated and {} unrated tracks",
+    plugin._log.debug("Split into {} rated and {} unrated tracks",
                    len(rated_tracks), len(unrated_tracks))
 
     # Calculate proportions
-    unrated_tracks_count, rated_tracks_count = self.calculate_playlist_proportions(
-        max_tracks, discovery_ratio
+    unrated_tracks_count, rated_tracks_count = calculate_playlist_proportions(
+        plugin, max_tracks, discovery_ratio
     )
 
     # Select tracks using weighted probability
-    selected_rated = self.select_tracks_weighted(rated_tracks, rated_tracks_count)
-    selected_unrated = self.select_tracks_weighted(unrated_tracks, unrated_tracks_count)
+    selected_rated = select_tracks_weighted(plugin, rated_tracks, rated_tracks_count)
+    selected_unrated = select_tracks_weighted(plugin, unrated_tracks, unrated_tracks_count)
 
     # If we don't have enough unrated tracks, fill with rated ones
     if len(selected_unrated) < unrated_tracks_count:
@@ -698,7 +698,7 @@ def generate_daily_discovery(self, lib, dd_config, plex_lookup, preferred_genres
             max_tracks - len(selected_rated) - len(selected_unrated)
         )
         remaining_rated = [t for t in rated_tracks if t not in selected_rated]
-        additional_rated = self.select_tracks_weighted(remaining_rated, additional_count)
+        additional_rated = select_tracks_weighted(plugin, remaining_rated, additional_count)
         selected_rated.extend(additional_rated)
 
     # Combine and shuffle
@@ -708,46 +708,46 @@ def generate_daily_discovery(self, lib, dd_config, plex_lookup, preferred_genres
 
     random.shuffle(selected_tracks)
 
-    self._log.info(
+    plugin._log.info(
         "Selected {} rated tracks and {} unrated tracks",
         len(selected_rated),
         len(selected_unrated)
     )
 
     if not selected_tracks:
-        self._log.warning("No tracks matched criteria for Daily Discovery playlist")
+        plugin._log.warning("No tracks matched criteria for Daily Discovery playlist")
         return
 
     # Create/update playlist
     try:
-        self._plex_clear_playlist(playlist_name)
-        self._log.info("Cleared existing Daily Discovery playlist")
+        plugin._plex_clear_playlist(playlist_name)
+        plugin._log.info("Cleared existing Daily Discovery playlist")
     except Exception:
-        self._log.debug("No existing Daily Discovery playlist found")
+        plugin._log.debug("No existing Daily Discovery playlist found")
 
-    self._plex_add_playlist_item(selected_tracks, playlist_name)
+    plugin._plex_add_playlist_item(selected_tracks, playlist_name)
 
-    self._log.info(
+    plugin._log.info(
         "Successfully updated {} playlist with {} tracks",
         playlist_name,
         len(selected_tracks)
     )
 
 
-def generate_forgotten_gems(self, lib, ug_config, plex_lookup, preferred_genres, similar_tracks):
+def generate_forgotten_gems(plugin, lib, ug_config, plex_lookup, preferred_genres, similar_tracks):
     """Generate a Forgotten Gems playlist with improved discovery."""
     playlist_name = ug_config.get("name", "Forgotten Gems")
-    self._log.info("Generating {} playlist", playlist_name)
+    plugin._log.info("Generating {} playlist", playlist_name)
 
     # Get configuration
-    if "playlists" in self.config["plexsync"] and "defaults" in self.config["plexsync"]["playlists"]:
-        defaults_cfg = self.config["plexsync"]["playlists"]["defaults"].get({})
+    if "playlists" in plugin.config["plexsync"] and "defaults" in plugin.config["plexsync"]["playlists"]:
+        defaults_cfg = plugin.config["plexsync"]["playlists"]["defaults"].get({})
     else:
         defaults_cfg = {}
 
-    max_tracks = self.get_config_value(ug_config, defaults_cfg, "max_tracks", 20)
-    discovery_ratio = self.get_config_value(ug_config, defaults_cfg, "discovery_ratio", 30)
-    exclusion_days = self.get_config_value(ug_config, defaults_cfg, "exclusion_days", 30)
+    max_tracks = get_config_value(plugin, ug_config, defaults_cfg, "max_tracks", 20)
+    discovery_ratio = get_config_value(plugin, ug_config, defaults_cfg, "discovery_ratio", 30)
+    exclusion_days = get_config_value(plugin, ug_config, defaults_cfg, "exclusion_days", 30)
 
     # Get filters from config
     filters = ug_config.get("filters", {})
@@ -759,19 +759,19 @@ def generate_forgotten_gems(self, lib, ug_config, plex_lookup, preferred_genres,
         if 'include' not in filters:
             filters['include'] = {}
         filters['include']['genres'] = preferred_genres
-        self._log.debug("Using preferred genres as no genres configured: {}", preferred_genres)
+        plugin._log.debug("Using preferred genres as no genres configured: {}", preferred_genres)
 
     # Get initial track pool using configured or preferred genres and filters
-    self._log.info("Searching library with filters...")
-    all_library_tracks = self.get_filtered_library_tracks(
-        [], # No need to pass preferred_genres since they're now in filters if needed
+    plugin._log.info("Searching library with filters...")
+    all_library_tracks = get_filtered_library_tracks(
+        plugin, [], # No need to pass preferred_genres since they're now in filters if needed
         filters,
         exclusion_days
     )
 
     # Add similar tracks if they match the filter criteria
     if len(similar_tracks) > 0:
-        filtered_similar = self.apply_playlist_filters(similar_tracks, filters)
+        filtered_similar = apply_playlist_filters(plugin, similar_tracks, filters)
 
         # Add filtered similar tracks if not already included
         seen_keys = set(track.ratingKey for track in all_library_tracks)
@@ -780,7 +780,7 @@ def generate_forgotten_gems(self, lib, ug_config, plex_lookup, preferred_genres,
                 all_library_tracks.append(track)
                 seen_keys.add(track.ratingKey)
 
-        self._log.debug(
+        plugin._log.debug(
             "Combined {} library tracks with {} filtered similar tracks",
             len(all_library_tracks), len(filtered_similar)
         )
@@ -793,9 +793,9 @@ def generate_forgotten_gems(self, lib, ug_config, plex_lookup, preferred_genres,
             if beets_item:
                 final_tracks.append(beets_item)
         except Exception as e:
-            self._log.debug("Error converting track {}: {}", track.title, e)
+            plugin._log.debug("Error converting track {}: {}", track.title, e)
 
-    self._log.debug("Converted {} tracks to beets items", len(final_tracks))
+    plugin._log.debug("Converted {} tracks to beets items", len(final_tracks))
 
     # Split tracks into rated and unrated
     rated_tracks = []
@@ -807,14 +807,14 @@ def generate_forgotten_gems(self, lib, ug_config, plex_lookup, preferred_genres,
         else:  # Only truly unrated tracks
             unrated_tracks.append(track)
 
-    self._log.debug("Split into {} rated and {} unrated tracks", len(rated_tracks), len(unrated_tracks))
+    plugin._log.debug("Split into {} rated and {} unrated tracks", len(rated_tracks), len(unrated_tracks))
 
     # Calculate proportions
-    unrated_tracks_count, rated_tracks_count = self.calculate_playlist_proportions(max_tracks, discovery_ratio)
+    unrated_tracks_count, rated_tracks_count = calculate_playlist_proportions(plugin, max_tracks, discovery_ratio)
 
     # Select tracks using weighted probability
-    selected_rated = self.select_tracks_weighted(rated_tracks, rated_tracks_count)
-    selected_unrated = self.select_tracks_weighted(unrated_tracks, unrated_tracks_count)
+    selected_rated = select_tracks_weighted(plugin, rated_tracks, rated_tracks_count)
+    selected_unrated = select_tracks_weighted(plugin, unrated_tracks, unrated_tracks_count)
 
     # If we don't have enough unrated tracks, fill with rated ones
     if len(selected_unrated) < unrated_tracks_count:
@@ -823,7 +823,7 @@ def generate_forgotten_gems(self, lib, ug_config, plex_lookup, preferred_genres,
             max_tracks - len(selected_rated) - len(selected_unrated)
         )
         remaining_rated = [t for t in rated_tracks if t not in selected_rated]
-        additional_rated = self.select_tracks_weighted(remaining_rated, additional_count)
+        additional_rated = select_tracks_weighted(plugin, remaining_rated, additional_count)
         selected_rated.extend(additional_rated)
 
     # Combine and shuffle
@@ -833,32 +833,32 @@ def generate_forgotten_gems(self, lib, ug_config, plex_lookup, preferred_genres,
 
     random.shuffle(selected_tracks)
 
-    self._log.info("Selected {} rated tracks and {} unrated tracks", len(selected_rated), len(selected_unrated))
+    plugin._log.info("Selected {} rated tracks and {} unrated tracks", len(selected_rated), len(selected_unrated))
 
     if not selected_tracks:
-        self._log.warning("No tracks matched criteria for Forgotten Gems playlist")
+        plugin._log.warning("No tracks matched criteria for Forgotten Gems playlist")
         return
 
     # Create/update playlist
     try:
-        self._plex_clear_playlist(playlist_name)
-        self._log.info("Cleared existing Forgotten Gems playlist")
+        plugin._plex_clear_playlist(playlist_name)
+        plugin._log.info("Cleared existing Forgotten Gems playlist")
     except Exception:
-        self._log.debug("No existing Forgotten Gems playlist found")
+        plugin._log.debug("No existing Forgotten Gems playlist found")
 
-    self._plex_add_playlist_item(selected_tracks, playlist_name)
+    plugin._plex_add_playlist_item(selected_tracks, playlist_name)
 
-    self._log.info("Successfully updated {} playlist with {} tracks", playlist_name, len(selected_tracks))
+    plugin._log.info("Successfully updated {} playlist with {} tracks", playlist_name, len(selected_tracks))
 
 
-def generate_imported_playlist(self, lib, playlist_config, plex_lookup=None):
+def generate_imported_playlist(plugin, lib, playlist_config, plex_lookup=None):
     """Generate a playlist by importing from external sources."""
     playlist_name = playlist_config.get("name", "Imported Playlist")
     sources = playlist_config.get("sources", [])
     max_tracks = playlist_config.get("max_tracks", None)
 
     # Create log file path in beets config directory
-    log_file = os.path.join(self.config_dir, f"{playlist_name.lower().replace(' ', '_')}_import.log")
+    log_file = os.path.join(plugin.config_dir, f"{playlist_name.lower().replace(' ', '_')}_import.log")
 
     # Clear/create the log file
     with open(log_file, 'w', encoding='utf-8') as f:
@@ -868,25 +868,25 @@ def generate_imported_playlist(self, lib, playlist_config, plex_lookup=None):
 
     # Get config options with defaults
     if (
-        "playlists" in self.config["plexsync"]
-        and "defaults" in self.config["plexsync"]["playlists"]
+        "playlists" in plugin.config["plexsync"]
+        and "defaults" in plugin.config["plexsync"]["playlists"]
     ):
-        defaults_cfg = self.config["plexsync"]["playlists"]["defaults"].get({})
+        defaults_cfg = plugin.config["plexsync"]["playlists"]["defaults"].get({})
     else:
         defaults_cfg = {}
 
-    manual_search = self.get_config_value(
-        playlist_config, defaults_cfg, "manual_search", self.config["plexsync"]["manual_search"].get(bool)
+    manual_search = get_config_value(
+        plugin, playlist_config, defaults_cfg, "manual_search", plugin.config["plexsync"]["manual_search"].get(bool)
     )
-    clear_playlist = self.get_config_value(
-        playlist_config, defaults_cfg, "clear_playlist", False
+    clear_playlist = get_config_value(
+        plugin, playlist_config, defaults_cfg, "clear_playlist", False
     )
 
     if not sources:
-        self._log.warning("No sources defined for imported playlist {}", playlist_name)
+        plugin._log.warning("No sources defined for imported playlist {}", playlist_name)
         return
 
-    self._log.info("Generating imported playlist {} from {} sources", playlist_name, len(sources))
+    plugin._log.info("Generating imported playlist {} from {} sources", playlist_name, len(sources))
 
     # Import tracks from all sources
     all_tracks = []
@@ -894,45 +894,45 @@ def generate_imported_playlist(self, lib, playlist_config, plex_lookup=None):
 
     for source in sources:
         try:
-            self._log.info("Importing from source: {}", source)
+            plugin._log.info("Importing from source: {}", source)
             if isinstance(source, str):  # Handle string sources (URLs and file paths)
                 if source.lower().endswith('.m3u8'):
                     # Check if path is absolute, if not make it relative to config dir
                     if not os.path.isabs(source):
-                        source = os.path.join(self.config_dir, source)
-                    tracks = self.import_m3u8_playlist(source)
+                        source = os.path.join(plugin.config_dir, source)
+                    tracks = plugin.import_m3u8_playlist(source)
                 elif "spotify" in source:
-                    tracks = self.import_spotify_playlist(self.get_playlist_id(source))
+                    tracks = plugin.import_spotify_playlist(plugin.get_playlist_id(source))
                 elif "jiosaavn" in source:
-                    tracks = self.import_jiosaavn_playlist(source)
+                    tracks = plugin.import_jiosaavn_playlist(source)
                 elif "apple" in source:
-                    tracks = self.import_apple_playlist(source)
+                    tracks = plugin.import_apple_playlist(source)
                 elif "gaana" in source:
-                    tracks = self.import_gaana_playlist(source)
+                    tracks = plugin.import_gaana_playlist(source)
                 elif "youtube" in source:
-                    tracks = self.import_yt_playlist(source)
+                    tracks = plugin.import_yt_playlist(source)
                 elif "tidal" in source:
-                    tracks = self.import_tidal_playlist(source)
+                    tracks = plugin.import_tidal_playlist(source)
                 else:
-                    self._log.warning("Unsupported source: {}", source)
+                    plugin._log.warning("Unsupported source: {}", source)
                     continue
             elif isinstance(source, dict) and source.get("type") == "post":
-                tracks = self.import_post_playlist(source)
+                tracks = plugin.import_post_playlist(source)
             else:
-                self._log.warning("Invalid source format: {}", source)
+                plugin._log.warning("Invalid source format: {}", source)
                 continue
 
             if tracks:
                 all_tracks.extend(tracks)
 
         except Exception as e:
-            self._log.error("Error importing from {}: {}", source, e)
+            plugin._log.error("Error importing from {}: {}", source, e)
             with open(log_file, 'a', encoding='utf-8') as f:
                 f.write(f"Error importing from source {source}: {str(e)}\n")
             continue
 
     if not all_tracks:
-        self._log.warning("No tracks found from any source for playlist {}", playlist_name)
+        plugin._log.warning("No tracks found from any source for playlist {}", playlist_name)
         return
 
     # Process tracks through Plex first
@@ -942,14 +942,14 @@ def generate_imported_playlist(self, lib, playlist_config, plex_lookup=None):
         f.write("-" * 80 + "\n")
 
     for track in all_tracks:
-        found = self.search_plex_song(track, manual_search)
+        found = plugin.search_plex_song(track, manual_search)
         if found:
             # Just use Plex rating directly
             plex_rating = float(getattr(found, "userRating", 0) or 0)
 
             if plex_rating == 0 or plex_rating > 2:  # Include unrated or rating > 2
                 matched_songs.append(found)
-                self._log.debug(
+                plugin._log.debug(
                     "Matched in Plex: {} - {} - {} (Rating: {})",
                     track.get('artist', 'Unknown'),
                     track.get('parentTitle', 'Unknown'),
@@ -967,15 +967,15 @@ def generate_imported_playlist(self, lib, playlist_config, plex_lookup=None):
     # Get filters from config and apply them
     filters = playlist_config.get("filters", {})
     if filters:
-        self._log.debug("Applying filters to {} matched tracks...", len(matched_songs))
+        plugin._log.debug("Applying filters to {} matched tracks...", len(matched_songs))
 
         # Convert Plex tracks to beets items first
         beets_items = []
 
         # Use provided lookup dictionary or build new one if not provided
         if plex_lookup is None:
-            self._log.debug("Building Plex lookup dictionary...")
-            plex_lookup = self.build_plex_lookup(lib)
+            plugin._log.debug("Building Plex lookup dictionary...")
+            plex_lookup = plugin.build_plex_lookup(lib)
 
         for track in matched_songs:
             try:
@@ -983,7 +983,7 @@ def generate_imported_playlist(self, lib, playlist_config, plex_lookup=None):
                 if beets_item:
                     beets_items.append(beets_item)
             except Exception as e:
-                self._log.debug("Error finding beets item for {}: {}", track.title, e)
+                plugin._log.debug("Error finding beets item for {}: {}", track.title, e)
                 continue
 
         # Now apply filters to beets items
@@ -997,18 +997,18 @@ def generate_imported_playlist(self, lib, playlist_config, plex_lookup=None):
                     if 'after' in years_config and item.year:
                         if item.year > years_config['after']:
                             include_item = False
-                            self._log.debug("Excluding {} (year {} > {})",
+                            plugin._log.debug("Excluding {} (year {} > {})",
                                 item.title, item.year, years_config['after'])
                     if 'before' in years_config and item.year:
                         if item.year < years_config['before']:
                             include_item = False
-                            self._log.debug("Excluding {} (year {} < {})",
+                            plugin._log.debug("Excluding {} (year {} < {})",
                                 item.title, item.year, years_config['before'])
 
             if include_item:
                 filtered_items.append(item)
 
-        self._log.debug("After filtering: {} tracks remain", len(filtered_items))
+        plugin._log.debug("After filtering: {} tracks remain", len(filtered_items))
         matched_songs = filtered_items
 
     # Deduplicate based on ratingKey for Plex Track objects and plex_ratingkey for beets items
@@ -1036,7 +1036,7 @@ def generate_imported_playlist(self, lib, playlist_config, plex_lookup=None):
         f.write(f"Tracks matched and added: {len(matched_songs)}\n")
         f.write(f"\nImport completed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
 
-    self._log.info(
+    plugin._log.info(
         "Found {} unique tracks after filtering (see {} for details)",
         len(unique_matched), log_file
     )
@@ -1044,20 +1044,20 @@ def generate_imported_playlist(self, lib, playlist_config, plex_lookup=None):
     # Create or update playlist based on clear_playlist setting
     if clear_playlist:
         try:
-            self._plex_clear_playlist(playlist_name)
-            self._log.info("Cleared existing playlist {}", playlist_name)
+            plugin._plex_clear_playlist(playlist_name)
+            plugin._log.info("Cleared existing playlist {}", playlist_name)
         except Exception:
-            self._log.debug("No existing playlist {} found", playlist_name)
+            plugin._log.debug("No existing playlist {} found", playlist_name)
 
     if unique_matched:
-        self._plex_add_playlist_item(unique_matched, playlist_name)
-        self._log.info(
+        plugin._plex_add_playlist_item(unique_matched, playlist_name)
+        plugin._log.info(
             "Successfully created playlist {} with {} tracks",
             playlist_name,
             len(unique_matched)
         )
     else:
-        self._log.warning("No tracks remaining after filtering for {}", playlist_name)
+        plugin._log.warning("No tracks remaining after filtering for {}", playlist_name)
 
 
 def plex_smartplaylists(plugin, lib, playlists_config):
