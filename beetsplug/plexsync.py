@@ -1165,3 +1165,43 @@ class PlexSync(BeetsPlugin):
         """For backward compatibility, calls the standalone function."""
         from beetsplug.playlist_handlers import plex2spotify
         return plex2spotify(self, lib, playlist)
+
+    # Add these method bindings to connect the standalone functions with the class:
+    def import_apple_playlist(self, url):
+        """Import Apple Music playlist using the standalone function."""
+        from beetsplug.playlist_handlers import import_apple_playlist
+        return import_apple_playlist(self, url)
+
+    def import_jiosaavn_playlist(self, url):
+        """Import JioSaavn playlist using the standalone function."""
+        from beetsplug.playlist_handlers import import_jiosaavn_playlist
+        return import_jiosaavn_playlist(self, url)
+
+    def import_m3u8_playlist(self, filepath):
+        """Import M3U8 playlist using the standalone function."""
+        from beetsplug.playlist_handlers import import_m3u8_playlist
+        return import_m3u8_playlist(self, filepath)
+
+    def import_gaana_playlist(self, url):
+        """Import Gaana playlist."""
+        # Placeholder for now - we'll need to implement this separately
+        self._log.warning("Gaana playlist support not yet implemented")
+        return []
+
+    def import_yt_playlist(self, url):
+        """Import YouTube Music playlist."""
+        # Placeholder for now - we'll need to implement this separately
+        self._log.warning("YouTube Music playlist support not yet implemented")
+        return []
+
+    def import_tidal_playlist(self, url):
+        """Import Tidal playlist."""
+        # Placeholder for now - we'll need to implement this separately
+        self._log.warning("Tidal playlist support not yet implemented")
+        return []
+
+    def import_yt_search(self, search, limit=10):
+        """Import tracks from YouTube search."""
+        # Placeholder for now - we'll need to implement this separately
+        self._log.warning("YouTube search support not yet implemented")
+        return []
