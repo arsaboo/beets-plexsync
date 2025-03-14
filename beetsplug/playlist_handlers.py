@@ -1013,3 +1013,35 @@ def import_yt_playlist(self, url):
     except Exception as e:
         self._log.error("Unable to initialize YouTube plugin. Error: {}", e)
         return None
+
+
+def import_tidal_playlist(self, url):
+    """Import Tidal playlist with caching."""
+    # Generate cache key from URL
+    playlist_id = url.split('/')[-1]
+
+    # Check cache
+    cached_data = self.cache.get_playlist_cache(playlist_id, 'tidal')
+    if (cached_data):
+        self._log.info("Using cached Tidal playlist data")
+        return cached_data
+
+    try:
+        from beetsplug.tidal import TidalPlugin
+    except ModuleNotFoundError:
+        self._log.error("Tidal plugin not installed")
+        return None
+
+    try:
+        tidal = TidalPlugin()
+        song_list = tidal.import_tidal_playlist(url)
+
+        # Cache successful results
+        if song_list:
+            self.cache.set_playlist_cache(playlist_id, 'tidal', song_list)
+            self._log.info("Cached {} tracks from Tidal playlist", len(song_list))
+
+        return song_list
+    except Exception as e:
+        self._log.error("Unable to initialize Tidal plugin. Error: {}", e)
+        return None

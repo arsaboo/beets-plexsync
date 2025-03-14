@@ -192,6 +192,30 @@ class PlexSync(BeetsPlugin):
             )
         self.register_listener("database_change", self.listen_for_db_change)
 
+        # Add direct method bindings to avoid needing wrapper methods
+        from beetsplug.playlist_handlers import (
+            plex_add_playlist_item, plex_remove_playlist_item, plex_clear_playlist,
+            plex_playlist_to_collection, plex_import_playlist, plex2spotify,
+            import_apple_playlist, import_jiosaavn_playlist, import_m3u8_playlist,
+            import_gaana_playlist, import_yt_playlist, import_tidal_playlist
+        )
+
+        self.plex_add_playlist_item = lambda items, playlist: plex_add_playlist_item(self, items, playlist)
+        self.plex_remove_playlist_item = lambda items, playlist: plex_remove_playlist_item(self, items, playlist)
+        self.plex_clear_playlist = lambda playlist: plex_clear_playlist(self, playlist)
+        self.plex_playlist_to_collection = lambda playlist: plex_playlist_to_collection(self, playlist)
+        self.plex_import_playlist = lambda playlist, playlist_url=None, listenbrainz=False: plex_import_playlist(self, playlist, playlist_url, listenbrainz)
+        self.plex2spotify = lambda lib, playlist: plex2spotify(self, lib, playlist)
+        self.import_apple_playlist = lambda url: import_apple_playlist(self, url)
+        self.import_jiosaavn_playlist = lambda url: import_jiosaavn_playlist(self, url)
+        self.import_m3u8_playlist = lambda filepath: import_m3u8_playlist(self, filepath)
+        self.import_gaana_playlist = lambda url: import_gaana_playlist(self, url)
+        self.import_yt_playlist = lambda url: import_yt_playlist(self, url)
+        self.import_tidal_playlist = lambda url: import_tidal_playlist(self, url)
+
+        # Simple error message for unimplemented feature
+        self.import_yt_search = lambda search, limit=10: self._log.warning("YouTube search support not implemented")
+
     def get_event_loop(self):
         """Get or create an event loop."""
         if self.loop is None or self.loop.is_closed():
@@ -1140,71 +1164,3 @@ class PlexSync(BeetsPlugin):
             "Created playlist '{}' with {} tracks",
             playlist, len(found_tracks)
         )
-
-    def _plex_add_playlist_item(self, items, playlist):
-        """For backward compatibility, calls the standalone function."""
-        from beetsplug.playlist_handlers import plex_add_playlist_item
-        return plex_add_playlist_item(self, items, playlist)
-
-
-    def _plex_remove_playlist_item(self, items, playlist):
-        """For backward compatibility, calls the standalone function."""
-        from beetsplug.playlist_handlers import plex_remove_playlist_item
-        return plex_remove_playlist_item(self, items, playlist)
-
-
-    def _plex_clear_playlist(self, playlist):
-        """For backward compatibility, calls the standalone function."""
-        from beetsplug.playlist_handlers import plex_clear_playlist
-        return plex_clear_playlist(self, playlist)
-
-
-    def _plex_playlist_to_collection(self, playlist):
-        """For backward compatibility, calls the standalone function."""
-        from beetsplug.playlist_handlers import plex_playlist_to_collection
-        return plex_playlist_to_collection(self, playlist)
-
-    def _plex2spotify(self, lib, playlist):
-        """For backward compatibility, calls the standalone function."""
-        from beetsplug.playlist_handlers import plex2spotify
-        return plex2spotify(self, lib, playlist)
-
-    # Add these method bindings to connect the standalone functions with the class:
-    def import_apple_playlist(self, url):
-        """Import Apple Music playlist using the standalone function."""
-        from beetsplug.playlist_handlers import import_apple_playlist
-        return import_apple_playlist(self, url)
-
-    def import_jiosaavn_playlist(self, url):
-        """Import JioSaavn playlist using the standalone function."""
-        from beetsplug.playlist_handlers import import_jiosaavn_playlist
-        return import_jiosaavn_playlist(self, url)
-
-    def import_m3u8_playlist(self, filepath):
-        """Import M3U8 playlist using the standalone function."""
-        from beetsplug.playlist_handlers import import_m3u8_playlist
-        return import_m3u8_playlist(self, filepath)
-
-    def import_gaana_playlist(self, url):
-        """Import Gaana playlist."""
-        # Placeholder for now - we'll need to implement this separately
-        from beetsplug.playlist_handlers import import_gaana_playlist
-        return import_gaana_playlist(self, url)
-
-    def import_yt_playlist(self, url):
-        """Import YouTube Music playlist."""
-        # Placeholder for now - we'll need to implement this separately
-        from beetsplug.playlist_handlers import import_yt_playlist
-        return import_yt_playlist(self, url)
-
-    def import_tidal_playlist(self, url):
-        """Import Tidal playlist."""
-        # Placeholder for now - we'll need to implement this separately
-        self._log.warning("Tidal playlist support not yet implemented")
-        return []
-
-    def import_yt_search(self, search, limit=10):
-        """Import tracks from YouTube search."""
-        # Placeholder for now - we'll need to implement this separately
-        self._log.warning("YouTube search support not yet implemented")
-        return []
