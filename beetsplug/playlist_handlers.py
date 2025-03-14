@@ -352,8 +352,8 @@ def import_m3u8_playlist(self, filepath):
                             'album': None  # Will be set by EXTALB
                         }
                 elif line.startswith('#EXTALB:'):
-                    # Extract album info
-                    current_song['album'] = line[8:].trip()
+                    # Extract album info - fix the strip() typo here
+                    current_song['album'] = line[8:].strip()
                 elif not line.startswith('#'):
                     # This is a file path line - finalize the song entry
                     if current_song and all(k in current_song for k in ['title', 'artist']):
