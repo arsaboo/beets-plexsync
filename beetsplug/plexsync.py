@@ -1194,8 +1194,8 @@ class PlexSync(BeetsPlugin):
     def import_yt_playlist(self, url):
         """Import YouTube Music playlist."""
         # Placeholder for now - we'll need to implement this separately
-        self._log.warning("YouTube Music playlist support not yet implemented")
-        return []
+        from beetsplug.playlist_handlers import import_yt_playlist
+        return import_yt_playlist(self, url)
 
     def import_tidal_playlist(self, url):
         """Import Tidal playlist."""
