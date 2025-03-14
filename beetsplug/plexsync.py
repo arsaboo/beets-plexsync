@@ -1188,8 +1188,8 @@ class PlexSync(BeetsPlugin):
     def import_gaana_playlist(self, url):
         """Import Gaana playlist."""
         # Placeholder for now - we'll need to implement this separately
-        self._log.warning("Gaana playlist support not yet implemented")
-        return []
+        from beetsplug.playlist_handlers import import_gaana_playlist
+        return import_gaana_playlist(self, url)
 
     def import_yt_playlist(self, url):
         """Import YouTube Music playlist."""

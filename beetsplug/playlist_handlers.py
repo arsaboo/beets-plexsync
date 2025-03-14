@@ -12,6 +12,7 @@ from beets import ui
 from bs4 import BeautifulSoup
 from plexapi import exceptions
 from spotipy.oauth2 import SpotifyOAuth
+from jiosaavn import JioSaavn
 
 from beetsplug.utils import parse_title, clean_album_name, clean_title
 
@@ -242,6 +243,7 @@ def import_apple_playlist(self, url):
 
     return song_list
 
+saavn = JioSaavn()
 
 def import_jiosaavn_playlist(self, url):
     """Import JioSaavn playlist with caching."""
@@ -942,3 +944,40 @@ def process_import_logs(self, lib, specific_log=None):
                     f.writelines(new_summary)
 
     return total_imported, total_failed
+
+
+def import_gaana_playlist(self, url):
+    """Import Gaana playlist with caching."""
+    # Generate cache key from URL
+    playlist_id = url.split('/')[-1]
+
+    # Check cache
+    cached_data = self.cache.get_playlist_cache(playlist_id, 'gaana')
+    if (cached_data):
+        self._log.info("Using cached Gaana playlist data")
+        return cached_data
+
+    try:
+        from beetsplug.gaana import GaanaPlugin
+    except ModuleNotFoundError:
+        self._log.error(
+            "Gaana plugin not installed. \
+                        See https://github.com/arsaboo/beets-gaana"
+        )
+        return None
+
+    try:
+        gaana = GaanaPlugin()
+    except Exception as e:
+        self._log.error("Unable to initialize Gaana plugin. Error: {}", e)
+        return None
+
+    # Get songs from Gaana
+    song_list = gaana.import_gaana_playlist(url)
+
+    # Cache successful results
+    if song_list:
+        self.cache.set_playlist_cache(playlist_id, 'gaana', song_list)
+        self._log.info("Cached {} tracks from Gaana playlist", len(song_list))
+
+    return song_list
