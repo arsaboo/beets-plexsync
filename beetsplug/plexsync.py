@@ -198,7 +198,7 @@ class PlexSync(BeetsPlugin):
             plex_playlist_to_collection, plex_import_playlist, plex2spotify,
             import_apple_playlist, import_jiosaavn_playlist, import_m3u8_playlist,
             import_gaana_playlist, import_yt_playlist, import_tidal_playlist,
-            process_import_logs  # Add this import
+            process_import_logs, import_yt_search  # Add import_yt_search
         )
 
         self.plex_add_playlist_item = lambda items, playlist: plex_add_playlist_item(self, items, playlist)
@@ -213,11 +213,8 @@ class PlexSync(BeetsPlugin):
         self.import_gaana_playlist = lambda url: import_gaana_playlist(self, url)
         self.import_yt_playlist = lambda url: import_yt_playlist(self, url)
         self.import_tidal_playlist = lambda url: import_tidal_playlist(self, url)
-        # Add the binding for process_import_logs
         self.process_import_logs = lambda lib, specific_log=None: process_import_logs(self, lib, specific_log)
-
-        # Simple error message for unimplemented feature
-        self.import_yt_search = lambda search, limit=10: self._log.warning("YouTube search support not implemented")
+        self.import_yt_search = lambda search, limit=10: import_yt_search(self, search, limit)
 
     def get_event_loop(self):
         """Get or create an event loop."""

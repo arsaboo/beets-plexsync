@@ -1045,3 +1045,35 @@ def import_tidal_playlist(self, url):
     except Exception as e:
         self._log.error("Unable to initialize Tidal plugin. Error: {}", e)
         return None
+
+
+def import_yt_search(self, search, limit=10):
+    """Import tracks from YouTube search with caching."""
+    # Generate cache key from search query and limit
+    cache_key = f"{search}_{limit}"
+
+    # Check cache
+    cached_data = self.cache.get_playlist_cache(cache_key, 'youtube_search')
+    if (cached_data):
+        self._log.info("Using cached YouTube search results")
+        return cached_data
+
+    try:
+        from beetsplug.youtube import YouTubePlugin
+    except ModuleNotFoundError:
+        self._log.error("YouTube plugin not installed")
+        return None
+
+    try:
+        ytp = YouTubePlugin()
+        song_list = ytp.search_youtube_tracks(search, limit)
+
+        # Cache successful results
+        if song_list:
+            self.cache.set_playlist_cache(cache_key, 'youtube_search', song_list)
+            self._log.info("Cached {} tracks from YouTube search", len(song_list))
+
+        return song_list
+    except Exception as e:
+        self._log.error("Unable to perform YouTube search. Error: {}", e)
+        return None
