@@ -57,11 +57,6 @@ def search_track_info(query: str):
         "history": []
     }
 
-    # Add custom OpenAI key if specified in config
-    custom_api_key = config["llm"]["search"]["api_key"].get()
-    if custom_api_key:
-        payload["chatModel"]["customOpenAIKey"] = custom_api_key
-
     base_url = config["llm"]["search"]["base_url"].get()
 
     # Add detailed logging for troubleshooting
