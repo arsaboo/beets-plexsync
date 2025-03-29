@@ -60,9 +60,42 @@ def search_track_info(query: str):
 
     base_url = config["llm"]["search"]["base_url"].get()
 
+    # Add detailed logging for troubleshooting
+    logger.debug("Making request to: {}", base_url)
+    logger.debug("Payload: {}", payload)
+
+    # Parse the host and port from base_url for diagnostics
+    import urllib.parse
+    parsed_url = urllib.parse.urlparse(base_url)
+    host = parsed_url.hostname
+    port = parsed_url.port
+
+    # Try a simple connection test first
+    import socket
     try:
-        response = requests.post(base_url, json=payload, timeout=30)
-        logger.debug("API Response: {}", response.json().get("message"))
+        test_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        test_socket.settimeout(5)
+        test_socket.connect((host, port))
+        test_socket.close()
+        logger.debug("Socket connection test to {}:{} successful", host, port)
+    except socket.error as e:
+        logger.error("Socket connection test to {}:{} failed: {}", host, port, str(e))
+        # If socket connection fails, there's a network issue
+        return None
+
+    try:
+        # Add request session with detailed debugging
+        session = requests.Session()
+
+        # Use a generous timeout but not too long
+        response = session.post(
+            base_url,
+            json=payload,
+            timeout=(10, 90)  # (connect timeout, read timeout)
+        )
+        logger.debug("Response status code: {}", response.status_code)
+        logger.debug("Response headers: {}", response.headers)
+
         if not response.text.strip():
             logger.error("Error: Received empty response from API")
             return None  # Return None if no response
