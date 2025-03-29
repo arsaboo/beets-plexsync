@@ -3,6 +3,7 @@
 import json
 import logging
 import re
+import textwrap
 from typing import Optional
 
 import requests
@@ -25,18 +26,8 @@ def search_track_info(query: str):
         dict: A dictionary containing the track's Title, Album, and Artist, with missing fields set to None.
     """
 
-    payload = {
-        "chatModel": {
-            "provider": config["llm"]["search"]["provider"].get(),
-            "name": config["llm"]["search"]["model"].get(),  # Changed from 'model' to 'name' to match API docs
-        },
-        "embeddingModel": {
-            "provider": config["llm"]["search"]["provider"].get(),
-            "name": config["llm"]["search"]["embedding_model"].get(),  # Changed from 'model' to 'name'
-        },
-        "optimizationMode": "balanced",
-        "focusMode": "webSearch",
-        "query": f"""
+    # Use textwrap.dedent for cleaner prompt formatting
+    prompt = textwrap.dedent(f"""
         Extract structured music metadata from the following query and return ONLY in JSON format.
         Do not include any explanations, markdown formatting, or additional text.
         Ensure the JSON contains the exact extracted details.
@@ -49,7 +40,20 @@ def search_track_info(query: str):
             "Album": "<album name>",
             "Artist": "<artist name>"
         }}
-        """,
+    """).strip()
+
+    payload = {
+        "chatModel": {
+            "provider": config["llm"]["search"]["provider"].get(),
+            "name": config["llm"]["search"]["model"].get(),  # Changed from 'model' to 'name' to match API docs
+        },
+        "embeddingModel": {
+            "provider": config["llm"]["search"]["provider"].get(),
+            "name": config["llm"]["search"]["embedding_model"].get(),  # Changed from 'model' to 'name'
+        },
+        "optimizationMode": "balanced",
+        "focusMode": "webSearch",
+        "query": prompt,
         "history": []
     }
 
@@ -70,10 +74,18 @@ def search_track_info(query: str):
     host = parsed_url.hostname
     port = parsed_url.port
 
-    # Get timeout settings from config or use defaults
-    timeout_value = config["llm"]["search"].get("timeout", 90)
-    max_retries = config["llm"]["search"].get("max_retries", 2)
-    retry_delay = config["llm"]["search"].get("retry_delay", 5)
+    # Get timeout settings from config or use defaults - fixed to handle ConfigView correctly
+    timeout_value = 90  # Default timeout
+    max_retries = 2    # Default retries
+    retry_delay = 5    # Default delay
+
+    # Access beets ConfigView correctly
+    if "timeout" in config["llm"]["search"]:
+        timeout_value = config["llm"]["search"]["timeout"].get(int)
+    if "max_retries" in config["llm"]["search"]:
+        max_retries = config["llm"]["search"]["max_retries"].get(int)
+    if "retry_delay" in config["llm"]["search"]:
+        retry_delay = config["llm"]["search"]["retry_delay"].get(int)
 
     # Try a simple connection test first
     import socket
@@ -90,6 +102,7 @@ def search_track_info(query: str):
 
     # Implement retries with exponential backoff
     import time
+    response = None
     for attempt in range(max_retries + 1):
         try:
             # Add request session with detailed debugging
@@ -119,6 +132,11 @@ def search_track_info(query: str):
             else:
                 logger.error("All retry attempts failed")
                 return None
+
+    # Check if response was set (could still be None after all retries)
+    if response is None:
+        logger.error("No valid response received after all attempts")
+        return None
 
     try:
         if not response.text.strip():
