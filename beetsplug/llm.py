@@ -28,11 +28,11 @@ def search_track_info(query: str):
     payload = {
         "chatModel": {
             "provider": config["llm"]["search"]["provider"].get(),
-            "model": config["llm"]["search"]["model"].get()
+            "name": config["llm"]["search"]["model"].get(),  # Changed from 'model' to 'name' to match API docs
         },
         "embeddingModel": {
             "provider": config["llm"]["search"]["provider"].get(),
-            "model": config["llm"]["search"]["embedding_model"].get()
+            "name": config["llm"]["search"]["embedding_model"].get(),  # Changed from 'model' to 'name'
         },
         "optimizationMode": "balanced",
         "focusMode": "webSearch",
@@ -70,6 +70,11 @@ def search_track_info(query: str):
     host = parsed_url.hostname
     port = parsed_url.port
 
+    # Get timeout settings from config or use defaults
+    timeout_value = config["llm"]["search"].get("timeout", 90)
+    max_retries = config["llm"]["search"].get("max_retries", 2)
+    retry_delay = config["llm"]["search"].get("retry_delay", 5)
+
     # Try a simple connection test first
     import socket
     try:
@@ -83,19 +88,39 @@ def search_track_info(query: str):
         # If socket connection fails, there's a network issue
         return None
 
+    # Implement retries with exponential backoff
+    import time
+    for attempt in range(max_retries + 1):
+        try:
+            # Add request session with detailed debugging
+            session = requests.Session()
+
+            # Use timeout from config
+            response = session.post(
+                base_url,
+                json=payload,
+                timeout=timeout_value
+            )
+            logger.debug("Response status code: {}", response.status_code)
+            if response.status_code == 200:
+                break  # Success, exit retry loop
+
+            logger.warning("Attempt {}/{}: received status code {}",
+                         attempt + 1, max_retries + 1, response.status_code)
+
+        except requests.exceptions.RequestException as e:
+            logger.warning("Attempt {}/{}: Request failed: {}",
+                         attempt + 1, max_retries + 1, str(e))
+
+            if attempt < max_retries:
+                wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
+                logger.info("Retrying in {} seconds...", wait_time)
+                time.sleep(wait_time)
+            else:
+                logger.error("All retry attempts failed")
+                return None
+
     try:
-        # Add request session with detailed debugging
-        session = requests.Session()
-
-        # Use a generous timeout but not too long
-        response = session.post(
-            base_url,
-            json=payload,
-            timeout=(10, 90)  # (connect timeout, read timeout)
-        )
-        logger.debug("Response status code: {}", response.status_code)
-        logger.debug("Response headers: {}", response.headers)
-
         if not response.text.strip():
             logger.error("Error: Received empty response from API")
             return None  # Return None if no response
