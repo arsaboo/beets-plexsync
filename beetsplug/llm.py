@@ -45,11 +45,11 @@ def search_track_info(query: str):
     payload = {
         "chatModel": {
             "provider": config["llm"]["search"]["provider"].get(),
-            "name": config["llm"]["search"]["model"].get(),  # Changed from 'model' to 'name' to match API docs
+            "name": config["llm"]["search"]["model"].get(),
         },
         "embeddingModel": {
             "provider": config["llm"]["search"]["provider"].get(),
-            "name": config["llm"]["search"]["embedding_model"].get(),  # Changed from 'model' to 'name'
+            "name": config["llm"]["search"]["embedding_model"].get(),
         },
         "optimizationMode": "balanced",
         "focusMode": "webSearch",
@@ -68,77 +68,15 @@ def search_track_info(query: str):
     logger.debug("Making request to: {}", base_url)
     logger.debug("Payload: {}", payload)
 
-    # Parse the host and port from base_url for diagnostics
-    import urllib.parse
-    parsed_url = urllib.parse.urlparse(base_url)
-    host = parsed_url.hostname
-    port = parsed_url.port
-
-    # Get timeout settings from config or use defaults - fixed to handle ConfigView correctly
-    timeout_value = 90  # Default timeout
-    max_retries = 2    # Default retries
-    retry_delay = 5    # Default delay
-
-    # Access beets ConfigView correctly
-    if "timeout" in config["llm"]["search"]:
-        timeout_value = config["llm"]["search"]["timeout"].get(int)
-    if "max_retries" in config["llm"]["search"]:
-        max_retries = config["llm"]["search"]["max_retries"].get(int)
-    if "retry_delay" in config["llm"]["search"]:
-        retry_delay = config["llm"]["search"]["retry_delay"].get(int)
-
-    # Try a simple connection test first
-    import socket
     try:
-        test_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        test_socket.settimeout(5)
-        test_socket.connect((host, port))
-        test_socket.close()
-        logger.debug("Socket connection test to {}:{} successful", host, port)
-    except socket.error as e:
-        logger.error("Socket connection test to {}:{} failed: {}", host, port, str(e))
-        # If socket connection fails, there's a network issue
-        return None
+        # Simple request with fixed 30 second timeout
+        response = requests.post(
+            base_url,
+            json=payload,
+            timeout=30
+        )
+        logger.debug("Response status code: {}", response.status_code)
 
-    # Implement retries with exponential backoff
-    import time
-    response = None
-    for attempt in range(max_retries + 1):
-        try:
-            # Add request session with detailed debugging
-            session = requests.Session()
-
-            # Use timeout from config
-            response = session.post(
-                base_url,
-                json=payload,
-                timeout=timeout_value
-            )
-            logger.debug("Response status code: {}", response.status_code)
-            if response.status_code == 200:
-                break  # Success, exit retry loop
-
-            logger.warning("Attempt {}/{}: received status code {}",
-                         attempt + 1, max_retries + 1, response.status_code)
-
-        except requests.exceptions.RequestException as e:
-            logger.warning("Attempt {}/{}: Request failed: {}",
-                         attempt + 1, max_retries + 1, str(e))
-
-            if attempt < max_retries:
-                wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
-                logger.info("Retrying in {} seconds...", wait_time)
-                time.sleep(wait_time)
-            else:
-                logger.error("All retry attempts failed")
-                return None
-
-    # Check if response was set (could still be None after all retries)
-    if response is None:
-        logger.error("No valid response received after all attempts")
-        return None
-
-    try:
         if not response.text.strip():
             logger.error("Error: Received empty response from API")
             return None  # Return None if no response
@@ -175,6 +113,7 @@ def search_track_info(query: str):
         logger.error("Request Error: {}", str(e))
         return None  # Return None on API failure
 
+
 def clean_json_string(json_string: str):
     """
     Cleans the API response by removing Markdown-style JSON formatting,
@@ -192,6 +131,7 @@ def clean_json_string(json_string: str):
         logger.error("Error repairing JSON: {}", str(e))
 
     return json_string
+
 
 def normalize_keys(data: dict):
     """
