@@ -41,6 +41,7 @@ from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
 from beetsplug.caching import Cache
 from beetsplug.llm import search_track_info
 from beetsplug.matching import plex_track_distance, clean_string
+import enlighten  # Add enlighten library import
 
 
 class Song(BaseModel):
@@ -3306,6 +3307,14 @@ class PlexSync(BeetsPlugin):
             self._log.warning("No tracks found from any source for playlist {}", playlist_name)
             return
 
+# Initialize enlighten manager and progress bar for all tracks
+        manager = enlighten.get_manager()
+        progress_bar = manager.counter(
+            total=len(all_tracks),
+            desc=f"Processing tracks for {playlist_name}",
+            unit="tracks"
+        )
+
         # Process tracks through Plex first
         matched_songs = []
         with open(log_file, 'a', encoding='utf-8') as f:
@@ -3334,6 +3343,13 @@ class PlexSync(BeetsPlugin):
                 not_found_count += 1
                 with open(log_file, 'a', encoding='utf-8') as f:
                     f.write(f"Not found: {track.get('artist', 'Unknown')} - {track.get('parentTitle', 'Unknown')} - {track.get('title', 'Unknown')}\n")
+
+# Update progress bar
+            progress_bar.update()
+
+        # Complete and close progress bar
+        progress_bar.close()
+        manager.stop()
 
         # Get filters from config and apply them
         filters = playlist_config.get("filters", {})
