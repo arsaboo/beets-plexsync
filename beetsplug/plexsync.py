@@ -42,7 +42,10 @@ from beetsplug.caching import Cache
 from beetsplug.llm import search_track_info
 from beetsplug.matching import plex_track_distance, clean_string
 import enlighten  # Add enlighten library import
+import logging  # Add logging import
 
+# Get the logger
+_log = logging.getLogger('beets')
 
 class Song(BaseModel):
     title: str
