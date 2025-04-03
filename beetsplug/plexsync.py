@@ -1571,8 +1571,10 @@ class PlexSync(BeetsPlugin):
                     self._log.debug("Failed to fetch cached item {}: {}", cached_result, e)
 
         # Try regular search
-        artist = song["artist"].split(",")[0]
+        # Ensure song["artist"] is not None before splitting
         try:
+            if song["artist"] is None:
+                song["artist"] = ""
             if song["album"] is None:
                 tracks = self.music.searchTracks(**{"track.title": song["title"]}, limit=50)
             else:
