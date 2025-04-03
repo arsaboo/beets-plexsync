@@ -2196,46 +2196,48 @@ class PlexSync(BeetsPlugin):
                     if line.startswith('#EXTINF:'):
                         # Extract artist - title from the EXTINF line
                         meta = line.split(',', 1)[1]
+
+                        # Add direct debug of the raw meta line
+                        self._log.debug("M3U8 raw meta line: '{}'", meta)
+
                         if ' - ' in meta:
-                            # Parse meta information - in m3u8 the format is often "Artist - Title"
+                            # Critical problem area - ensure the right values go to the right fields
                             parts = meta.split(' - ', 1)
+                            self._log.debug("M3U8 parsed parts: {}", parts)
 
-                            # Log raw parsed data to identify issue
-                            self._log.debug("Raw m3u8 meta: '{}' -> split parts: {}", meta, parts)
-
+                            # The critical fix: In m3u8 format, it's "Artist - Title"
                             artist, title = parts
+                            self._log.debug("Parsed as artist='{}', title='{}'", artist, title)
+
                             current_song = {
                                 'artist': artist.strip(),
                                 'title': title.strip(),
                                 'album': None  # Will be set by EXTALB
                             }
 
-                            # Debug logging for this entry
-                            self._log.debug("Parsed as: artist='{}', title='{}'",
-                                         current_song['artist'], current_song['title'])
-
                             # Check for EXTALB on next line
                             if i + 1 < len(lines) and lines[i+1].strip().startswith('#EXTALB:'):
                                 i += 1
                                 album_line = lines[i].strip()
                                 current_song['album'] = album_line[8:].strip()
-                                self._log.debug("  with album='{}'", current_song['album'])
+
+                            # Debug the final dictionary that will be added
+                            self._log.debug("Current song before adding: {}", current_song)
 
                             # Check for file path on next line (should not start with #)
                             if i + 1 < len(lines) and not lines[i+1].strip().startswith('#'):
                                 i += 1
-                                file_path = lines[i].strip()
-                                self._log.debug("File path: '{}'", file_path)
-
-                                # Finalize song entry
+                                # This is the file path - finalize song entry
                                 if current_song and all(k in current_song for k in ['title', 'artist']):
-                                    # Final debug log before adding to list
-                                    self._log.debug("Added M3U8 track: {}", current_song)
                                     song_list.append(current_song.copy())
                                     current_song = {}
                     i += 1
 
             if song_list:
+                # Log the first few songs for verification
+                for idx, song in enumerate(song_list[:3]):
+                    self._log.debug("Final song {}: {}", idx, song)
+
                 self.cache.set_playlist_cache(playlist_id, 'm3u8', song_list)
                 self._log.info("Cached {} tracks from M3U8 playlist", len(song_list))
 

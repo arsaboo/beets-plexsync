@@ -328,6 +328,28 @@ class Cache:
                     )
                     row = cursor.fetchone()
 
+                    # If still not found and this is a dict with artist and title, try with swapped values
+                    if not row and isinstance(query, dict) and 'artist' in query and 'title' in query:
+                        # Try with artist and title swapped
+                        swapped_query = {
+                            'title': query.get('artist', ''),
+                            'artist': query.get('title', ''),
+                            'album': query.get('album', '')
+                        }
+                        swapped_key = self._make_cache_key(swapped_query)
+
+                        # Debug the swapped attempt
+                        logger.debug('Trying with swapped artist/title: {}', swapped_key)
+
+                        cursor.execute(
+                            'SELECT plex_ratingkey, cleaned_query FROM cache WHERE query = ?',
+                            (swapped_key,)
+                        )
+                        row = cursor.fetchone()
+
+                        if row:
+                            logger.debug('Cache hit with swapped artist/title')
+
                 if row:
                     plex_ratingkey, cleaned_metadata_json = row
                     cleaned_metadata = json.loads(cleaned_metadata_json) if cleaned_metadata_json else None
