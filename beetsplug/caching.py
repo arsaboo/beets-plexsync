@@ -236,6 +236,7 @@ class Cache:
 
     def _make_cache_key(self, query_data):
         """Create a consistent cache key regardless of input type."""
+        logger.debug('_make_cache_key input: {}', query_data)
         if isinstance(query_data, str):
             return query_data
         elif isinstance(query_data, dict):
@@ -246,7 +247,9 @@ class Cache:
                 "album": self.normalize_text(query_data.get("album", ""))
             }
             # Sort to ensure consistent order
-            return json.dumps(sorted(key_data.items()))
+            sorted_key = json.dumps(sorted(key_data.items()))
+            logger.debug('_make_cache_key output: {}', sorted_key)
+            return sorted_key
         return str(query_data)
 
     def _verify_track_exists(self, plex_ratingkey, query):

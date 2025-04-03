@@ -162,8 +162,7 @@ class PlexSync(BeetsPlugin):
         baseurl = (
             "http://"
             + config["plex"]["host"].get()
-            + ":"
-            + str(config["plex"]["port"].get())
+            + ":" + str(config["plex"]["port"].get())
         )
         try:
             self.plex = PlexServer(baseurl, config["plex"]["token"].get())
@@ -1511,8 +1510,8 @@ class PlexSync(BeetsPlugin):
             print_(ui.colorize('text', '  #: Select match by number'))
             print_(
                 f"  {ui.colorize('action', 'a')}{ui.colorize('text', ': Abort')}   "
-                f"{ui.colorize('action', 's')}{ui.colorize('text', ': Skip')}   "
-                f"{ui.colorize('action', 'e')}{ui.colorize('text', ': Enter manual search')}\n"
+                f"  {ui.colorize('action', 's')}{ui.colorize('text', ': Skip')}   "
+                f"  {ui.colorize('action', 'e')}{ui.colorize('text', ': Enter manual search')}\n"
             )
 
             sel = ui.input_options(
@@ -2167,6 +2166,75 @@ class PlexSync(BeetsPlugin):
             self._log.info("Cached {} tracks from Gaana playlist", len(song_list))
 
         return song_list
+
+    def import_m3u8_playlist(self, filepath):
+        """Import M3U8 playlist with caching."""
+        # Generate cache key from file path
+        playlist_id = str(Path(filepath).stem)
+
+        # Check cache
+        cached_data = self.cache.get_playlist_cache(playlist_id, 'm3u8')
+        if (cached_data):
+            self._log.info("Using cached M3U8 playlist data")
+            return cached_data
+
+        song_list = []
+        current_song = {}
+
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+
+                i = 0
+                while i < len(lines):
+                    line = lines[i].strip()
+
+                    if not line or line.startswith('#EXTM3U'):
+                        i += 1
+                        continue
+
+                    if line.startswith('#EXTINF:'):
+                        # Extract artist - title from the EXTINF line
+                        meta = line.split(',', 1)[1]
+                        if ' - ' in meta:
+                            artist, title = meta.split(' - ', 1)
+                            current_song = {
+                                'artist': artist.strip(),
+                                'title': title.strip(),
+                                'album': None  # Will be set by EXTALB
+                            }
+
+                            # Debug logging for this entry
+                            self._log.debug("Parsing M3U8 entry - artist='{}', title='{}'",
+                                         current_song['artist'], current_song['title'])
+
+                            # Check for EXTALB on next line
+                            if i + 1 < len(lines) and lines[i+1].strip().startswith('#EXTALB:'):
+                                i += 1
+                                album_line = lines[i].strip()
+                                current_song['album'] = album_line[8:].strip()
+                                self._log.debug("  with album='{}'", current_song['album'])
+
+                            # Check for file path on next line (should not start with #)
+                            if i + 1 < len(lines) and not lines[i+1].strip().startswith('#'):
+                                i += 1
+                                # This is the file path - finalize song entry
+                                if current_song and all(k in current_song for k in ['title', 'artist']):
+                                    # Final debug log before adding to list
+                                    self._log.debug("Added M3U8 track: {}", current_song)
+                                    song_list.append(current_song.copy())
+                                    current_song = {}
+                    i += 1
+
+            if song_list:
+                self.cache.set_playlist_cache(playlist_id, 'm3u8', song_list)
+                self._log.info("Cached {} tracks from M3U8 playlist", len(song_list))
+
+            return song_list
+
+        except Exception as e:
+            self._log.error("Error importing M3U8 playlist {}: {}", filepath, e)
+            return []
 
     def _plex2spotify(self, lib, playlist):
         """Transfer Plex playlist to Spotify using plex_lookup."""
@@ -3045,7 +3113,7 @@ class PlexSync(BeetsPlugin):
             except Exception as e:
                 self._log.debug("Error converting track {}: {}", track.title, e)
 
-        self._log.debug("Converted {} tracks to beets items", len(final_tracks))
+        self._log.debug("Converted {} tracks to beets items", len(final_tracks)
 
         # Split tracks into rated and unrated
         rated_tracks = []
@@ -3100,59 +3168,6 @@ class PlexSync(BeetsPlugin):
         self._plex_add_playlist_item(selected_tracks, playlist_name)
 
         self._log.info("Successfully updated {} playlist with {} tracks", playlist_name, len(selected_tracks))
-
-    def import_m3u8_playlist(self, filepath):
-        """Import M3U8 playlist with caching."""
-        # Generate cache key from file path
-        playlist_id = str(Path(filepath).stem)
-
-        # Check cache
-        cached_data = self.cache.get_playlist_cache(playlist_id, 'm3u8')
-        if (cached_data):
-            self._log.info("Using cached M3U8 playlist data")
-            return cached_data
-
-        song_list = []
-        current_song = {}
-
-        try:
-            with open(filepath, 'r', encoding='utf-8') as f:
-                for line in f:
-                    line = line.strip()
-                    if not line or line.startswith('#EXTM3U'):
-                        continue
-
-                    if line.startswith('#EXTINF:'):
-                        # Extract artist - title from the EXTINF line
-                        meta = line.split(',', 1)[1]
-                        if ' - ' in meta:
-                            artist, title = meta.split(' - ', 1)
-                            current_song = {
-                                'artist': artist.strip(),
-                                'title': title.strip(),
-                                'album': None  # Will be set by EXTALB
-                            }
-                    elif line.startswith('#EXTALB:'):
-                        # Extract album info
-                        current_song['album'] = line[8:].strip()
-                    elif not line.startswith('#'):
-                        # This is a file path line - finalize the song entry
-                        if current_song and all(k in current_song for k in ['title', 'artist']):
-                            # If no album was specified, use None
-                            if 'album' not in current_song:
-                                current_song['album'] = None
-                            song_list.append(current_song)
-                            current_song = {}
-
-            if song_list:
-                self.cache.set_playlist_cache(playlist_id, 'm3u8', song_list)
-                self._log.info("Cached {} tracks from M3U8 playlist", len(song_list))
-
-            return song_list
-
-        except Exception as e:
-            self._log.error("Error importing M3U8 playlist {}: {}", filepath, e)
-            return []
 
     def import_post_playlist(self, source_config):
         """Import playlist from a POST request endpoint with caching."""
