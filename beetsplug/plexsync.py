@@ -3102,7 +3102,6 @@ class PlexSync(BeetsPlugin):
         self._log.info("Successfully updated {} playlist with {} tracks", playlist_name, len(selected_tracks))
 
     def import_m3u8_playlist(self, filepath):
-        """Import M3U8 playlist with caching."""
         playlist_id = str(Path(filepath).stem)
 
         cached_data = self.cache.get_playlist_cache(playlist_id, 'm3u8')
@@ -3122,17 +3121,19 @@ class PlexSync(BeetsPlugin):
 
                 if line.startswith('#EXTINF:'):
                     meta = line.split(',', 1)[1]
-                    self._log.debug("Parsing EXTINF meta line: '{}'", meta)
+                    self._log.debug("EXTINF meta raw line: '{}'", meta)
 
                     if ' - ' in meta:
                         artist, title = meta.split(' - ', 1)
+                        artist, title = artist.strip(), title.strip()
+                        self._log.debug("Parsed EXTINF as artist='{}', title='{}'", artist, title)
                     else:
-                        self._log.warning("EXTINF line malformed (missing '-'): '{}'", meta)
+                        self._log.warning("EXTINF missing '-': '{}'", meta)
                         artist, title = None, None
 
                     current_song = {
-                        'artist': artist.strip() if artist else None,
-                        'title': title.strip() if title else None,
+                        'artist': artist,
+                        'title': title,
                         'album': None
                     }
 
@@ -3141,16 +3142,18 @@ class PlexSync(BeetsPlugin):
                     if next_idx < len(lines) and lines[next_idx].startswith('#EXTALB:'):
                         album = lines[next_idx][8:].strip()
                         current_song['album'] = album if album else None
+                        self._log.debug("Found album: '{}'", current_song['album'])
                         next_idx += 1
 
-                    # Optional filename line
+                    # Optional file path (we'll skip)
                     if next_idx < len(lines) and not lines[next_idx].startswith('#'):
-                        next_idx += 1  # file path line (not used here, just increment)
+                        next_idx += 1
 
-                    # Confirm parsing correctness
-                    self._log.debug("Final parsed entry: {}", current_song)
+                    # Log before appending:
+                    self._log.debug("Appending song entry: {}", current_song)
+
                     song_list.append(current_song.copy())
-                    i = next_idx - 1  # Adjust index to next unprocessed line
+                    i = next_idx - 1  # Set to the last processed line
 
                 i += 1
 
