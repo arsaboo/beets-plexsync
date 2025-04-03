@@ -3104,13 +3104,11 @@ class PlexSync(BeetsPlugin):
     def import_m3u8_playlist(self, filepath):
         """Import M3U8 playlist with caching."""
         playlist_id = str(Path(filepath).stem)
-        force_reparse = "force_reparse" in str(filepath).lower()
 
-        if not force_reparse:
-            cached_data = self.cache.get_playlist_cache(playlist_id, 'm3u8')
-            if cached_data:
-                self._log.info("Using cached M3U8 playlist data")
-                return cached_data
+        cached_data = self.cache.get_playlist_cache(playlist_id, 'm3u8')
+        if cached_data:
+            self._log.info("Using cached M3U8 playlist data")
+            return cached_data
 
         song_list = []
 
@@ -3123,52 +3121,36 @@ class PlexSync(BeetsPlugin):
                 line = lines[i]
 
                 if line.startswith('#EXTINF:'):
-                    # Extract artist and title explicitly from EXTINF line
                     meta = line.split(',', 1)[1]
-                    self._log.debug("M3U8 raw meta line: '{}'", meta)
+                    self._log.debug("Parsing EXTINF meta line: '{}'", meta)
 
-                    artist, title = None, None
                     if ' - ' in meta:
-                        artist_part, title_part = meta.split(' - ', 1)
-                        artist = artist_part.strip()
-                        title = title_part.strip()
+                        artist, title = meta.split(' - ', 1)
                     else:
-                        self._log.warning("EXTINF line missing expected format 'Artist - Title': '{}'", meta)
+                        self._log.warning("EXTINF line malformed (missing '-'): '{}'", meta)
+                        artist, title = None, None
 
                     current_song = {
-                        'artist': artist,
-                        'title': title,
+                        'artist': artist.strip() if artist else None,
+                        'title': title.strip() if title else None,
                         'album': None
                     }
 
-                    # Check for optional EXTALB line
+                    # Optional EXTALB line
                     next_idx = i + 1
                     if next_idx < len(lines) and lines[next_idx].startswith('#EXTALB:'):
-                        album_line = lines[next_idx]
-                        album = album_line[8:].strip()
+                        album = lines[next_idx][8:].strip()
                         current_song['album'] = album if album else None
-                        self._log.debug("Found album: '{}'", current_song['album'])
                         next_idx += 1
 
-                    # Next line should be file path
+                    # Optional filename line
                     if next_idx < len(lines) and not lines[next_idx].startswith('#'):
-                        file_path = lines[next_idx]
-                        filename = os.path.basename(file_path)
-                        filename_no_ext, _ = os.path.splitext(filename)
+                        next_idx += 1  # file path line (not used here, just increment)
 
-                        # Only if artist/title was not parsed properly, use filename fallback
-                        if not artist or not title:
-                            if ' - ' in filename_no_ext:
-                                file_artist, file_title = filename_no_ext.split(' - ', 1)
-                                current_song['artist'] = file_artist.strip()
-                                current_song['title'] = file_title.strip()
-                                self._log.debug("Used filename fallback for artist/title: '{}', '{}'",
-                                                current_song['artist'], current_song['title'])
-
-                        # Log final parsed entry clearly
-                        self._log.debug("Final M3U8 parsed entry: {}", current_song)
-                        song_list.append(current_song.copy())
-                        i = next_idx  # Advance index to the file path line
+                    # Confirm parsing correctness
+                    self._log.debug("Final parsed entry: {}", current_song)
+                    song_list.append(current_song.copy())
+                    i = next_idx - 1  # Adjust index to next unprocessed line
 
                 i += 1
 
