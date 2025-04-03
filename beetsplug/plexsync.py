@@ -44,9 +44,6 @@ from beetsplug.matching import plex_track_distance, clean_string
 import enlighten  # Add enlighten library import
 import logging  # Add logging import
 
-# Get the logger
-_log = logging.getLogger('beets')
-
 class Song(BaseModel):
     title: str
     artist: str
@@ -85,8 +82,11 @@ class PlexSync(BeetsPlugin):
         """Initialize plexsync plugin."""
         super().__init__()
 
+        # Set up the logger
+        self._log = logging.getLogger('beets.plexsync')
+
         self.headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 0.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
             "Accept-Language": "en-US,en;q=0.9",
             "Accept-Encoding": "gzip, deflate, br",
             "Connection": "keep-alive",
