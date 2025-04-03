@@ -2169,89 +2169,74 @@ class PlexSync(BeetsPlugin):
 
     def import_m3u8_playlist(self, filepath):
         """Import M3U8 playlist with caching."""
-        # Generate cache key from file path
         playlist_id = str(Path(filepath).stem)
+        force_reparse = "force_reparse" in str(filepath).lower()
 
-        # Check cache
-        cached_data = self.cache.get_playlist_cache(playlist_id, 'm3u8')
-        if (cached_data):
-            self._log.info("Using cached M3U8 playlist data")
-            return cached_data
+        if not force_reparse:
+            cached_data = self.cache.get_playlist_cache(playlist_id, 'm3u8')
+            if cached_data:
+                self._log.info("Using cached M3U8 playlist data")
+                return cached_data
 
         song_list = []
 
         try:
             with open(filepath, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
+                lines = [line.strip() for line in f if line.strip()]
 
-                i = 0
-                while i < len(lines):
-                    line = lines[i].strip()
+            i = 0
+            while i < len(lines):
+                line = lines[i]
 
-                    if not line or line.startswith('#EXTM3U'):
-                        i += 1
-                        continue
+                if line.startswith('#EXTINF:'):
+                    # Extract artist and title explicitly from EXTINF line
+                    meta = line.split(',', 1)[1]
+                    self._log.debug("M3U8 raw meta line: '{}'", meta)
 
-                    if line.startswith('#EXTINF:'):
-                        # Extract artist - title from the EXTINF line
-                        meta = line.split(',', 1)[1]
-                        self._log.debug("M3U8 raw meta line: '{}'", meta)
+                    artist, title = None, None
+                    if ' - ' in meta:
+                        artist_part, title_part = meta.split(' - ', 1)
+                        artist = artist_part.strip()
+                        title = title_part.strip()
+                    else:
+                        self._log.warning("EXTINF line missing expected format 'Artist - Title': '{}'", meta)
 
-                        if ' - ' in meta:
-                            # Get parts first
-                            artist, title = meta.split(' - ', 1)
+                    current_song = {
+                        'artist': artist,
+                        'title': title,
+                        'album': None
+                    }
 
-                            # Extract metadata from filename as validation
-                            filename = ""
-                            file_artist = ""
-                            file_title = ""
+                    # Check for optional EXTALB line
+                    next_idx = i + 1
+                    if next_idx < len(lines) and lines[next_idx].startswith('#EXTALB:'):
+                        album_line = lines[next_idx]
+                        album = album_line[8:].strip()
+                        current_song['album'] = album if album else None
+                        self._log.debug("Found album: '{}'", current_song['album'])
+                        next_idx += 1
 
-                            # Check for file path on next line after EXTINF and possible EXTALB
-                            next_line_index = i + 1
-                            if next_line_index < len(lines) and lines[next_line_index].strip().startswith('#EXTALB:'):
-                                next_line_index += 1
+                    # Next line should be file path
+                    if next_idx < len(lines) and not lines[next_idx].startswith('#'):
+                        file_path = lines[next_idx]
+                        filename = os.path.basename(file_path)
+                        filename_no_ext, _ = os.path.splitext(filename)
 
-                            if next_line_index < len(lines) and not lines[next_line_index].strip().startswith('#'):
-                                filename = os.path.basename(lines[next_line_index].strip())
-                                # Check if filename has artist-title format
-                                if ' - ' in filename:
-                                    file_parts = os.path.splitext(filename)[0].split(' - ', 1)
-                                    file_artist = file_parts[0].strip()
-                                    file_title = file_parts[1].strip() if len(file_parts) > 1 else ""
+                        # Only if artist/title was not parsed properly, use filename fallback
+                        if not artist or not title:
+                            if ' - ' in filename_no_ext:
+                                file_artist, file_title = filename_no_ext.split(' - ', 1)
+                                current_song['artist'] = file_artist.strip()
+                                current_song['title'] = file_title.strip()
+                                self._log.debug("Used filename fallback for artist/title: '{}', '{}'",
+                                                current_song['artist'], current_song['title'])
 
-                            # Check if we need to swap artist and title based on filename
-                            swap_needed = False
-                            if file_artist and file_title:
-                                # If filename matches the opposite of what we parsed, swap them
-                                if (file_artist == title and file_title == artist):
-                                    self._log.debug("Swapping artist and title based on filename: {} - {}", file_artist, file_title)
-                                    artist, title = title, artist
-                                    swap_needed = True
+                        # Log final parsed entry clearly
+                        self._log.debug("Final M3U8 parsed entry: {}", current_song)
+                        song_list.append(current_song.copy())
+                        i = next_idx  # Advance index to the file path line
 
-                            # Create song entry
-                            current_song = {
-                                'artist': artist.strip(),
-                                'title': title.strip(),
-                                'album': None  # Will be set by EXTALB if present
-                            }
-
-                            # Check for EXTALB on next line
-                            if i + 1 < len(lines) and lines[i+1].strip().startswith('#EXTALB:'):
-                                i += 1
-                                album_line = lines[i].strip()
-                                current_song['album'] = album_line[8:].strip()
-                                self._log.debug("Found album: '{}'", current_song['album'])
-
-                            # Log the parsed track information
-                            self._log.debug("Parsed M3U8 entry: {} (swap={}) -> {}", meta, swap_needed, current_song)
-
-                            # Check for file path on next line (should not start with #)
-                            if i + 1 < len(lines) and not lines[i+1].strip().startswith('#'):
-                                i += 1
-                                # This is the file path - finalize song entry
-                                if current_song and all(k in current_song for k in ['title', 'artist']):
-                                    song_list.append(current_song.copy())
-                    i += 1
+                i += 1
 
             if song_list:
                 self.cache.set_playlist_cache(playlist_id, 'm3u8', song_list)
@@ -2260,7 +2245,7 @@ class PlexSync(BeetsPlugin):
             return song_list
 
         except Exception as e:
-            self._log.error("Error importing M3U8 playlist {}: {}", filepath, e)
+            self._log.error("Error importing M3U8 playlist '{}': {}", filepath, e)
             return []
 
     def _plex2spotify(self, lib, playlist):
@@ -2409,8 +2394,24 @@ class PlexSync(BeetsPlugin):
                 for match in sonic_matches:
                     # Check rating - include unrated (-1) and highly rated (>=4) tracks
                     rating = getattr(
-                        match, "userRating", -1
-                    )  # Default to -1 if attribute doesn't exist
+                        match, "userRating", -1  # Default to -1 if attribute doesn't exist
+                    )
+                    if (
+                        match.ratingKey not in recently_played  # Not recently played
+                        and any(
+                            g.tag.lower() in track_genres for g in match.genres
+                        )  # Genre match
+                        and (rating is None or rating == -1 or rating >= 4)
+                    ):  # Rating criteria including None
+                        similar_tracks.add(match)
+            except Exception as e:
+                self._log.debug(
+                    "Error getting similar tracks for {}: {}", track.title, e
+                )
+                    # Check rating - include unrated (-1) and highly rated (>=4) tracks
+                    rating = getattr(
+                        match, "userRating", -1  # Default to -1 if attribute doesn't exist
+                    )
                     if (
                         match.ratingKey not in recently_played  # Not recently played
                         and any(
