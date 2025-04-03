@@ -246,10 +246,15 @@ class Cache:
                 "artist": self.normalize_text(query_data.get("artist", "")),
                 "album": self.normalize_text(query_data.get("album", ""))
             }
-            # Sort to ensure consistent order
-            sorted_key = json.dumps(sorted(key_data.items()))
-            logger.debug('_make_cache_key output: {}', sorted_key)
-            return sorted_key
+            # Create a consistent string representation without using sorted()
+            # which was causing title and artist to be swapped
+            key_str = json.dumps([
+                ["album", key_data["album"]],
+                ["artist", key_data["artist"]],
+                ["title", key_data["title"]]
+            ])
+            logger.debug('_make_cache_key output: {}', key_str)
+            return key_str
         return str(query_data)
 
     def _verify_track_exists(self, plex_ratingkey, query):

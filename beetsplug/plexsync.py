@@ -2197,6 +2197,7 @@ class PlexSync(BeetsPlugin):
                         # Extract artist - title from the EXTINF line
                         meta = line.split(',', 1)[1]
                         if ' - ' in meta:
+                            # Correct parsing: Artist comes first, then title
                             artist, title = meta.split(' - ', 1)
                             current_song = {
                                 'artist': artist.strip(),
