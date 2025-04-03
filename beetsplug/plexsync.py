@@ -3113,7 +3113,7 @@ class PlexSync(BeetsPlugin):
             except Exception as e:
                 self._log.debug("Error converting track {}: {}", track.title, e)
 
-        self._log.debug("Converted {} tracks to beets items", len(final_tracks)
+        self._log.debug("Converted {} tracks to beets items", len(final_tracks))
 
         # Split tracks into rated and unrated
         rated_tracks = []
