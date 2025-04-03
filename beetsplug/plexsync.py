@@ -162,7 +162,8 @@ class PlexSync(BeetsPlugin):
         baseurl = (
             "http://"
             + config["plex"]["host"].get()
-            + ":" + str(config["plex"]["port"].get())
+            + ":"
+            + str(config["plex"]["port"].get())
         )
         try:
             self.plex = PlexServer(baseurl, config["plex"]["token"].get())
@@ -1510,8 +1511,8 @@ class PlexSync(BeetsPlugin):
             print_(ui.colorize('text', '  #: Select match by number'))
             print_(
                 f"  {ui.colorize('action', 'a')}{ui.colorize('text', ': Abort')}   "
-                f"  {ui.colorize('action', 's')}{ui.colorize('text', ': Skip')}   "
-                f"  {ui.colorize('action', 'e')}{ui.colorize('text', ': Enter manual search')}\n"
+                f"{ui.colorize('action', 's')}{ui.colorize('text', ': Skip')}   "
+                f"{ui.colorize('action', 'e')}{ui.colorize('text', ': Enter manual search')}\n"
             )
 
             sel = ui.input_options(
@@ -2167,87 +2168,6 @@ class PlexSync(BeetsPlugin):
 
         return song_list
 
-    def import_m3u8_playlist(self, filepath):
-        """Import M3U8 playlist with caching."""
-        playlist_id = str(Path(filepath).stem)
-        force_reparse = "force_reparse" in str(filepath).lower()
-
-        if not force_reparse:
-            cached_data = self.cache.get_playlist_cache(playlist_id, 'm3u8')
-            if cached_data:
-                self._log.info("Using cached M3U8 playlist data")
-                return cached_data
-
-        song_list = []
-
-        try:
-            with open(filepath, 'r', encoding='utf-8') as f:
-                lines = [line.strip() for line in f if line.strip()]
-
-            i = 0
-            while i < len(lines):
-                line = lines[i]
-
-                if line.startswith('#EXTINF:'):
-                    # Extract artist and title explicitly from EXTINF line
-                    meta = line.split(',', 1)[1]
-                    self._log.debug("M3U8 raw meta line: '{}'", meta)
-
-                    artist, title = None, None
-                    if ' - ' in meta:
-                        artist_part, title_part = meta.split(' - ', 1)
-                        artist = artist_part.strip()
-                        title = title_part.strip()
-                    else:
-                        self._log.warning("EXTINF line missing expected format 'Artist - Title': '{}'", meta)
-
-                    current_song = {
-                        'artist': artist,
-                        'title': title,
-                        'album': None
-                    }
-
-                    # Check for optional EXTALB line
-                    next_idx = i + 1
-                    if next_idx < len(lines) and lines[next_idx].startswith('#EXTALB:'):
-                        album_line = lines[next_idx]
-                        album = album_line[8:].strip()
-                        current_song['album'] = album if album else None
-                        self._log.debug("Found album: '{}'", current_song['album'])
-                        next_idx += 1
-
-                    # Next line should be file path
-                    if next_idx < len(lines) and not lines[next_idx].startswith('#'):
-                        file_path = lines[next_idx]
-                        filename = os.path.basename(file_path)
-                        filename_no_ext, _ = os.path.splitext(filename)
-
-                        # Only if artist/title was not parsed properly, use filename fallback
-                        if not artist or not title:
-                            if ' - ' in filename_no_ext:
-                                file_artist, file_title = filename_no_ext.split(' - ', 1)
-                                current_song['artist'] = file_artist.strip()
-                                current_song['title'] = file_title.strip()
-                                self._log.debug("Used filename fallback for artist/title: '{}', '{}'",
-                                                current_song['artist'], current_song['title'])
-
-                        # Log final parsed entry clearly
-                        self._log.debug("Final M3U8 parsed entry: {}", current_song)
-                        song_list.append(current_song.copy())
-                        i = next_idx  # Advance index to the file path line
-
-                i += 1
-
-            if song_list:
-                self.cache.set_playlist_cache(playlist_id, 'm3u8', song_list)
-                self._log.info("Cached {} tracks from M3U8 playlist", len(song_list))
-
-            return song_list
-
-        except Exception as e:
-            self._log.error("Error importing M3U8 playlist '{}': {}", filepath, e)
-            return []
-
     def _plex2spotify(self, lib, playlist):
         """Transfer Plex playlist to Spotify using plex_lookup."""
         self.authenticate_spotify()
@@ -2394,24 +2314,8 @@ class PlexSync(BeetsPlugin):
                 for match in sonic_matches:
                     # Check rating - include unrated (-1) and highly rated (>=4) tracks
                     rating = getattr(
-                        match, "userRating", -1  # Default to -1 if attribute doesn't exist
-                    )
-                    if (
-                        match.ratingKey not in recently_played  # Not recently played
-                        and any(
-                            g.tag.lower() in track_genres for g in match.genres
-                        )  # Genre match
-                        and (rating is None or rating == -1 or rating >= 4)
-                    ):  # Rating criteria including None
-                        similar_tracks.add(match)
-            except Exception as e:
-                self._log.debug(
-                    "Error getting similar tracks for {}: {}", track.title, e
-                )
-                    # Check rating - include unrated (-1) and highly rated (>=4) tracks
-                    rating = getattr(
-                        match, "userRating", -1  # Default to -1 if attribute doesn't exist
-                    )
+                        match, "userRating", -1
+                    )  # Default to -1 if attribute doesn't exist
                     if (
                         match.ratingKey not in recently_played  # Not recently played
                         and any(
@@ -3196,6 +3100,87 @@ class PlexSync(BeetsPlugin):
         self._plex_add_playlist_item(selected_tracks, playlist_name)
 
         self._log.info("Successfully updated {} playlist with {} tracks", playlist_name, len(selected_tracks))
+
+    def import_m3u8_playlist(self, filepath):
+        """Import M3U8 playlist with caching."""
+        playlist_id = str(Path(filepath).stem)
+        force_reparse = "force_reparse" in str(filepath).lower()
+
+        if not force_reparse:
+            cached_data = self.cache.get_playlist_cache(playlist_id, 'm3u8')
+            if cached_data:
+                self._log.info("Using cached M3U8 playlist data")
+                return cached_data
+
+        song_list = []
+
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                lines = [line.strip() for line in f if line.strip()]
+
+            i = 0
+            while i < len(lines):
+                line = lines[i]
+
+                if line.startswith('#EXTINF:'):
+                    # Extract artist and title explicitly from EXTINF line
+                    meta = line.split(',', 1)[1]
+                    self._log.debug("M3U8 raw meta line: '{}'", meta)
+
+                    artist, title = None, None
+                    if ' - ' in meta:
+                        artist_part, title_part = meta.split(' - ', 1)
+                        artist = artist_part.strip()
+                        title = title_part.strip()
+                    else:
+                        self._log.warning("EXTINF line missing expected format 'Artist - Title': '{}'", meta)
+
+                    current_song = {
+                        'artist': artist,
+                        'title': title,
+                        'album': None
+                    }
+
+                    # Check for optional EXTALB line
+                    next_idx = i + 1
+                    if next_idx < len(lines) and lines[next_idx].startswith('#EXTALB:'):
+                        album_line = lines[next_idx]
+                        album = album_line[8:].strip()
+                        current_song['album'] = album if album else None
+                        self._log.debug("Found album: '{}'", current_song['album'])
+                        next_idx += 1
+
+                    # Next line should be file path
+                    if next_idx < len(lines) and not lines[next_idx].startswith('#'):
+                        file_path = lines[next_idx]
+                        filename = os.path.basename(file_path)
+                        filename_no_ext, _ = os.path.splitext(filename)
+
+                        # Only if artist/title was not parsed properly, use filename fallback
+                        if not artist or not title:
+                            if ' - ' in filename_no_ext:
+                                file_artist, file_title = filename_no_ext.split(' - ', 1)
+                                current_song['artist'] = file_artist.strip()
+                                current_song['title'] = file_title.strip()
+                                self._log.debug("Used filename fallback for artist/title: '{}', '{}'",
+                                                current_song['artist'], current_song['title'])
+
+                        # Log final parsed entry clearly
+                        self._log.debug("Final M3U8 parsed entry: {}", current_song)
+                        song_list.append(current_song.copy())
+                        i = next_idx  # Advance index to the file path line
+
+                i += 1
+
+            if song_list:
+                self.cache.set_playlist_cache(playlist_id, 'm3u8', song_list)
+                self._log.info("Cached {} tracks from M3U8 playlist", len(song_list))
+
+            return song_list
+
+        except Exception as e:
+            self._log.error("Error importing M3U8 playlist '{}': {}", filepath, e)
+            return []
 
     def import_post_playlist(self, source_config):
         """Import playlist from a POST request endpoint with caching."""
