@@ -2179,7 +2179,6 @@ class PlexSync(BeetsPlugin):
             return cached_data
 
         song_list = []
-        current_song = {}
 
         try:
             with open(filepath, 'r', encoding='utf-8') as f:
@@ -2196,23 +2195,44 @@ class PlexSync(BeetsPlugin):
                     if line.startswith('#EXTINF:'):
                         # Extract artist - title from the EXTINF line
                         meta = line.split(',', 1)[1]
-
-                        # Add direct debug of the raw meta line
                         self._log.debug("M3U8 raw meta line: '{}'", meta)
 
                         if ' - ' in meta:
-                            # Critical problem area - ensure the right values go to the right fields
-                            parts = meta.split(' - ', 1)
-                            self._log.debug("M3U8 parsed parts: {}", parts)
+                            # Get parts first
+                            artist, title = meta.split(' - ', 1)
 
-                            # The critical fix: In m3u8 format, it's "Artist - Title"
-                            artist, title = parts
-                            self._log.debug("Parsed as artist='{}', title='{}'", artist, title)
+                            # Extract metadata from filename as validation
+                            filename = ""
+                            file_artist = ""
+                            file_title = ""
 
+                            # Check for file path on next line after EXTINF and possible EXTALB
+                            next_line_index = i + 1
+                            if next_line_index < len(lines) and lines[next_line_index].strip().startswith('#EXTALB:'):
+                                next_line_index += 1
+
+                            if next_line_index < len(lines) and not lines[next_line_index].strip().startswith('#'):
+                                filename = os.path.basename(lines[next_line_index].strip())
+                                # Check if filename has artist-title format
+                                if ' - ' in filename:
+                                    file_parts = os.path.splitext(filename)[0].split(' - ', 1)
+                                    file_artist = file_parts[0].strip()
+                                    file_title = file_parts[1].strip() if len(file_parts) > 1 else ""
+
+                            # Check if we need to swap artist and title based on filename
+                            swap_needed = False
+                            if file_artist and file_title:
+                                # If filename matches the opposite of what we parsed, swap them
+                                if (file_artist == title and file_title == artist):
+                                    self._log.debug("Swapping artist and title based on filename: {} - {}", file_artist, file_title)
+                                    artist, title = title, artist
+                                    swap_needed = True
+
+                            # Create song entry
                             current_song = {
                                 'artist': artist.strip(),
                                 'title': title.strip(),
-                                'album': None  # Will be set by EXTALB
+                                'album': None  # Will be set by EXTALB if present
                             }
 
                             # Check for EXTALB on next line
@@ -2220,9 +2240,10 @@ class PlexSync(BeetsPlugin):
                                 i += 1
                                 album_line = lines[i].strip()
                                 current_song['album'] = album_line[8:].strip()
+                                self._log.debug("Found album: '{}'", current_song['album'])
 
-                            # Debug the final dictionary that will be added
-                            self._log.debug("Current song before adding: {}", current_song)
+                            # Log the parsed track information
+                            self._log.debug("Parsed M3U8 entry: {} (swap={}) -> {}", meta, swap_needed, current_song)
 
                             # Check for file path on next line (should not start with #)
                             if i + 1 < len(lines) and not lines[i+1].strip().startswith('#'):
@@ -2230,14 +2251,9 @@ class PlexSync(BeetsPlugin):
                                 # This is the file path - finalize song entry
                                 if current_song and all(k in current_song for k in ['title', 'artist']):
                                     song_list.append(current_song.copy())
-                                    current_song = {}
                     i += 1
 
             if song_list:
-                # Log the first few songs for verification
-                for idx, song in enumerate(song_list[:3]):
-                    self._log.debug("Final song {}: {}", idx, song)
-
                 self.cache.set_playlist_cache(playlist_id, 'm3u8', song_list)
                 self._log.info("Cached {} tracks from M3U8 playlist", len(song_list))
 
