@@ -1527,15 +1527,23 @@ class PlexSync(BeetsPlugin):
             if sel in ("b", "B"):
                 return None
             elif sel in ("s", "S"):
-                self._cache_result(song_dict, None)
+                # If skip was selected and we have an original song, cache negative result
+                if original_song:
+                    original_key = self.cache._make_cache_key(original_song)
+                    self._log.debug("Skipped - caching negative result for original query: {}", original_key)
+                    self._cache_result(original_key, None)
                 return None
             elif sel in ("e", "E"):
-                return self.manual_track_search(song_dict)
+                return self.manual_track_search(original_song)
 
             selected_track = sorted_tracks[sel - 1][0] if sel > 0 else None
 
-            if selected_track and original_song:
-                self._cache_result(self.cache._make_cache_key(original_song), selected_track)
+            # Cache using only the original query if provided
+            if selected_track and original_song and isinstance(original_song, dict):
+                original_key = self.cache._make_cache_key(original_song)
+                self._log.debug("Storing match for original query: {} → ratingKey: {}",
+                                original_key, selected_track.ratingKey)
+                self._cache_result(original_key, selected_track.ratingKey, cleaned_metadata=original_song)
 
             return selected_track
 
