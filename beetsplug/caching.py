@@ -236,6 +236,7 @@ class Cache:
 
     def _make_cache_key(self, query_data):
         """Create a consistent cache key regardless of input type."""
+        logger.debug('_make_cache_key input: {}', query_data)
         if isinstance(query_data, str):
             return query_data
         elif isinstance(query_data, dict):
@@ -245,8 +246,15 @@ class Cache:
                 "artist": self.normalize_text(query_data.get("artist", "")),
                 "album": self.normalize_text(query_data.get("album", ""))
             }
-            # Sort to ensure consistent order
-            return json.dumps(sorted(key_data.items()))
+            # Create a consistent string representation without using sorted()
+            # which was causing title and artist to be swapped
+            key_str = json.dumps([
+                ["album", key_data["album"]],
+                ["artist", key_data["artist"]],
+                ["title", key_data["title"]]
+            ])
+            logger.debug('_make_cache_key output: {}', key_str)
+            return key_str
         return str(query_data)
 
     def _verify_track_exists(self, plex_ratingkey, query):
@@ -319,6 +327,28 @@ class Cache:
                         (cache_key,)
                     )
                     row = cursor.fetchone()
+
+                    # If still not found and this is a dict with artist and title, try with swapped values
+                    if not row and isinstance(query, dict) and 'artist' in query and 'title' in query:
+                        # Try with artist and title swapped
+                        swapped_query = {
+                            'title': query.get('artist', ''),
+                            'artist': query.get('title', ''),
+                            'album': query.get('album', '')
+                        }
+                        swapped_key = self._make_cache_key(swapped_query)
+
+                        # Debug the swapped attempt
+                        logger.debug('Trying with swapped artist/title: {}', swapped_key)
+
+                        cursor.execute(
+                            'SELECT plex_ratingkey, cleaned_query FROM cache WHERE query = ?',
+                            (swapped_key,)
+                        )
+                        row = cursor.fetchone()
+
+                        if row:
+                            logger.debug('Cache hit with swapped artist/title')
 
                 if row:
                     plex_ratingkey, cleaned_metadata_json = row

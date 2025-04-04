@@ -42,7 +42,7 @@ from beetsplug.caching import Cache
 from beetsplug.llm import search_track_info
 from beetsplug.matching import plex_track_distance, clean_string
 import enlighten  # Add enlighten library import
-
+import logging  # Add logging import
 
 class Song(BaseModel):
     title: str
@@ -82,8 +82,11 @@ class PlexSync(BeetsPlugin):
         """Initialize plexsync plugin."""
         super().__init__()
 
+        # Set up the logger
+        self._log = logging.getLogger('beets.plexsync')
+
         self.headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 0.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
             "Accept-Language": "en-US,en;q=0.9",
             "Accept-Encoding": "gzip, deflate, br",
             "Connection": "keep-alive",
@@ -150,7 +153,7 @@ class PlexSync(BeetsPlugin):
                     "provider": "ollama",
                     "api_key": "",  # Will use base key if empty
                     "base_url": "http://192.168.2.162:3006/api/search",  # Override base_url for search
-                    "model": "qwen2.5:72b-instruct",  # Override model for search
+                    "model": "qwen2.5:latest",  # Override model for search
                     "embedding_model": "snowflake-arctic-embed2:latest"  # Embedding model
                 }
             }
@@ -1571,8 +1574,10 @@ class PlexSync(BeetsPlugin):
                     self._log.debug("Failed to fetch cached item {}: {}", cached_result, e)
 
         # Try regular search
-        artist = song["artist"].split(",")[0]
+        # Ensure song["artist"] is not None before splitting
         try:
+            if song["artist"] is None:
+                song["artist"] = ""
             if song["album"] is None:
                 tracks = self.music.searchTracks(**{"track.title": song["title"]}, limit=50)
             else:
@@ -3102,47 +3107,60 @@ class PlexSync(BeetsPlugin):
         self._log.info("Successfully updated {} playlist with {} tracks", playlist_name, len(selected_tracks))
 
     def import_m3u8_playlist(self, filepath):
-        """Import M3U8 playlist with caching."""
-        # Generate cache key from file path
         playlist_id = str(Path(filepath).stem)
 
-        # Check cache
         cached_data = self.cache.get_playlist_cache(playlist_id, 'm3u8')
-        if (cached_data):
+        if cached_data:
             self._log.info("Using cached M3U8 playlist data")
             return cached_data
 
         song_list = []
-        current_song = {}
 
         try:
             with open(filepath, 'r', encoding='utf-8') as f:
-                for line in f:
-                    line = line.strip()
-                    if not line or line.startswith('#EXTM3U'):
-                        continue
+                lines = [line.strip() for line in f if line.strip()]
 
-                    if line.startswith('#EXTINF:'):
-                        # Extract artist - title from the EXTINF line
-                        meta = line.split(',', 1)[1]
-                        if ' - ' in meta:
-                            artist, title = meta.split(' - ', 1)
-                            current_song = {
-                                'artist': artist.strip(),
-                                'title': title.strip(),
-                                'album': None  # Will be set by EXTALB
-                            }
-                    elif line.startswith('#EXTALB:'):
-                        # Extract album info
-                        current_song['album'] = line[8:].strip()
-                    elif not line.startswith('#'):
-                        # This is a file path line - finalize the song entry
-                        if current_song and all(k in current_song for k in ['title', 'artist']):
-                            # If no album was specified, use None
-                            if 'album' not in current_song:
-                                current_song['album'] = None
-                            song_list.append(current_song)
-                            current_song = {}
+            i = 0
+            while i < len(lines):
+                line = lines[i]
+
+                if line.startswith('#EXTINF:'):
+                    meta = line.split(',', 1)[1]
+                    self._log.debug("EXTINF meta raw line: '{}'", meta)
+
+                    if ' - ' in meta:
+                        artist, title = meta.split(' - ', 1)
+                        artist, title = artist.strip(), title.strip()
+                        self._log.debug("Parsed EXTINF as artist='{}', title='{}'", artist, title)
+                    else:
+                        self._log.warning("EXTINF missing '-': '{}'", meta)
+                        artist, title = None, None
+
+                    current_song = {
+                        'artist': artist,
+                        'title': title,
+                        'album': None
+                    }
+
+                    # Optional EXTALB line
+                    next_idx = i + 1
+                    if next_idx < len(lines) and lines[next_idx].startswith('#EXTALB:'):
+                        album = lines[next_idx][8:].strip()
+                        current_song['album'] = album if album else None
+                        self._log.debug("Found album: '{}'", current_song['album'])
+                        next_idx += 1
+
+                    # Optional file path (we'll skip)
+                    if next_idx < len(lines) and not lines[next_idx].startswith('#'):
+                        next_idx += 1
+
+                    # Log before appending:
+                    self._log.debug("Appending song entry: {}", current_song)
+
+                    song_list.append(current_song.copy())
+                    i = next_idx - 1  # Set to the last processed line
+
+                i += 1
 
             if song_list:
                 self.cache.set_playlist_cache(playlist_id, 'm3u8', song_list)
@@ -3151,7 +3169,7 @@ class PlexSync(BeetsPlugin):
             return song_list
 
         except Exception as e:
-            self._log.error("Error importing M3U8 playlist {}: {}", filepath, e)
+            self._log.error("Error importing M3U8 playlist '{}': {}", filepath, e)
             return []
 
     def import_post_playlist(self, source_config):
@@ -3307,7 +3325,7 @@ class PlexSync(BeetsPlugin):
             self._log.warning("No tracks found from any source for playlist {}", playlist_name)
             return
 
-# Initialize enlighten manager and progress bar for all tracks
+        # Initialize enlighten manager and progress bar for all tracks
         manager = enlighten.get_manager()
         progress_bar = manager.counter(
             total=len(all_tracks),
@@ -3344,7 +3362,7 @@ class PlexSync(BeetsPlugin):
                 with open(log_file, 'a', encoding='utf-8') as f:
                     f.write(f"Not found: {track.get('artist', 'Unknown')} - {track.get('parentTitle', 'Unknown')} - {track.get('title', 'Unknown')}\n")
 
-# Update progress bar
+            # Update progress bar
             progress_bar.update()
 
         # Complete and close progress bar
@@ -3480,8 +3498,8 @@ class PlexSync(BeetsPlugin):
                     else:
                         return None
 
-                # Clean up the title
-                title = clean_title(title)
+                # Use clean_string instead of clean_title
+                title = clean_string(title)
 
                 # Clean up artist (handle cases like "Vishal - Shekhar")
                 artist = re.sub(r'\s+-\s+', ' & ', artist)
@@ -3628,42 +3646,3 @@ class PlexSync(BeetsPlugin):
         """Clean up when plugin is disabled."""
         if self.loop and not self.loop.is_closed():
             self.close()
-
-def get_color_for_score(score):
-    """Get the appropriate color for a given score."""
-    if score >= 0.8:
-        return 'text_success'    # High match (green)
-    elif score >= 0.5:
-        return 'text_warning'    # Medium match (yellow)
-    else:
-        return 'text_error'      # Low match (red)
-
-def clean_title(title):
-    """Clean up track title by removing common extras and normalizing format.
-
-    Args:
-        title: The title string to clean
-
-    Returns:
-        str: Cleaned title string
-    """
-    # Remove various suffix patterns
-    patterns = [
-        r'\s*\([^)]*\)\s*$',  # Remove trailing parentheses and contents
-        r'\s*\[[^\]]*\]\s*$',  # Remove trailing square brackets and contents
-        r'\s*-\s*[^-]*$',      # Remove trailing dash and text
-        r'\s*\|[^|]*$',        # Remove trailing pipe and text
-        r'\s*feat\.[^,]*',     # Remove "feat." and featured artists
-        r'\s*ft\.[^,]*',       # Remove "ft." and featured artists
-        r'\s*\d+\s*$',         # Remove trailing numbers
-        r'\s+$'                # Remove trailing whitespace
-    ]
-
-    cleaned = title
-    for pattern in patterns:
-        cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
-
-    # Remove redundant spaces
-    cleaned = ' '.join(cleaned.split())
-
-    return cleaned
