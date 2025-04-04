@@ -1346,10 +1346,19 @@ class PlexSync(BeetsPlugin):
 
         selected_track = sorted_tracks[sel - 1][0] if sel > 0 else None
         if selected_track:
-            final_key = self.cache._make_cache_key(song)
-            self._log.debug("Storing manual selection in cache for key: {} ratingKey: {}",
-                            final_key, selected_track.ratingKey)
-            self._cache_result(final_key, selected_track.ratingKey, cleaned_metadata=song)
+            # Make sure we're using a consistent cache key format
+            cache_key = self.cache._make_cache_key(song)
+            self._log.debug("Storing selection in cache for key: {} → ratingKey: {}",
+                          cache_key, selected_track.ratingKey)
+
+            # Store the selection in the cache
+            self._cache_result(song, selected_track.ratingKey)
+
+            # Log the selection for debugging
+            self._log.info("Selected match: {} - {} - {}",
+                          selected_track.parentTitle,
+                          selected_track.title,
+                          getattr(selected_track, 'originalTitle', None) or selected_track.artist().title)
         return selected_track
 
     def manual_track_search(self, original_song=None):
@@ -1587,7 +1596,9 @@ class PlexSync(BeetsPlugin):
             if song["artist"] is None:
                 song["artist"] = ""
             if song["album"] is None:
-                tracks = self.music.searchTracks(**{"track.title": song["title"]}, limit=50)
+                tracks = self.music.searchTracks(
+                    **{"track.title": song["title"]}, limit=50
+                )
             else:
                 tracks = self.music.searchTracks(
                     **{"album.title": song["album"], "track.title": song["title"]}, limit=50
