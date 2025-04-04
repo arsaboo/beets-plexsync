@@ -153,7 +153,7 @@ class PlexSync(BeetsPlugin):
                     "provider": "ollama",
                     "api_key": "",  # Will use base key if empty
                     "base_url": "http://192.168.2.162:3006/api/search",  # Override base_url for search
-                    "model": "qwen2.5:72b-instruct",  # Override model for search
+                    "model": "qwen2.5:latest",  # Override model for search
                     "embedding_model": "snowflake-arctic-embed2:latest"  # Embedding model
                 }
             }
@@ -3325,7 +3325,7 @@ class PlexSync(BeetsPlugin):
             self._log.warning("No tracks found from any source for playlist {}", playlist_name)
             return
 
-# Initialize enlighten manager and progress bar for all tracks
+        # Initialize enlighten manager and progress bar for all tracks
         manager = enlighten.get_manager()
         progress_bar = manager.counter(
             total=len(all_tracks),
@@ -3362,7 +3362,7 @@ class PlexSync(BeetsPlugin):
                 with open(log_file, 'a', encoding='utf-8') as f:
                     f.write(f"Not found: {track.get('artist', 'Unknown')} - {track.get('parentTitle', 'Unknown')} - {track.get('title', 'Unknown')}\n")
 
-# Update progress bar
+            # Update progress bar
             progress_bar.update()
 
         # Complete and close progress bar
@@ -3498,8 +3498,8 @@ class PlexSync(BeetsPlugin):
                     else:
                         return None
 
-                # Clean up the title
-                title = clean_title(title)
+                # Use clean_string instead of clean_title
+                title = clean_string(title)
 
                 # Clean up artist (handle cases like "Vishal - Shekhar")
                 artist = re.sub(r'\s+-\s+', ' & ', artist)
@@ -3646,42 +3646,3 @@ class PlexSync(BeetsPlugin):
         """Clean up when plugin is disabled."""
         if self.loop and not self.loop.is_closed():
             self.close()
-
-def get_color_for_score(score):
-    """Get the appropriate color for a given score."""
-    if score >= 0.8:
-        return 'text_success'    # High match (green)
-    elif score >= 0.5:
-        return 'text_warning'    # Medium match (yellow)
-    else:
-        return 'text_error'      # Low match (red)
-
-def clean_title(title):
-    """Clean up track title by removing common extras and normalizing format.
-
-    Args:
-        title: The title string to clean
-
-    Returns:
-        str: Cleaned title string
-    """
-    # Remove various suffix patterns
-    patterns = [
-        r'\s*\([^)]*\)\s*$',  # Remove trailing parentheses and contents
-        r'\s*\[[^\]]*\]\s*$',  # Remove trailing square brackets and contents
-        r'\s*-\s*[^-]*$',      # Remove trailing dash and text
-        r'\s*\|[^|]*$',        # Remove trailing pipe and text
-        r'\s*feat\.[^,]*',     # Remove "feat." and featured artists
-        r'\s*ft\.[^,]*',       # Remove "ft." and featured artists
-        r'\s*\d+\s*$',         # Remove trailing numbers
-        r'\s+$'                # Remove trailing whitespace
-    ]
-
-    cleaned = title
-    for pattern in patterns:
-        cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
-
-    # Remove redundant spaces
-    cleaned = ' '.join(cleaned.split())
-
-    return cleaned
