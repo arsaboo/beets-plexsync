@@ -1346,13 +1346,12 @@ class PlexSync(BeetsPlugin):
 
         selected_track = sorted_tracks[sel - 1][0] if sel > 0 else None
         if selected_track:
-            # Make sure we're using a consistent cache key format
-            cache_key = self.cache._make_cache_key(song)
-            self._log.debug("Storing selection in cache for key: {} → ratingKey: {}",
-                          cache_key, selected_track.ratingKey)
+            # Store the original song query directly in the cache
+            original_query_str = json.dumps(song)
+            self._log.debug("Storing selection in cache with exact original query: {}", original_query_str)
 
-            # Store the selection in the cache
-            self._cache_result(song, selected_track.ratingKey)
+            # Store in the cache using the exact original query
+            self.cache.set(original_query_str, selected_track.ratingKey)
 
             # Log the selection for debugging
             self._log.info("Selected match: {} - {} - {}",
