@@ -16,6 +16,7 @@ try:
     from phi.agent import Agent
     from phi.tools.tavily import TavilyTools
     from phi.tools.searxng import Searxng
+    from phi.tools.exa import ExaTools
     from phi.model.ollama import Ollama
 except ImportError:
     logger.error("Required classes not found in phi. Ensure you have the correct version of phidata installed.")
@@ -28,10 +29,10 @@ config['llm'].add({
     'search': {
         'provider': 'ollama',
         'model': 'qwen2.5:latest',
-        'embedding_model': 'mxbai-embed-large',
         'ollama_host': 'http://localhost:11434',
         'tavily_api_key': '',
         'searxng_host': '',
+        'exa_api_key': '',
     }
 })
 
@@ -53,7 +54,7 @@ class SongBasicInfo(BaseModel):
 class MusicSearchTools:
     """Standalone class for music metadata search using multiple search engines."""
 
-    def __init__(self, tavily_api_key=None, searxng_host=None, model_id=None, ollama_host=None):
+    def __init__(self, tavily_api_key=None, searxng_host=None, model_id=None, ollama_host=None, exa_api_key=None):
         self.name = "music_search_tools"
         self.model_id = model_id
         self.ollama_host = ollama_host
@@ -63,6 +64,12 @@ class MusicSearchTools:
             model=Ollama(id=model_id, host=ollama_host),
             tools=[Searxng(host=searxng_host, fixed_max_results=5)]
         ) if searxng_host else None
+
+        # Initialize Exa search if API key is provided
+        self.exa_agent = Agent(
+            model=Ollama(id=model_id, host=ollama_host),
+            tools=[ExaTools(api_key=exa_api_key)]
+        ) if exa_api_key else None
 
         self.ollama_agent = Agent(
             model=Ollama(id=model_id, host=ollama_host),
@@ -93,11 +100,29 @@ class MusicSearchTools:
             logger.warning(f"Tavily failed: {e}")
             return None
 
+    def _fetch_results_exa(self, song_name: str) -> Optional[str]:
+        """Query Exa for song information."""
+        query = f"{song_name} song album, title, and artist"
+        logger.debug(f"Exa querying: {query}")
+        try:
+            exa_tool = next((t for t in self.exa_agent.tools if isinstance(t, ExaTools)), None)
+            # Use search_exa_with_contents instead of search_using_exa
+            response = exa_tool.search_exa_with_contents(query)
+            return str(response)
+        except Exception as e:
+            logger.warning(f"Exa search failed: {e}")
+            return None
+
     def _get_search_results(self, song_name: str) -> Dict[str, str]:
         """Get search results from available search engines."""
+
         content = self._fetch_results_searxng(song_name) if self.searxng_agent else None
         if content:
             return {"source": "searxng", "content": content}
+
+        content = self._fetch_results_exa(song_name) if self.exa_agent else None
+        if (content):
+            return {"source": "exa", "content": content}
 
         content = self._fetch_results_tavily(song_name) if self.tavily_agent else None
         if content:
@@ -151,16 +176,18 @@ def initialize_search_toolkit():
     searxng_host = config["llm"]["search"]["searxng_host"].get()
     model_id = config["llm"]["search"]["model"].get() or "qwen2.5:latest"
     ollama_host = config["llm"]["search"]["ollama_host"].get() or "http://localhost:11434"
+    exa_api_key = config["llm"]["search"]["exa_api_key"].get()
 
-    if not tavily_api_key and not searxng_host:
-        logger.warning("Neither Tavily API key nor SearxNG host configured. Search functionality limited.")
+    if not tavily_api_key and not searxng_host and not exa_api_key:
+        logger.warning("No search providers configured. Search functionality limited.")
 
     try:
         return MusicSearchTools(
             tavily_api_key=tavily_api_key,
             searxng_host=searxng_host,
             model_id=model_id,
-            ollama_host=ollama_host
+            ollama_host=ollama_host,
+            exa_api_key=exa_api_key
         )
     except Exception as e:
         logger.error(f"Failed to initialize search toolkit: {e}")
