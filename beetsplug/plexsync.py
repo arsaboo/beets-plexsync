@@ -1346,12 +1346,15 @@ class PlexSync(BeetsPlugin):
 
         selected_track = sorted_tracks[sel - 1][0] if sel > 0 else None
         if selected_track:
-            # Store the original song query directly in the cache
-            original_query_str = json.dumps(song)
-            self._log.debug("Storing selection in cache with exact original query: {}", original_query_str)
+            # Store the selection directly in the cache system
+            # First create a direct string key from the original song dict
+            self._log.debug("Selected: {} → ratingKey: {}", song, selected_track.ratingKey)
 
-            # Store in the cache using the exact original query
-            self.cache.set(original_query_str, selected_track.ratingKey)
+            # Store both the internal format and the exact song dict as originally received
+            self.cache.set(json.dumps(song), selected_track.ratingKey)
+
+            # Also store in normalized format through the regular cache mechanism
+            self._cache_result(song, selected_track)
 
             # Log the selection for debugging
             self._log.info("Selected match: {} - {} - {}",
