@@ -17,10 +17,8 @@ try:
     from phi.tools.tavily import TavilyTools
     from phi.tools.searxng import Searxng
     from phi.model.ollama import Ollama
-    from phi.tools import Toolkit
 except ImportError:
-    Toolkit = None
-    logger.error("Toolkit class not found in phi.tools. Ensure you have the correct version of phidata installed.")
+    logger.error("Required classes not found in phi. Ensure you have the correct version of phidata installed.")
 
 PHI_AVAILABLE = True
 
@@ -52,14 +50,11 @@ class SongBasicInfo(BaseModel):
         return v.strip() if v.strip() else "Unknown"
 
 
-class MusicSearchTools(Toolkit):
-    """Toolkit for music metadata search using multiple search engines."""
-
-    if Toolkit is None:
-        raise ImportError("Toolkit class is not available. Please verify your phidata installation.")
+class MusicSearchTools:
+    """Standalone class for music metadata search using multiple search engines."""
 
     def __init__(self, tavily_api_key=None, searxng_host=None, model_id=None, ollama_host=None):
-        super().__init__(name="music_search_tools")
+        self.name = "music_search_tools"
         self.model_id = model_id
         self.ollama_host = ollama_host
 
@@ -74,8 +69,6 @@ class MusicSearchTools(Toolkit):
             response_model=SongBasicInfo,
             structured_outputs=True
         )
-
-        self.register(self.search_song_info)
 
     def _fetch_results_searxng(self, song_name: str) -> Optional[str]:
         """Query SearxNG for song information."""
@@ -103,11 +96,11 @@ class MusicSearchTools(Toolkit):
     def _get_search_results(self, song_name: str) -> Dict[str, str]:
         """Get search results from available search engines."""
         content = self._fetch_results_searxng(song_name) if self.searxng_agent else None
-        if (content):
+        if content:
             return {"source": "searxng", "content": content}
 
         content = self._fetch_results_tavily(song_name) if self.tavily_agent else None
-        if (content):
+        if content:
             return {"source": "tavily", "content": content}
 
         return {"source": "error", "content": f"No results for '{song_name}'"}
@@ -181,7 +174,7 @@ _search_toolkit = None
 def get_search_toolkit():
     """Get or initialize the search toolkit singleton."""
     global _search_toolkit
-    if _search_toolkit is None:
+    if (_search_toolkit is None):
         _search_toolkit = initialize_search_toolkit()
     return _search_toolkit
 
