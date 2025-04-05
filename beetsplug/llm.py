@@ -9,18 +9,21 @@ from typing import Optional, Dict
 from beets import config
 from pydantic import BaseModel, Field, field_validator
 
+# Simple logger for standalone use
+logger = logging.getLogger('beets')
+
 try:
     from phi.agent import Agent
     from phi.tools.tavily import TavilyTools
     from phi.tools.searxng import Searxng
     from phi.model.ollama import Ollama
     from phi.tools import Toolkit
-    PHI_AVAILABLE = True
 except ImportError:
-    PHI_AVAILABLE = False
+    Toolkit = None
+    logger.error("Toolkit class not found in phi.tools. Ensure you have the correct version of phidata installed.")
 
-# Simple logger for standalone use
-logger = logging.getLogger('beets')
+PHI_AVAILABLE = True
+
 
 # Add default configuration for LLM search
 config['llm'].add({
@@ -51,6 +54,9 @@ class SongBasicInfo(BaseModel):
 
 class MusicSearchTools(Toolkit):
     """Toolkit for music metadata search using multiple search engines."""
+
+    if Toolkit is None:
+        raise ImportError("Toolkit class is not available. Please verify your phidata installation.")
 
     def __init__(self, tavily_api_key=None, searxng_host=None, model_id=None, ollama_host=None):
         super().__init__(name="music_search_tools")
