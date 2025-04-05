@@ -206,7 +206,7 @@ def search_track_info(query: str):
             "artist": song_info.get("artist")
         }
 
-        logger.info(f"Found track info: {result}")
+        logger.info("Found track info: {}", result)
         return result
     except Exception as e:
         logger.error(f"Error in agent-based search: {e}")
