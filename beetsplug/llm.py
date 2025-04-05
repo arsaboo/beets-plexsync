@@ -133,13 +133,28 @@ class MusicSearchTools:
     def _extract_song_details(self, content: str, song_name: str) -> SongBasicInfo:
         """Extract structured song details from search results."""
         prompt = f"""
-        From the text provided, clearly extract only:
-        - Song Title
-        - Artist Name
-        - Album Name (if mentioned, else indicate unavailable)
+        <instruction>
+        Based on the search results below, extract specific information about the song "{song_name}".
 
-        Source text:
+        Return ONLY these fields in a structured JSON format:
+        - Song Title: The exact title of the song (not an album or artist name)
+        - Artist Name: The primary artist or band who performed the song
+        - Album Name: The album that contains this song (if mentioned)
+
+        If any information is not clearly stated in the search results, use the most likely value based on available context.
+        If you cannot determine a value with reasonable confidence, respond with "Unknown" for that field.
+
+        Format your response as valid JSON with these exact keys:
+        {{
+            "title": "The song title",
+            "artist": "The artist name",
+            "album": "The album name"
+        }}
+        </instruction>
+
+        <search_results>
         {content}
+        </search_results>
         """
         try:
             response = self.ollama_agent.run(prompt)
