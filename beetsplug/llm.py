@@ -148,13 +148,14 @@ class MusicSearchTools:
         query = f"{song_name} song album, title, and artist"
         logger.debug(f"Exa querying: {query}")
         try:
+            # Get the ExaTools instance from the agent
             exa_tool = next((t for t in self.exa_agent.tools if isinstance(t, ExaTools)), None)
             if not exa_tool:
                 logger.warning("Exa tool not found in agent tools")
                 return None
 
-            # Use the exa_tool directly with search_exa_with_contents method
-            response = exa_tool.search_exa_with_contents(query)
+            # Use search_exa instead of search_exa_with_contents
+            response = exa_tool.search_exa(query)
             return str(response)
         except Exception as e:
             logger.warning(f"Exa search failed: {e}")
