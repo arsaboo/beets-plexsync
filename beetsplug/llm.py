@@ -12,17 +12,38 @@ from pydantic import BaseModel, Field, field_validator
 # Simple logger for standalone use
 logger = logging.getLogger('beets')
 
+# Track available dependencies
+PHI_AVAILABLE = False
+TAVILY_AVAILABLE = False
+SEARXNG_AVAILABLE = False
+EXA_AVAILABLE = False
+
 try:
     from phi.agent import Agent
-    from phi.tools.tavily import TavilyTools
-    from phi.tools.searxng import Searxng
-    from phi.tools.exa import ExaTools
     from phi.model.ollama import Ollama
+    PHI_AVAILABLE = True
+
+    # Check for individual search providers
+    try:
+        from phi.tools.tavily import TavilyTools
+        TAVILY_AVAILABLE = True
+    except ImportError:
+        logger.debug("Tavily tools not available")
+
+    try:
+        from phi.tools.searxng import Searxng
+        SEARXNG_AVAILABLE = True
+    except ImportError:
+        logger.debug("SearxNG tools not available")
+
+    try:
+        from phi.tools.exa import ExaTools
+        EXA_AVAILABLE = True
+    except ImportError:
+        logger.debug("Exa tools not available")
+
 except ImportError:
-    logger.error("Required classes not found in phi. Ensure you have the correct version of phidata installed.")
-
-PHI_AVAILABLE = True
-
+    logger.error("Phi package not available. Please install with: pip install phidata")
 
 # Add default configuration for LLM search
 config['llm'].add({
@@ -59,23 +80,45 @@ class MusicSearchTools:
         self.model_id = model_id
         self.ollama_host = ollama_host
 
-        self.tavily_agent = Agent(tools=[TavilyTools(api_key=tavily_api_key)]) if tavily_api_key else None
-        self.searxng_agent = Agent(
-            model=Ollama(id=model_id, host=ollama_host),
-            tools=[Searxng(host=searxng_host, fixed_max_results=5)]
-        ) if searxng_host else None
+        # Initialize search agents only if dependencies are available
+        self.tavily_agent = None
+        if tavily_api_key and TAVILY_AVAILABLE:
+            try:
+                self.tavily_agent = Agent(tools=[TavilyTools(api_key=tavily_api_key)])
+            except Exception as e:
+                logger.warning(f"Failed to initialize Tavily agent: {e}")
 
-        # Initialize Exa search if API key is provided
-        self.exa_agent = Agent(
-            model=Ollama(id=model_id, host=ollama_host),
-            tools=[ExaTools(api_key=exa_api_key)]
-        ) if exa_api_key else None
+        self.searxng_agent = None
+        if searxng_host and SEARXNG_AVAILABLE:
+            try:
+                self.searxng_agent = Agent(
+                    model=Ollama(id=model_id, host=ollama_host),
+                    tools=[Searxng(host=searxng_host, fixed_max_results=5)]
+                )
+            except Exception as e:
+                logger.warning(f"Failed to initialize SearxNG agent: {e}")
 
-        self.ollama_agent = Agent(
-            model=Ollama(id=model_id, host=ollama_host),
-            response_model=SongBasicInfo,
-            structured_outputs=True
-        )
+        # Initialize Exa search if API key is provided and dependency is available
+        self.exa_agent = None
+        if exa_api_key and EXA_AVAILABLE:
+            try:
+                self.exa_agent = Agent(
+                    model=Ollama(id=model_id, host=ollama_host),
+                    tools=[ExaTools(api_key=exa_api_key)]
+                )
+            except Exception as e:
+                logger.warning(f"Failed to initialize Exa agent: {e}")
+
+        # Always initialize the Ollama agent for extraction
+        try:
+            self.ollama_agent = Agent(
+                model=Ollama(id=model_id, host=ollama_host),
+                response_model=SongBasicInfo,
+                structured_outputs=True
+            )
+        except Exception as e:
+            logger.error(f"Failed to initialize Ollama agent: {e}")
+            self.ollama_agent = None
 
     def _fetch_results_searxng(self, song_name: str) -> Optional[str]:
         """Query SearxNG for song information."""
@@ -116,17 +159,24 @@ class MusicSearchTools:
     def _get_search_results(self, song_name: str) -> Dict[str, str]:
         """Get search results from available search engines."""
 
-        content = self._fetch_results_searxng(song_name) if self.searxng_agent else None
-        if content:
-            return {"source": "searxng", "content": content}
+        # Try SearxNG first if available
+        if self.searxng_agent:
+            content = self._fetch_results_searxng(song_name)
+            if content:
+                return {"source": "searxng", "content": content}
 
-        content = self._fetch_results_exa(song_name) if self.exa_agent else None
-        if (content):
-            return {"source": "exa", "content": content}
+        # Then try Exa
+        if self.exa_agent:
+            content = self._fetch_results_exa(song_name)
+            if content:
+                return {"source": "exa", "content": content}
 
-        content = self._fetch_results_tavily(song_name) if self.tavily_agent else None
-        if content:
-            return {"source": "tavily", "content": content}
+
+        # Finally try Tavily
+        if self.tavily_agent:
+            content = self._fetch_results_tavily(song_name)
+            if content:
+                return {"source": "tavily", "content": content}
 
         return {"source": "error", "content": f"No results for '{song_name}'"}
 

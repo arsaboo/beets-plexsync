@@ -26,5 +26,6 @@ setup(
         'json_repair',
         'phidata',
         'tavily-python',
+        'exa_py',
     ],
 )
