@@ -24,5 +24,7 @@ setup(
         'beautifulsoup4',
         'pillow',
         'json_repair',
+        'phidata',
+        'tavily-python',
     ],
 )
