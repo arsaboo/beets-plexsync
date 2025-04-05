@@ -125,7 +125,7 @@ class MusicSearchTools:
         query = f"{song_name} song album, title, and artist"
         logger.debug(f"SearxNG querying: {query}")
         try:
-            response = self.searxng_agent.run(query, timeout=10)
+            response = self.searxng_agent.run(query, timeout=20)
             return getattr(response, 'content', str(response))
         except Exception as e:
             logger.warning(f"SearxNG failed: {e}")
@@ -136,30 +136,50 @@ class MusicSearchTools:
         query = f"{song_name} song album, title, and artist"
         logger.debug(f"Tavily querying: {query}")
         try:
-            tavily_tool = next((t for t in self.tavily_agent.tools if isinstance(t, TavilyTools)), None)
-            response = tavily_tool.web_search_using_tavily(query)
-            return str(response)
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(self._tavily_search, query)
+                return future.result(timeout=15)  # 15 second timeout
+        except concurrent.futures.TimeoutError:
+            logger.warning(f"Tavily search timed out for: {query}")
+            return None
         except Exception as e:
             logger.warning(f"Tavily failed: {e}")
             return None
+
+    def _tavily_search(self, query: str) -> str:
+        """Helper method to perform the actual Tavily search."""
+        tavily_tool = next((t for t in self.tavily_agent.tools if isinstance(t, TavilyTools)), None)
+        response = tavily_tool.web_search_using_tavily(query)
+        return str(response)
 
     def _fetch_results_exa(self, song_name: str) -> Optional[str]:
         """Query Exa for song information."""
         query = f"{song_name} song album, title, and artist"
         logger.debug(f"Exa querying: {query}")
         try:
-            # Get the ExaTools instance from the agent
-            exa_tool = next((t for t in self.exa_agent.tools if isinstance(t, ExaTools)), None)
-            if not exa_tool:
-                logger.warning("Exa tool not found in agent tools")
-                return None
-
-            # Use search_exa instead of search_exa_with_contents
-            response = exa_tool.search_exa(query)
-            return str(response)
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(self._exa_search, query)
+                return future.result(timeout=15)  # 15 second timeout
+        except concurrent.futures.TimeoutError:
+            logger.warning(f"Exa search timed out for: {query}")
+            return None
         except Exception as e:
             logger.warning(f"Exa search failed: {e}")
             return None
+
+    def _exa_search(self, query: str) -> str:
+        """Helper method to perform the actual Exa search."""
+        # Get the ExaTools instance from the agent
+        exa_tool = next((t for t in self.exa_agent.tools if isinstance(t, ExaTools)), None)
+        if not exa_tool:
+            logger.warning("Exa tool not found in agent tools")
+            return None
+
+        # Use search_exa
+        response = exa_tool.search_exa(query)
+        return str(response)
 
     def _get_search_results(self, song_name: str) -> Dict[str, str]:
         """Get search results from available search engines."""
