@@ -149,7 +149,11 @@ class MusicSearchTools:
         logger.debug(f"Exa querying: {query}")
         try:
             exa_tool = next((t for t in self.exa_agent.tools if isinstance(t, ExaTools)), None)
-            # Use search_exa_with_contents instead of search_using_exa
+            if not exa_tool:
+                logger.warning("Exa tool not found in agent tools")
+                return None
+
+            # Use the exa_tool directly with search_exa_with_contents method
             response = exa_tool.search_exa_with_contents(query)
             return str(response)
         except Exception as e:
@@ -217,7 +221,7 @@ class MusicSearchTools:
         """Search for song information using available search engines."""
         search_results = self._get_search_results(song_name)
 
-        if search_results["source"] == "error":
+        if (search_results["source"] == "error"):
             return {
                 "title": song_name,
                 "artist": "Unknown",
