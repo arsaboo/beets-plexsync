@@ -173,12 +173,40 @@ class MusicSearchTools:
     def _fetch_results_exa(self, song_name: str) -> Optional[str]:
         """Query Exa for song information."""
         query = f"{song_name} song album, title, and artist"
-        logger.debug(f"Exa querying: {query}")
+        logger.info(f"Searching exa for: {query}")
         try:
             import concurrent.futures
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future = executor.submit(self._exa_search, query)
-                return future.result(timeout=15)  # 15 second timeout
+                response = future.result(timeout=15)  # 15 second timeout
+
+                # Process the Exa response to extract just the text content
+                if response:
+                    try:
+                        # Parse the response as JSON
+                        results = json.loads(response) if isinstance(response, str) else response
+
+                        # If we have a list of results, extract and combine the text content
+                        if isinstance(results, list):
+                            extracted_text = ""
+                            for item in results:
+                                if isinstance(item, dict):
+                                    # Combine title and text for context
+                                    if "title" in item:
+                                        extracted_text += f"Title: {item['title']}\n"
+                                    if "text" in item:
+                                        extracted_text += f"{item['text']}\n\n"
+
+                            if extracted_text:
+                                return extracted_text
+
+                        # Return the raw response if we couldn't process it
+                        return str(response)
+                    except (json.JSONDecodeError, TypeError) as e:
+                        logger.warning(f"Failed to process Exa response: {e}")
+                        return str(response)
+
+                return None
         except concurrent.futures.TimeoutError:
             logger.warning(f"Exa search timed out for: {query}")
             return None
