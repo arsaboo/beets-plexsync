@@ -148,7 +148,6 @@ class MusicSearchTools:
             if isinstance(response, str):
                 try:
                     response = json.loads(response)
-                    logger.info("Successfully parsed Tavily JSON response")
                 except json.JSONDecodeError as e:
                     logger.error(f"Failed to parse Tavily JSON response: {e}")
                     return {"results": [], "content": response}
@@ -156,8 +155,7 @@ class MusicSearchTools:
             # If we have an AI-generated answer, just return that directly
             if "answer" in response:
                 ai_answer = response["answer"]
-                logger.info(f"AI Generated Answer from Tavily: {ai_answer[:100]}...")
-                print(f"\n🤖 AI Generated Answer from Tavily:\n{ai_answer}\n")
+                logger.info(f"\n🤖 AI Generated Answer from Tavily: {ai_answer[:100]}...")
                 return {"ai_answer": ai_answer}
 
             # Otherwise return the full response
