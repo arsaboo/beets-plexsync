@@ -380,7 +380,7 @@ class MusicSearchTools:
             response = self.ollama_agent.run(prompt)
             return response.content
         except Exception as e:
-            logger.error(f"Ollama extraction failed: {e}")
+            logger.error("Ollama extraction failed: {0}", str(e))
             return SongBasicInfo(title=song_name, artist="Unknown")
 
     def search_song_info(self, song_name: str) -> Dict:
@@ -466,7 +466,7 @@ def search_track_info(query: str) -> Dict:
         return {"title": query, "artist": "Unknown", "album": None}
 
     try:
-        logger.info(f"Searching for track info: {query}")
+        logger.info("Searching for track info: {0}", query)
         song_info = toolkit.search_song_info(query)
 
         # Format response to match expected structure
@@ -476,8 +476,9 @@ def search_track_info(query: str) -> Dict:
             "artist": song_info.get("artist")
         }
 
-        logger.info(f"Found track info: {result}")
+        # Use beets' numbered placeholder style for logging
+        logger.info("Found track info: {}", result)
         return result
     except Exception as e:
-        logger.error(f"Error in agent-based search: {e}")
+        logger.error("Error in agent-based search: {0}", str(e))
         return {"title": query, "artist": "Unknown", "album": None}
