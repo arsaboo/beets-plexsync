@@ -256,6 +256,12 @@ class MusicSearchTools:
         {content}
         </search_results>
         """
+
+        # Debug log to show what's being sent to Ollama
+        logger.debug(f"Sending to Ollama for parsing - Song: {song_name}")
+        logger.debug(f"Content source length: {len(content)} characters")
+        logger.debug(f"First 200 chars of content: {content[:200]}...")
+
         try:
             response = self.ollama_agent.run(prompt)
             return response.content
