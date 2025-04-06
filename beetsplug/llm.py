@@ -84,7 +84,12 @@ class MusicSearchTools:
         self.tavily_agent = None
         if tavily_api_key and TAVILY_AVAILABLE:
             try:
-                self.tavily_agent = Agent(tools=[TavilyTools(api_key=tavily_api_key)])
+                self.tavily_agent = Agent(tools=[TavilyTools(
+                    api_key=tavily_api_key,
+                    include_answer=True,
+                    search_depth="advanced",
+                    format="json"
+                )])
             except Exception as e:
                 logger.warning(f"Failed to initialize Tavily agent: {e}")
 
@@ -131,18 +136,32 @@ class MusicSearchTools:
             logger.warning(f"SearxNG failed: {e}")
             return None
 
-    def _fetch_results_tavily(self, song_name: str) -> Optional[str]:
+    def _fetch_results_tavily(self, song_name: str) -> Optional[Dict]:
         """Query Tavily for song information."""
         query = f"{song_name} song album, title, and artist"
-        logger.debug(f"Tavily querying: {query}")
+        logger.info(f"Tavily querying: {query}")
         try:
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(self._tavily_search, query)
-                return future.result(timeout=15)  # 15 second timeout
-        except concurrent.futures.TimeoutError:
-            logger.warning(f"Tavily search timed out for: {query}")
-            return None
+            tavily_tool = next((t for t in self.tavily_agent.tools if isinstance(t, TavilyTools)), None)
+            response = tavily_tool.web_search_using_tavily(query)
+
+            # Check if response is a string (JSON string) and parse it
+            if isinstance(response, str):
+                try:
+                    response = json.loads(response)
+                    logger.info("Successfully parsed Tavily JSON response")
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to parse Tavily JSON response: {e}")
+                    return {"results": [], "content": response}
+
+            # If we have an AI-generated answer, just return that directly
+            if "answer" in response:
+                ai_answer = response["answer"]
+                logger.info(f"AI Generated Answer from Tavily: {ai_answer[:100]}...")
+                print(f"\n🤖 AI Generated Answer from Tavily:\n{ai_answer}\n")
+                return {"ai_answer": ai_answer}
+
+            # Otherwise return the full response
+            return response
         except Exception as e:
             logger.warning(f"Tavily failed: {e}")
             return None
@@ -187,21 +206,29 @@ class MusicSearchTools:
         # Try SearxNG first if available
         if self.searxng_agent:
             content = self._fetch_results_searxng(song_name)
-            if content:
+            if (content):
                 return {"source": "searxng", "content": content}
 
         # Then try Exa
         if self.exa_agent:
             content = self._fetch_results_exa(song_name)
-            if content:
+            if (content):
                 return {"source": "exa", "content": content}
-
 
         # Finally try Tavily
         if self.tavily_agent:
-            content = self._fetch_results_tavily(song_name)
-            if content:
-                return {"source": "tavily", "content": content}
+            response = self._fetch_results_tavily(song_name)
+            if response:
+                # If Tavily returned an AI-generated answer, use it directly
+                if "ai_answer" in response:
+                    return {"source": "tavily_ai", "content": response["ai_answer"]}
+
+                # Otherwise, format the search results for processing
+                if isinstance(response, dict) and "results" in response:
+                    content = json.dumps(response["results"])
+                    return {"source": "tavily", "content": content}
+
+                return {"source": "tavily", "content": str(response)}
 
         return {"source": "error", "content": f"No results for '{song_name}'"}
 
