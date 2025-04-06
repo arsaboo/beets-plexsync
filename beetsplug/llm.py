@@ -261,7 +261,7 @@ class MusicSearchTools:
         logger.debug("Sending to Ollama for parsing - Song: {0}", song_name)
         logger.debug("Content source length: {0} characters", len(content))
         # Use a safe substring approach for the content preview
-        content_preview = content[:200] if len(content) > 200 else content
+        content_preview = content[:1000] if len(content) > 1000 else content
         logger.debug("First chars of content: {0}...", content_preview)
 
         try:
