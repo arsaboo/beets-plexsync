@@ -257,10 +257,12 @@ class MusicSearchTools:
         </search_results>
         """
 
-        # Debug log to show what's being sent to Ollama
-        logger.debug(f"Sending to Ollama for parsing - Song: {song_name}")
-        logger.debug(f"Content source length: {len(content)} characters")
-        logger.debug(f"First 200 chars of content: {content[:200]}...")
+        # Debug log to show what's being sent to Ollama - using Beets logger format
+        logger.debug("Sending to Ollama for parsing - Song: {0}", song_name)
+        logger.debug("Content source length: {0} characters", len(content))
+        # Use a safe substring approach for the content preview
+        content_preview = content[:200] if len(content) > 200 else content
+        logger.debug("First chars of content: {0}...", content_preview)
 
         try:
             response = self.ollama_agent.run(prompt)
