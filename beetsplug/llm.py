@@ -4,7 +4,7 @@ import json
 import logging
 import os
 import re
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 
 from beets import config
 from pydantic import BaseModel, Field, field_validator
@@ -17,10 +17,12 @@ PHI_AVAILABLE = False
 TAVILY_AVAILABLE = False
 SEARXNG_AVAILABLE = False
 EXA_AVAILABLE = False
+EXA_PY_AVAILABLE = False
 
 try:
     from phi.agent import Agent
     from phi.model.ollama import Ollama
+    from phi.tools import Toolkit
     PHI_AVAILABLE = True
 
     # Check for individual search providers
@@ -41,6 +43,13 @@ try:
         EXA_AVAILABLE = True
     except ImportError:
         logger.debug("Exa tools not available")
+
+    # Check for Exa Python SDK
+    try:
+        from exa_py import Exa
+        EXA_PY_AVAILABLE = True
+    except ImportError:
+        logger.debug("Exa Python SDK not available. Install with: pip install exa_py")
 
 except ImportError:
     logger.error("Phi package not available. Please install with: pip install phidata")
@@ -72,6 +81,76 @@ class SongBasicInfo(BaseModel):
         return v.strip() if v.strip() else "Unknown"
 
 
+class ExaToolAnswer(Toolkit):
+    """Custom toolkit for AI-generated answers using Exa."""
+
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        system_prompt: Optional[str] = None
+    ):
+        super().__init__(name="exa_tool_answer")
+
+        # Use environment variable if api_key not provided
+        self.api_key = api_key or os.getenv("EXA_API_KEY")
+        if not self.api_key:
+            logger.error("EXA_API_KEY not set. Please set the EXA_API_KEY environment variable.")
+
+        # Default system prompt for music search
+        self.system_prompt = system_prompt or """
+        You are a music information expert. Extract and provide the following details:
+        1. Song Title (be precise with capitalization and special characters)
+        2. Artist Name (full name of artist or band)
+        3. Album Name (the album the song appears on)
+
+        Format your answer in a clear, concise manner. If any information is unavailable,
+        explicitly state it's unknown. Do not include additional commentary or explanations.
+        """
+
+        self.register(self.get_ai_answer)
+
+    def get_ai_answer(self, query: str) -> str:
+        """Get an AI-generated answer for a query using Exa.
+
+        Args:
+            query (str): The query to generate an answer for.
+
+        Returns:
+            str: The AI-generated answer or an error message.
+        """
+        if not self.api_key:
+            return "Please set the EXA_API_KEY"
+
+        if not EXA_PY_AVAILABLE:
+            return "Error: The exa_py package is not installed. Please install using `pip install exa_py`"
+
+        try:
+            # Create Exa client
+            exa = Exa(self.api_key)
+
+            # Enhance the query if it doesn't contain music-related terms
+            if not any(term in query.lower() for term in ["song", "track", "artist", "album"]):
+                enhanced_query = f"{query} song artist album information"
+                logger.info(f"Enhanced music search query: {enhanced_query}")
+                query = enhanced_query
+            else:
+                logger.info(f"Getting AI answer for: {query}")
+
+            # Get AI-generated answer with the system prompt
+            answer_kwargs = {"system_prompt": self.system_prompt}
+            answer_response = exa.answer(query, **answer_kwargs)
+
+            if answer_response:
+                answer = answer_response.answer
+                return answer
+            else:
+                return "No information found for this query."
+
+        except Exception as e:
+            logger.error(f"Failed to get AI answer: {e}")
+            return f"Error: {e}"
+
+
 class MusicSearchTools:
     """Standalone class for music metadata search using multiple search engines."""
 
@@ -96,6 +175,7 @@ class MusicSearchTools:
         self.tavily_agent = self._init_tavily_agent(tavily_api_key) if tavily_api_key and TAVILY_AVAILABLE else None
         self.searxng_agent = self._init_searxng_agent(searxng_host) if searxng_host and SEARXNG_AVAILABLE else None
         self.exa_agent = self._init_exa_agent(exa_api_key) if exa_api_key and EXA_AVAILABLE else None
+        self.exa_tool_answer_agent = self._init_exa_tool_answer_agent(exa_api_key) if exa_api_key and EXA_PY_AVAILABLE else None
 
         # Log available search providers
         self._log_available_providers()
@@ -166,6 +246,24 @@ class MusicSearchTools:
             )
         except Exception as e:
             logger.warning(f"Failed to initialize Exa agent: {e}")
+            return None
+
+    def _init_exa_tool_answer_agent(self, api_key: str) -> Optional[Agent]:
+        """Initialize the Exa Tool Answer agent.
+
+        Args:
+            api_key: Exa API key
+
+        Returns:
+            Configured Exa Tool Answer agent or None if initialization fails
+        """
+        try:
+            return Agent(
+                model=Ollama(id=self.model_id, host=self.ollama_host),
+                tools=[ExaToolAnswer(api_key=api_key)]
+            )
+        except Exception as e:
+            logger.warning(f"Failed to initialize Exa Tool Answer agent: {e}")
             return None
 
     def _log_available_providers(self) -> None:
@@ -385,6 +483,24 @@ class MusicSearchTools:
 
     def search_song_info(self, song_name: str) -> Dict:
         """Search for song information using available search engines."""
+        # First try the ExaToolAnswer if available for a direct AI-generated answer
+        if self.exa_tool_answer_agent:
+            try:
+                # Get the ExaToolAnswer instance from the agent
+                exa_tool_answer = next((t for t in self.exa_tool_answer_agent.tools
+                                    if isinstance(t, ExaToolAnswer)), None)
+                if exa_tool_answer:
+                    ai_answer = exa_tool_answer.get_ai_answer(song_name)
+                    if ai_answer and "unknown" not in ai_answer.lower():
+                        logger.info(f"Got direct AI answer from ExaToolAnswer: {ai_answer[:100]}...")
+                        # Extract structured information from the AI answer
+                        song_details = self._extract_song_details(ai_answer, song_name).model_dump()
+                        song_details["search_source"] = "exa_tool_answer"
+                        return song_details
+            except Exception as e:
+                logger.warning(f"ExaToolAnswer failed: {e}")
+
+        # Fall back to standard search methods
         search_results = self._get_search_results(song_name)
 
         if (search_results["source"] == "error"):
