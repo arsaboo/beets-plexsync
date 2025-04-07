@@ -13,37 +13,37 @@ from pydantic import BaseModel, Field, field_validator
 logger = logging.getLogger('beets')
 
 # Track available dependencies
-PHI_AVAILABLE = False
+AGNO_AVAILABLE = False
 TAVILY_AVAILABLE = False
 SEARXNG_AVAILABLE = False
 EXA_AVAILABLE = False
 
 try:
-    from phi.agent import Agent
-    from phi.model.ollama import Ollama
-    PHI_AVAILABLE = True
+    from agno.agent import Agent
+    from agno.models.ollama import Ollama
+    AGNO_AVAILABLE = True
 
     # Check for individual search providers
     try:
-        from phi.tools.tavily import TavilyTools
+        from agno.tools.tavily import TavilyTools
         TAVILY_AVAILABLE = True
     except ImportError:
         logger.debug("Tavily tools not available")
 
     try:
-        from phi.tools.searxng import Searxng
+        from agno.tools.searxng import Searxng
         SEARXNG_AVAILABLE = True
     except ImportError:
         logger.debug("SearxNG tools not available")
 
     try:
-        from phi.tools.exa import ExaTools
+        from agno.tools.exa import ExaTools
         EXA_AVAILABLE = True
     except ImportError:
         logger.debug("Exa tools not available")
 
 except ImportError:
-    logger.error("Phi package not available. Please install with: pip install phidata")
+    logger.error("Agno package not available. Please install with: pip install agno")
 
 # Add default configuration for LLM search
 config['llm'].add({
@@ -424,8 +424,8 @@ def initialize_search_toolkit():
     Returns:
         MusicSearchTools instance or None if initialization fails
     """
-    if not PHI_AVAILABLE:
-        logger.error("Phi package not available. Please install with: pip install phidata")
+    if not AGNO_AVAILABLE:
+        logger.error("Agno package not available. Please install with: pip install agno")
         return None
 
     # Get configuration from beets config
