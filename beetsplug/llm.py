@@ -13,37 +13,37 @@ from pydantic import BaseModel, Field, field_validator
 logger = logging.getLogger('beets')
 
 # Track available dependencies
-PHI_AVAILABLE = False
+AGNO_AVAILABLE = False
 TAVILY_AVAILABLE = False
 SEARXNG_AVAILABLE = False
 EXA_AVAILABLE = False
 
 try:
-    from phi.agent import Agent
-    from phi.model.ollama import Ollama
-    PHI_AVAILABLE = True
+    from agno.agent import Agent
+    from agno.models.ollama import Ollama
+    AGNO_AVAILABLE = True
 
     # Check for individual search providers
     try:
-        from phi.tools.tavily import TavilyTools
+        from agno.tools.tavily import TavilyTools
         TAVILY_AVAILABLE = True
     except ImportError:
         logger.debug("Tavily tools not available")
 
     try:
-        from phi.tools.searxng import Searxng
+        from agno.tools.searxng import Searxng
         SEARXNG_AVAILABLE = True
     except ImportError:
         logger.debug("SearxNG tools not available")
 
     try:
-        from phi.tools.exa import ExaTools
+        from agno.tools.exa import ExaTools
         EXA_AVAILABLE = True
     except ImportError:
         logger.debug("Exa tools not available")
 
 except ImportError:
-    logger.error("Phi package not available. Please install with: pip install phidata")
+    logger.error("Agno package not available. Please install with: pip install agno")
 
 # Add default configuration for LLM search
 config['llm'].add({
@@ -251,13 +251,13 @@ class MusicSearchTools:
         return str(response)
 
     def _fetch_results_exa(self, song_name: str) -> Optional[str]:
-        """Query Exa for song information.
+        """Query Exa for song information using AI-generated answers.
 
         Args:
             song_name: The song name to search for
 
         Returns:
-            String containing search results or None if search failed
+            String containing AI-generated answer or None if search failed
         """
         query = f"{song_name} song album, title, and artist"
         logger.debug(f"Searching Exa for: {query}")
@@ -267,28 +267,19 @@ class MusicSearchTools:
                 future = executor.submit(self._exa_search, query)
                 response = future.result(timeout=15)  # 15 second timeout
 
-                # Process the Exa response to extract just the text content
                 if response:
                     try:
                         # Parse the response as JSON
                         results = json.loads(response) if isinstance(response, str) else response
 
-                        # If we have a list of results, extract and combine the text content
-                        if isinstance(results, list):
-                            extracted_text = ""
-                            for item in results:
-                                if isinstance(item, dict):
-                                    # Combine title and text for context
-                                    if "title" in item:
-                                        extracted_text += f"Title: {item['title']}\n"
-                                    if "text" in item:
-                                        extracted_text += f"{item['text']}\n\n"
+                        # Extract the answer from the response
+                        if isinstance(results, dict) and "answer" in results:
+                            logger.debug(f"AI Generated Answer from Exa: {results['answer'][:100]}...")
+                            return results["answer"]
 
-                            if extracted_text:
-                                return extracted_text
-
-                        # Return the raw response if we couldn't process it
+                        # Return raw response if we couldn't extract answer
                         return str(response)
+
                     except (json.JSONDecodeError, TypeError) as e:
                         logger.warning(f"Failed to process Exa response: {e}")
                         return str(response)
@@ -302,16 +293,20 @@ class MusicSearchTools:
             return None
 
     def _exa_search(self, query: str) -> str:
-        """Helper method to perform the actual Exa search."""
+        """Helper method to perform Exa search using AI-generated answers."""
         # Get the ExaTools instance from the agent
         exa_tool = next((t for t in self.exa_agent.tools if isinstance(t, ExaTools)), None)
         if not exa_tool:
             logger.warning("Exa tool not found in agent tools")
             return None
 
-        # Use search_exa
-        response = exa_tool.search_exa(query)
-        return str(response)
+        # Use exa_answer to get AI-generated answers
+        try:
+            response = exa_tool.exa_answer(query, text=True)
+            return response
+        except Exception as e:
+            logger.warning(f"Exa answer failed: {e}")
+            return None
 
     def _get_search_results(self, song_name: str) -> Dict[str, str]:
         """Get search results from available search engines."""
@@ -319,14 +314,14 @@ class MusicSearchTools:
         # Try SearxNG first if available
         if self.searxng_agent:
             content = self._fetch_results_searxng(song_name)
-            if (content):
+            if content:
                 return {"source": "searxng", "content": content}
 
         # Then try Exa
         if self.exa_agent:
             content = self._fetch_results_exa(song_name)
-            if (content):
-                return {"source": "exa", "content": content}
+            if content:
+                return {"source": "exa_ai", "content": content}
 
         # Finally try Tavily
         if self.tavily_agent:
@@ -406,8 +401,8 @@ def initialize_search_toolkit():
     Returns:
         MusicSearchTools instance or None if initialization fails
     """
-    if not PHI_AVAILABLE:
-        logger.error("Phi package not available. Please install with: pip install phidata")
+    if not AGNO_AVAILABLE:
+        logger.error("Agno package not available. Please install with: pip install agno")
         return None
 
     # Get configuration from beets config
