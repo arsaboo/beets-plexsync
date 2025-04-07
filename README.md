@@ -153,12 +153,17 @@ spotify:
         provider: "ollama"                                # Search provider (ollama is default)
         model: "qwen2.5:latest"                           # Model to use for search processing
         ollama_host: "http://localhost:11434"             # Ollama host address
-        tavily_api_key: "your-tavily-api-key"             # Optional Tavily API key
-        searxng_host: "http://your-searxng-instance.com"  # Optional SearxNG instance
+        searxng_host: "http://your-searxng-instance.com"  # Optional SearxNG instance.
         exa_api_key: "your-exa-api-key"                   # Optional Exa search API key
+        tavily_api_key: "your-tavily-api-key"             # Optional Tavily API key
   ```
 
   Note: To enable LLM search, you must also set `use_llm_search: yes` in your `plexsync` configuration (see Advanced Usage section).
+
+  When multiple search providers are configured, they're used in the following priority order:
+  1. SearxNG (tried first if configured)
+  2. Exa (used if SearxNG fails or isn't configured)
+  3. Tavily (used if both SearxNG and Exa fail or aren't configured)
 
   You can get started with `beet plexsonic -p "YOUR_PROMPT"` to create the playlist based on YOUR_PROMPT. The default playlist name is `SonicSage` (wink wink), you can modify it using `-m` flag. By default, it requests 10 tracks from the AI model. Use the `-n` flag to change the number of tracks requested. Finally, if you prefer to clear the playlist before adding the new songs, you can add `-c` flag. So, to create a new classical music playlist, you can use something like `beet plexsonic -c -n 10 -p "classical music, romanticism era, like Schubert, Chopin, Liszt"`.
 
@@ -237,7 +242,7 @@ spotify:
 ## Advanced
 Plex matching may be less than perfect and it can miss tracks if the tags don't match perfectly. There are few tools you can use to improve searching:
 * You can enable manual search to improve the matching by enabling `manual_search` in your config (default: `False`).
-* You can enable LLM-powered search using Ollama with optional integration for SearxNG or Tavily. This provides intelligent search capabilities that can better match tracks with incomplete or variant metadata. See the `llm` configuration section above.
+* You can enable LLM-powered search using Ollama with optional integration for SearxNG, Exa, or Tavily (used in that order if all of them are configured). This provides intelligent search capabilities that can better match tracks with incomplete or variant metadata. See the `llm` configuration section above.
 
 ```yaml
 plexsync:
