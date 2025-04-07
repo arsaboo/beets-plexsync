@@ -13,37 +13,37 @@ from pydantic import BaseModel, Field, field_validator
 logger = logging.getLogger('beets')
 
 # Track available dependencies
-PHI_AVAILABLE = False
+AGNO_AVAILABLE = False
 TAVILY_AVAILABLE = False
 SEARXNG_AVAILABLE = False
 EXA_AVAILABLE = False
 
 try:
-    from phi.agent import Agent
-    from phi.model.ollama import Ollama
-    PHI_AVAILABLE = True
+    from agno.agent import Agent
+    from agno.models.ollama import Ollama
+    AGNO_AVAILABLE = True
 
     # Check for individual search providers
     try:
-        from phi.tools.tavily import TavilyTools
+        from agno.tools.tavily import TavilyTools
         TAVILY_AVAILABLE = True
     except ImportError:
         logger.debug("Tavily tools not available")
 
     try:
-        from phi.tools.searxng import Searxng
+        from agno.tools.searxng import Searxng
         SEARXNG_AVAILABLE = True
     except ImportError:
         logger.debug("SearxNG tools not available")
 
     try:
-        from phi.tools.exa import ExaTools
+        from agno.tools.exa import ExaTools
         EXA_AVAILABLE = True
     except ImportError:
         logger.debug("Exa tools not available")
 
 except ImportError:
-    logger.error("Phi package not available. Please install with: pip install phidata")
+    logger.error("Agno package not available. Please install with: pip install agno")
 
 # Add default configuration for LLM search
 config['llm'].add({
@@ -76,43 +76,35 @@ class MusicSearchTools:
     """Standalone class for music metadata search using multiple search engines."""
 
     def __init__(self, tavily_api_key=None, searxng_host=None, model_id=None, ollama_host=None, exa_api_key=None):
+        """Initialize music search tools with available search providers.
+
+        Args:
+            tavily_api_key: API key for Tavily search
+            searxng_host: Host URL for SearxNG instance
+            model_id: Ollama model ID to use
+            ollama_host: Ollama API host URL
+            exa_api_key: API key for Exa search
+        """
         self.name = "music_search_tools"
-        self.model_id = model_id
-        self.ollama_host = ollama_host
+        self.model_id = model_id or "qwen2.5:latest"
+        self.ollama_host = ollama_host or "http://localhost:11434"
 
-        # Initialize search agents only if dependencies are available
-        self.tavily_agent = None
-        if tavily_api_key and TAVILY_AVAILABLE:
-            try:
-                self.tavily_agent = Agent(tools=[TavilyTools(api_key=tavily_api_key)])
-            except Exception as e:
-                logger.warning(f"Failed to initialize Tavily agent: {e}")
+        # Initialize Ollama agent for extraction (required for all search methods)
+        self._init_ollama_agent()
 
-        self.searxng_agent = None
-        if searxng_host and SEARXNG_AVAILABLE:
-            try:
-                self.searxng_agent = Agent(
-                    model=Ollama(id=model_id, host=ollama_host),
-                    tools=[Searxng(host=searxng_host, fixed_max_results=5)]
-                )
-            except Exception as e:
-                logger.warning(f"Failed to initialize SearxNG agent: {e}")
+        # Initialize optional search providers
+        self.tavily_agent = self._init_tavily_agent(tavily_api_key) if tavily_api_key and TAVILY_AVAILABLE else None
+        self.searxng_agent = self._init_searxng_agent(searxng_host) if searxng_host and SEARXNG_AVAILABLE else None
+        self.exa_agent = self._init_exa_agent(exa_api_key) if exa_api_key and EXA_AVAILABLE else None
 
-        # Initialize Exa search if API key is provided and dependency is available
-        self.exa_agent = None
-        if exa_api_key and EXA_AVAILABLE:
-            try:
-                self.exa_agent = Agent(
-                    model=Ollama(id=model_id, host=ollama_host),
-                    tools=[ExaTools(api_key=exa_api_key)]
-                )
-            except Exception as e:
-                logger.warning(f"Failed to initialize Exa agent: {e}")
+        # Log available search providers
+        self._log_available_providers()
 
-        # Always initialize the Ollama agent for extraction
+    def _init_ollama_agent(self) -> None:
+        """Initialize the Ollama agent for text extraction."""
         try:
             self.ollama_agent = Agent(
-                model=Ollama(id=model_id, host=ollama_host),
+                model=Ollama(id=self.model_id, host=self.ollama_host),
                 response_model=SongBasicInfo,
                 structured_outputs=True
             )
@@ -120,8 +112,90 @@ class MusicSearchTools:
             logger.error(f"Failed to initialize Ollama agent: {e}")
             self.ollama_agent = None
 
+    def _init_tavily_agent(self, api_key: str) -> Optional[Agent]:
+        """Initialize the Tavily search agent.
+
+        Args:
+            api_key: Tavily API key
+
+        Returns:
+            Configured Tavily agent or None if initialization fails
+        """
+        try:
+            return Agent(tools=[TavilyTools(
+                api_key=api_key,
+                include_answer=True,
+                search_depth="advanced",
+                format="json"
+            )])
+        except Exception as e:
+            logger.warning(f"Failed to initialize Tavily agent: {e}")
+            return None
+
+    def _init_searxng_agent(self, host: str) -> Optional[Agent]:
+        """Initialize the SearxNG search agent.
+
+        Args:
+            host: SearxNG host URL
+
+        Returns:
+            Configured SearxNG agent or None if initialization fails
+        """
+        try:
+            return Agent(
+                model=Ollama(id=self.model_id, host=self.ollama_host),
+                tools=[Searxng(host=host, fixed_max_results=5)]
+            )
+        except Exception as e:
+            logger.warning(f"Failed to initialize SearxNG agent: {e}")
+            return None
+
+    def _init_exa_agent(self, api_key: str) -> Optional[Agent]:
+        """Initialize the Exa search agent.
+
+        Args:
+            api_key: Exa API key
+
+        Returns:
+            Configured Exa agent or None if initialization fails
+        """
+        try:
+            return Agent(
+                model=Ollama(id=self.model_id, host=self.ollama_host),
+                tools=[ExaTools(api_key=api_key)]
+            )
+        except Exception as e:
+            logger.warning(f"Failed to initialize Exa agent: {e}")
+            return None
+
+    def _log_available_providers(self) -> None:
+        """Log which search providers are available."""
+        providers = []
+        if self.tavily_agent:
+            providers.append("Tavily")
+        if self.searxng_agent:
+            providers.append("SearxNG")
+        if self.exa_agent:
+            providers.append("Exa")
+
+        if providers:
+            logger.info(f"Initialized music search with providers: {', '.join(providers)}")
+            if self.ollama_agent:
+                logger.info(f"Using Ollama model '{self.model_id}' for result extraction")
+        else:
+            logger.warning("No music search providers available!")
+            if self.ollama_agent:
+                logger.info("Only Ollama extraction is available, which requires at least one search provider")
+
     def _fetch_results_searxng(self, song_name: str) -> Optional[str]:
-        """Query SearxNG for song information."""
+        """Query SearxNG for song information.
+
+        Args:
+            song_name: The song name to search for
+
+        Returns:
+            String containing search results or None if search failed
+        """
         query = f"{song_name} song album, title, and artist"
         logger.debug(f"SearxNG querying: {query}")
         try:
@@ -131,20 +205,43 @@ class MusicSearchTools:
             logger.warning(f"SearxNG failed: {e}")
             return None
 
-    def _fetch_results_tavily(self, song_name: str) -> Optional[str]:
-        """Query Tavily for song information."""
+    def _fetch_results_tavily(self, song_name: str) -> Optional[Dict]:
+        """Query Tavily for song information.
+
+        Args:
+            song_name: The song name to search for
+
+        Returns:
+            Dictionary containing search results or None if search failed
+        """
         query = f"{song_name} song album, title, and artist"
         logger.debug(f"Tavily querying: {query}")
+
         try:
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(self._tavily_search, query)
-                return future.result(timeout=15)  # 15 second timeout
-        except concurrent.futures.TimeoutError:
-            logger.warning(f"Tavily search timed out for: {query}")
-            return None
+            tavily_tool = next((t for t in self.tavily_agent.tools if isinstance(t, TavilyTools)), None)
+            if not tavily_tool:
+                logger.warning("Tavily tool not found in agent tools")
+                return None
+
+            response = tavily_tool.web_search_using_tavily(query)
+
+            # Handle response parsing
+            if isinstance(response, str):
+                try:
+                    response = json.loads(response)
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to parse Tavily JSON response: {e}")
+                    return {"results": [], "content": response}
+
+            # If we have an AI-generated answer, just return that directly
+            if isinstance(response, dict) and "answer" in response:
+                ai_answer = response["answer"]
+                logger.debug(f"AI Generated Answer from Tavily: {ai_answer[:100]}...")
+                return {"ai_answer": ai_answer}
+
+            return response
         except Exception as e:
-            logger.warning(f"Tavily failed: {e}")
+            logger.warning(f"Tavily search failed: {e}")
             return None
 
     def _tavily_search(self, query: str) -> str:
@@ -154,14 +251,40 @@ class MusicSearchTools:
         return str(response)
 
     def _fetch_results_exa(self, song_name: str) -> Optional[str]:
-        """Query Exa for song information."""
+        """Query Exa for song information using AI-generated answers.
+
+        Args:
+            song_name: The song name to search for
+
+        Returns:
+            String containing AI-generated answer or None if search failed
+        """
         query = f"{song_name} song album, title, and artist"
-        logger.debug(f"Exa querying: {query}")
+        logger.debug(f"Searching Exa for: {query}")
         try:
             import concurrent.futures
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future = executor.submit(self._exa_search, query)
-                return future.result(timeout=15)  # 15 second timeout
+                response = future.result(timeout=15)  # 15 second timeout
+
+                if response:
+                    try:
+                        # Parse the response as JSON
+                        results = json.loads(response) if isinstance(response, str) else response
+
+                        # Extract the answer from the response
+                        if isinstance(results, dict) and "answer" in results:
+                            logger.debug(f"AI Generated Answer from Exa: {results['answer'][:100]}...")
+                            return results["answer"]
+
+                        # Return raw response if we couldn't extract answer
+                        return str(response)
+
+                    except (json.JSONDecodeError, TypeError) as e:
+                        logger.warning(f"Failed to process Exa response: {e}")
+                        return str(response)
+
+                return None
         except concurrent.futures.TimeoutError:
             logger.warning(f"Exa search timed out for: {query}")
             return None
@@ -170,16 +293,20 @@ class MusicSearchTools:
             return None
 
     def _exa_search(self, query: str) -> str:
-        """Helper method to perform the actual Exa search."""
+        """Helper method to perform Exa search using AI-generated answers."""
         # Get the ExaTools instance from the agent
         exa_tool = next((t for t in self.exa_agent.tools if isinstance(t, ExaTools)), None)
         if not exa_tool:
             logger.warning("Exa tool not found in agent tools")
             return None
 
-        # Use search_exa
-        response = exa_tool.search_exa(query)
-        return str(response)
+        # Use exa_answer to get AI-generated answers
+        try:
+            response = exa_tool.exa_answer(query, text=True)
+            return response
+        except Exception as e:
+            logger.warning(f"Exa answer failed: {e}")
+            return None
 
     def _get_search_results(self, song_name: str) -> Dict[str, str]:
         """Get search results from available search engines."""
@@ -194,14 +321,22 @@ class MusicSearchTools:
         if self.exa_agent:
             content = self._fetch_results_exa(song_name)
             if content:
-                return {"source": "exa", "content": content}
-
+                return {"source": "exa_ai", "content": content}
 
         # Finally try Tavily
         if self.tavily_agent:
-            content = self._fetch_results_tavily(song_name)
-            if content:
-                return {"source": "tavily", "content": content}
+            response = self._fetch_results_tavily(song_name)
+            if response:
+                # If Tavily returned an AI-generated answer, use it directly
+                if "ai_answer" in response:
+                    return {"source": "tavily_ai", "content": response["ai_answer"]}
+
+                # Otherwise, format the search results for processing
+                if isinstance(response, dict) and "results" in response:
+                    content = json.dumps(response["results"])
+                    return {"source": "tavily", "content": content}
+
+                return {"source": "tavily", "content": str(response)}
 
         return {"source": "error", "content": f"No results for '{song_name}'"}
 
@@ -231,11 +366,16 @@ class MusicSearchTools:
         {content}
         </search_results>
         """
+
+        logger.debug("Sending to Ollama for parsing - Song: {0}", song_name)
+        content_preview = content[:1000] if len(content) > 1000 else content
+        logger.debug("First chars of content: {0}...", content_preview)
+
         try:
             response = self.ollama_agent.run(prompt)
             return response.content
         except Exception as e:
-            logger.error(f"Ollama extraction failed: {e}")
+            logger.error("Ollama extraction failed: {0}", str(e))
             return SongBasicInfo(title=song_name, artist="Unknown")
 
     def search_song_info(self, song_name: str) -> Dict:
@@ -256,9 +396,13 @@ class MusicSearchTools:
 
 
 def initialize_search_toolkit():
-    """Initialize the music search toolkit with configuration from beets config."""
-    if not PHI_AVAILABLE:
-        logger.error("Phi package not available. Please install with: pip install phidata")
+    """Initialize the music search toolkit with configuration from beets config.
+
+    Returns:
+        MusicSearchTools instance or None if initialization fails
+    """
+    if not AGNO_AVAILABLE:
+        logger.error("Agno package not available. Please install with: pip install agno")
         return None
 
     # Get configuration from beets config
@@ -289,22 +433,26 @@ _search_toolkit = None
 
 
 def get_search_toolkit():
-    """Get or initialize the search toolkit singleton."""
+    """Get or initialize the search toolkit singleton.
+
+    Returns:
+        MusicSearchTools instance or None if toolkit initialization fails
+    """
     global _search_toolkit
     if (_search_toolkit is None):
         _search_toolkit = initialize_search_toolkit()
     return _search_toolkit
 
 
-def search_track_info(query: str):
+def search_track_info(query: str) -> Dict:
     """
-    Sends a search query to get structured track information using phidata agent.
+    Searches for track information using available search engines.
 
     Args:
-        query (str): The user-provided search query for a song.
+        query: The song name or partial information to search for
 
     Returns:
-        dict: A dictionary containing the track's title, album, and artist, with missing fields set to None.
+        Dictionary containing title, album, and artist information
     """
     toolkit = get_search_toolkit()
 
@@ -313,7 +461,7 @@ def search_track_info(query: str):
         return {"title": query, "artist": "Unknown", "album": None}
 
     try:
-        logger.info(f"Searching for track info: {query}")
+        logger.info("Searching for track info: {0}", query)
         song_info = toolkit.search_song_info(query)
 
         # Format response to match expected structure
@@ -323,8 +471,9 @@ def search_track_info(query: str):
             "artist": song_info.get("artist")
         }
 
+        # Use beets' numbered placeholder style for logging
         logger.info("Found track info: {}", result)
         return result
     except Exception as e:
-        logger.error(f"Error in agent-based search: {e}")
+        logger.error("Error in agent-based search: {0}", str(e))
         return {"title": query, "artist": "Unknown", "album": None}
