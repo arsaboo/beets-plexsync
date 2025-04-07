@@ -251,13 +251,13 @@ class MusicSearchTools:
         return str(response)
 
     def _fetch_results_exa(self, song_name: str) -> Optional[str]:
-        """Query Exa for song information.
+        """Query Exa for song information using AI-generated answers.
 
         Args:
             song_name: The song name to search for
 
         Returns:
-            String containing search results or None if search failed
+            String containing AI-generated answer or None if search failed
         """
         query = f"{song_name} song album, title, and artist"
         logger.debug(f"Searching Exa for: {query}")
@@ -267,33 +267,19 @@ class MusicSearchTools:
                 future = executor.submit(self._exa_search, query)
                 response = future.result(timeout=15)  # 15 second timeout
 
-                # Process the Exa response
                 if response:
                     try:
                         # Parse the response as JSON
                         results = json.loads(response) if isinstance(response, str) else response
 
-                        # Check if we have an AI-generated answer
+                        # Extract the answer from the response
                         if isinstance(results, dict) and "answer" in results:
                             logger.debug(f"AI Generated Answer from Exa: {results['answer'][:100]}...")
                             return results["answer"]
 
-                        # Handle traditional search results if no AI answer is available
-                        if isinstance(results, list):
-                            extracted_text = ""
-                            for item in results:
-                                if isinstance(item, dict):
-                                    # Combine title and text for context
-                                    if "title" in item:
-                                        extracted_text += f"Title: {item['title']}\n"
-                                    if "text" in item:
-                                        extracted_text += f"{item['text']}\n\n"
-
-                            if extracted_text:
-                                return extracted_text
-
-                        # Return the raw response if we couldn't process it
+                        # Return raw response if we couldn't extract answer
                         return str(response)
+
                     except (json.JSONDecodeError, TypeError) as e:
                         logger.warning(f"Failed to process Exa response: {e}")
                         return str(response)
@@ -307,22 +293,20 @@ class MusicSearchTools:
             return None
 
     def _exa_search(self, query: str) -> str:
-        """Helper method to perform the actual Exa search using AI-generated answers."""
+        """Helper method to perform Exa search using AI-generated answers."""
         # Get the ExaTools instance from the agent
         exa_tool = next((t for t in self.exa_agent.tools if isinstance(t, ExaTools)), None)
         if not exa_tool:
             logger.warning("Exa tool not found in agent tools")
             return None
 
-        # Use exa_answer instead of search_exa to get AI-generated answers
+        # Use exa_answer to get AI-generated answers
         try:
             response = exa_tool.exa_answer(query, text=True)
             return response
-        except AttributeError:
-            # Fall back to search_exa if exa_answer is not available
-            logger.warning("exa_answer not available, falling back to search_exa")
-            response = exa_tool.search_exa(query)
-            return str(response)
+        except Exception as e:
+            logger.warning(f"Exa answer failed: {e}")
+            return None
 
     def _get_search_results(self, song_name: str) -> Dict[str, str]:
         """Get search results from available search engines."""
@@ -330,21 +314,14 @@ class MusicSearchTools:
         # Try SearxNG first if available
         if self.searxng_agent:
             content = self._fetch_results_searxng(song_name)
-            if (content):
+            if content:
                 return {"source": "searxng", "content": content}
 
         # Then try Exa
         if self.exa_agent:
             content = self._fetch_results_exa(song_name)
-            if (content):
-                # Check if Exa returned an AI-generated answer
-                try:
-                    results = json.loads(content) if isinstance(content, str) and content.startswith("{") else None
-                    if isinstance(results, dict) and "answer" in results:
-                        return {"source": "exa_ai", "content": results["answer"]}
-                except (json.JSONDecodeError, TypeError):
-                    pass
-                return {"source": "exa", "content": content}
+            if content:
+                return {"source": "exa_ai", "content": content}
 
         # Finally try Tavily
         if self.tavily_agent:
