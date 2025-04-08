@@ -135,7 +135,7 @@ plex:
   library_name: 'Music'
 ```
 
-If you want to import `spotify` playlists, you will also need to configure the `spotify` plugin. If you are already using the [Spotify][Spotify] plugin, `plexsync`will reuse the same configuration.
+If you want to import `spotify` playlists, you will also need to configure the `spotify` plugin. If you are already using the [Spotify][Spotify] plugin, `plexsync` will reuse the same configuration.
 ```yaml
 spotify:
   client_id: CLIENT_ID

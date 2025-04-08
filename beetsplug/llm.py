@@ -292,7 +292,7 @@ class MusicSearchTools:
             logger.warning(f"Exa search failed: {e}")
             return None
 
-    def _exa_search(self, query: str) -> str:
+    def _exa_search(self, query: str) -> Optional[str]:
         """Helper method to perform Exa search using AI-generated answers."""
         # Get the ExaTools instance from the agent
         exa_tool = next((t for t in self.exa_agent.tools if isinstance(t, ExaTools)), None)
@@ -457,7 +457,7 @@ def search_track_info(query: str) -> Dict:
     toolkit = get_search_toolkit()
 
     if not toolkit:
-        logger.error("Search toolkit unavailable. Install phidata and configure search engines.")
+        logger.error("Search toolkit unavailable. Install agno and configure search engines.")
         return {"title": query, "artist": "Unknown", "album": None}
 
     try:
