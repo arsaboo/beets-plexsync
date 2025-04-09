@@ -19,7 +19,7 @@ def import_m3u8_playlist(filepath, cache=None):
     if cache:
         cached_data = cache.get_playlist_cache(playlist_id, 'm3u8')
         if cached_data:
-            _log.info("Using cached M3U8 playlist data")
+            _log.info(f"Using cached M3U8 playlist data")
             return cached_data
 
     song_list = []
@@ -34,14 +34,14 @@ def import_m3u8_playlist(filepath, cache=None):
 
             if line.startswith('#EXTINF:'):
                 meta = line.split(',', 1)[1]
-                _log.debug("EXTINF meta raw line: '{}'", meta)
+                _log.debug(f"EXTINF meta raw line: '{meta}'")
 
                 if ' - ' in meta:
                     artist, title = meta.split(' - ', 1)
                     artist, title = artist.strip(), title.strip()
-                    _log.debug("Parsed EXTINF as artist='{}', title='{}'", artist, title)
+                    _log.debug(f"Parsed EXTINF as artist='{artist}', title='{title}'")
                 else:
-                    _log.warning("EXTINF missing '-': '{}'", meta)
+                    _log.warning(f"EXTINF missing '-': '{meta}'")
                     artist, title = None, None
 
                 current_song = {
@@ -55,7 +55,7 @@ def import_m3u8_playlist(filepath, cache=None):
                 if next_idx < len(lines) and lines[next_idx].startswith('#EXTALB:'):
                     album = lines[next_idx][8:].strip()
                     current_song['album'] = album if album else None
-                    _log.debug("Found album: '{}'", current_song['album'])
+                    _log.debug(f"Found album: '{current_song['album']}'")
                     next_idx += 1
 
                 # Optional file path (we'll skip)
@@ -63,7 +63,7 @@ def import_m3u8_playlist(filepath, cache=None):
                     next_idx += 1
 
                 # Log before appending:
-                _log.debug("Appending song entry: {}", current_song)
+                _log.debug(f"Appending song entry: {current_song}")
 
                 song_list.append(current_song.copy())
                 i = next_idx - 1  # Set to the last processed line
@@ -72,10 +72,10 @@ def import_m3u8_playlist(filepath, cache=None):
 
         if song_list and cache:
             cache.set_playlist_cache(playlist_id, 'm3u8', song_list)
-            _log.info("Cached {} tracks from M3U8 playlist", len(song_list))
+            _log.info(f"Cached {len(song_list)} tracks from M3U8 playlist")
 
         return song_list
 
     except Exception as e:
-        _log.error("Error importing M3U8 playlist '{}': {}", filepath, e)
+        _log.error(f"Error importing M3U8 playlist '{filepath}': {e}")
         return []
