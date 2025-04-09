@@ -41,6 +41,7 @@ from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
 from beetsplug.caching import Cache
 from beetsplug.llm import search_track_info
 from beetsplug.matching import plex_track_distance, clean_string
+from beetsplug.provider_youtube import import_yt_playlist, import_yt_search
 import enlighten  # Add enlighten library import
 import logging  # Add logging import
 
@@ -2064,47 +2065,11 @@ class PlexSync(BeetsPlugin):
 
     def import_yt_playlist(self, url):
         """Import YouTube playlist with caching."""
-        # Generate cache key from URL
-        playlist_id = url.split('list=')[-1].split('&')[0]  # Extract playlist ID from URL
-
-        # Check cache
-        cached_data = self.cache.get_playlist_cache(playlist_id, 'youtube')
-        if (cached_data):
-            self._log.info("Using cached YouTube playlist data")
-            return cached_data
-
-        try:
-            from beetsplug.youtube import YouTubePlugin
-        except ModuleNotFoundError:
-            self._log.error("YouTube plugin not installed")
-            return None
-
-        try:
-            ytp = YouTubePlugin()
-            song_list = ytp.import_youtube_playlist(url)
-
-            # Cache successful results
-            if song_list:
-                self.cache.set_playlist_cache(playlist_id, 'youtube', song_list)
-                self._log.info("Cached {} tracks from YouTube playlist", len(song_list))
-
-            return song_list
-        except Exception as e:
-            self._log.error("Unable to initialize YouTube plugin. Error: {}", e)
-            return None
+        return import_yt_playlist(url, self.cache)
 
     def import_yt_search(self, query, limit):
-        try:
-            from beetsplug.youtube import YouTubePlugin
-        except ModuleNotFoundError:
-            self._log.error("YouTube plugin not installed")
-            return
-        try:
-            ytp = YouTubePlugin()
-        except Exception as e:
-            self._log.error("Unable to initialize YouTube plugin. Error: {}", e)
-            return
-        return ytp.import_youtube_search(query, limit)
+        """Import YouTube search results."""
+        return import_yt_search(query, limit, self.cache)
 
     def import_tidal_playlist(self, url):
         """Import Tidal playlist with caching."""
