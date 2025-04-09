@@ -38,7 +38,7 @@ def import_jiosaavn_playlist(url, cache=None):
     if cache:
         cached_data = cache.get_playlist_cache(playlist_id, 'jiosaavn')
         if (cached_data):
-            _log.info("Using cached JioSaavn playlist data")
+            _log.info(f"Using cached JioSaavn playlist data")
             return cached_data
 
     # Initialize empty song list
@@ -60,7 +60,7 @@ def import_jiosaavn_playlist(url, cache=None):
         )
 
         if not data or "data" not in data or "list" not in data["data"]:
-            _log.error("Invalid response from JioSaavn API")
+            _log.error(f"Invalid response from JioSaavn API")
             return song_list
 
         songs = data["data"]["list"]
@@ -98,18 +98,18 @@ def import_jiosaavn_playlist(url, cache=None):
                 }
 
                 song_list.append(song_dict)
-                _log.debug("Added song: {} - {}", song_dict["title"], song_dict["artist"])
+                _log.debug(f"Added song: {song_dict['title']} - {song_dict['artist']}")
 
             except Exception as e:
-                _log.debug("Error processing JioSaavn song: {}", e)
+                _log.debug(f"Error processing JioSaavn song: {e}")
                 continue
 
         # Cache successful results
         if song_list and cache:
             cache.set_playlist_cache(playlist_id, 'jiosaavn', song_list)
-            _log.info("Cached {} tracks from JioSaavn playlist", len(song_list))
+            _log.info(f"Cached {len(song_list)} tracks from JioSaavn playlist")
 
     except Exception as e:
-        _log.error("Error importing JioSaavn playlist: {}", e)
+        _log.error(f"Error importing JioSaavn playlist: {e}")
 
     return song_list

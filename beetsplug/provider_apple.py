@@ -23,7 +23,7 @@ def import_apple_playlist(url, cache=None, headers=None):
     if cache:
         cached_data = cache.get_playlist_cache(playlist_id, 'apple')
         if (cached_data):
-            _log.info("Using cached Apple Music playlist data")
+            _log.info(f"Using cached Apple Music playlist data")
             return cached_data
 
     if headers is None:
@@ -49,7 +49,7 @@ def import_apple_playlist(url, cache=None, headers=None):
         try:
             data = soup.find("script", id="serialized-server-data").text
         except AttributeError:
-            _log.debug("Error parsing Apple Music playlist")
+            _log.debug(f"Error parsing Apple Music playlist")
             return None
 
         # load the data as a JSON object
@@ -59,7 +59,7 @@ def import_apple_playlist(url, cache=None, headers=None):
         try:
             songs = data[0]["data"]["sections"][1]["items"]
         except (KeyError, IndexError) as e:
-            _log.error("Failed to extract songs from Apple Music data: {}", e)
+            _log.error(f"Failed to extract songs from Apple Music data: {e}")
             return None
 
         # Loop through each song element
@@ -79,15 +79,15 @@ def import_apple_playlist(url, cache=None, headers=None):
                 # Append the dictionary to the list of songs
                 song_list.append(song_dict)
             except (KeyError, IndexError) as e:
-                _log.debug("Error processing song {}: {}", song.get("title", "Unknown"), e)
+                _log.debug(f"Error processing song {song.get('title', 'Unknown')}: {e}")
                 continue
 
         if song_list and cache:
             cache.set_playlist_cache(playlist_id, 'apple', song_list)
-            _log.info("Cached {} tracks from Apple Music playlist", len(song_list))
+            _log.info(f"Cached {len(song_list)} tracks from Apple Music playlist")
 
     except Exception as e:
-        _log.error("Error importing Apple Music playlist: {}", e)
+        _log.error(f"Error importing Apple Music playlist: {e}")
         return []
 
     return song_list
