@@ -10,6 +10,7 @@ Put something like the following in your config.yaml to configure:
 import asyncio
 import difflib
 import json
+import logging  # Add logging import
 import os
 import re
 import time
@@ -20,13 +21,14 @@ from typing import List
 
 import confuse
 import dateutil.parser
+import enlighten  # Add enlighten library import
 import openai
 import requests
 import spotipy
 from beets import config, ui
 from beets.dbcore import types
 from beets.dbcore.query import MatchQuery
-from beets.library import Item, DateType  # Added Item to import
+from beets.library import DateType, Item  # Added Item to import
 from beets.plugins import BeetsPlugin
 from beets.ui import input_, print_
 from bs4 import BeautifulSoup
@@ -40,10 +42,14 @@ from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
 
 from beetsplug.caching import Cache
 from beetsplug.llm import search_track_info
-from beetsplug.matching import plex_track_distance, clean_string
+from beetsplug.matching import clean_string, plex_track_distance
+from beetsplug.provider_gaana import import_gaana_playlist
+from beetsplug.provider_tidal import import_tidal_playlist
 from beetsplug.provider_youtube import import_yt_playlist, import_yt_search
-import enlighten  # Add enlighten library import
-import logging  # Add logging import
+from beetsplug.provider_apple import import_apple_playlist
+from beetsplug.provider_jiosaavn import import_jiosaavn_playlist
+from beetsplug.helpers import parse_title, clean_album_name
+
 
 class Song(BaseModel):
     title: str
@@ -221,14 +227,13 @@ class PlexSync(BeetsPlugin):
 
     def process_spotify_track(self, track):
         """Process a single Spotify track into a standardized format."""
-        try:
-            # Find and store the song title
+        try:            # Find and store the song title
             if ('From "' in track['name']) or ("From &quot" in track['name']):
                 title_orig = track['name'].replace("&quot;", '"')
-                title, album = self.parse_title(title_orig)
+                title, album = parse_title(title_orig)
             else:
                 title = track['name']
-                album = self.clean_album_name(track['album']['name'])
+                album = clean_album_name(track['album']['name'])
 
             # Get year if available
             try:
@@ -376,148 +381,12 @@ class PlexSync(BeetsPlugin):
             return song_list
 
         return song_list
-
     def import_apple_playlist(self, url):
         """Import Apple Music playlist with caching."""
-        # Generate cache key from URL
-        playlist_id = url.split('/')[-1]
-
-        # Check cache
-        cached_data = self.cache.get_playlist_cache(playlist_id, 'apple')
-        if (cached_data):
-            self._log.info("Using cached Apple Music playlist data")
-            return cached_data
-
-        song_list = []
-
-        try:
-            # Send a GET request to the URL and get the HTML content
-            response = requests.get(url, headers=self.headers)
-            content = response.text
-
-            # Create a BeautifulSoup object with the HTML content
-            soup = BeautifulSoup(content, "html.parser")
-            try:
-                data = soup.find("script", id="serialized-server-data").text
-            except AttributeError:
-                self._log.debug("Error parsing Apple Music playlist")
-                return None
-
-            # load the data as a JSON object
-            data = json.loads(data)
-
-            # Extract songs from the sections
-            try:
-                songs = data[0]["data"]["sections"][1]["items"]
-            except (KeyError, IndexError) as e:
-                self._log.error("Failed to extract songs from Apple Music data: {}", e)
-                return None
-
-            # Loop through each song element
-            for song in songs:
-                try:
-                    # Find and store the song title
-                    title = song["title"].strip()
-                    album = song["tertiaryLinks"][0]["title"]
-                    # Find and store the song artist
-                    artist = song["subtitleLinks"][0]["title"]
-                    # Create a dictionary with the song information
-                    song_dict = {
-                        "title": title.strip(),
-                        "album": album.strip(),
-                        "artist": artist.strip(),
-                    }
-                    # Append the dictionary to the list of songs
-                    song_list.append(song_dict)
-                except (KeyError, IndexError) as e:
-                    self._log.debug("Error processing song {}: {}", song.get("title", "Unknown"), e)
-                    continue
-
-            if (song_list):
-                self.cache.set_playlist_cache(playlist_id, 'apple', song_list)
-                self._log.info("Cached {} tracks from Apple Music playlist", len(song_list))
-
-        except Exception as e:
-            self._log.error("Error importing Apple Music playlist: {}", e)
-            return []
-
-        return song_list
-
+        return import_apple_playlist(url, self.cache, self.headers)
     def import_jiosaavn_playlist(self, url):
         """Import JioSaavn playlist with caching."""
-        playlist_id = url.split('/')[-1]
-
-        # Check cache first
-        cached_data = self.cache.get_playlist_cache(playlist_id, 'jiosaavn')
-        if (cached_data):
-            self._log.info("Using cached JioSaavn playlist data")
-            return cached_data
-
-        # Initialize empty song list
-        song_list = []
-
-        try:
-            loop = self.get_event_loop()
-
-            # Run the async operation and get results
-            data = loop.run_until_complete(
-                self.saavn.get_playlist_songs(url, page=1, limit=100)
-            )
-
-            if not data or "data" not in data or "list" not in data["data"]:
-                self._log.error("Invalid response from JioSaavn API")
-                return song_list
-
-            songs = data["data"]["list"]
-
-            for song in songs:
-                try:
-                    # Process song title
-                    if ('From "' in song["title"]) or ("From &quot" in song["title"]):
-                        title_orig = song["title"].replace("&quot;", '"')
-                        title, album = self.parse_title(title_orig)
-                    else:
-                        title = song["title"]
-                        album = self.clean_album_name(song["more_info"]["album"])
-
-                    # Get year if available
-                    year = song.get("year", None)
-
-                    # Get primary artist from artistMap
-                    try:
-                        artist = song["more_info"]["artistMap"]["primary_artists"][0]["name"]
-                    except (KeyError, IndexError):
-                        # Fallback to first featured artist if primary not found
-                        try:
-                            artist = song["more_info"]["artistMap"]["featured_artists"][0]["name"]
-                        except (KeyError, IndexError):
-                            # Skip if no artist found
-                            continue
-
-                    # Create song dictionary with cleaned data
-                    song_dict = {
-                        "title": title.strip(),
-                        "album": album.strip(),
-                        "artist": artist.strip(),
-                        "year": year,
-                    }
-
-                    song_list.append(song_dict)
-                    self._log.debug("Added song: {} - {}", song_dict["title"], song_dict["artist"])
-
-                except Exception as e:
-                    self._log.debug("Error processing JioSaavn song: {}", e)
-                    continue
-
-            # Cache successful results
-            if song_list:
-                self.cache.set_playlist_cache(playlist_id, 'jiosaavn', song_list)
-                self._log.info("Cached {} tracks from JioSaavn playlist", len(song_list))
-
-        except Exception as e:
-            self._log.error("Error importing JioSaavn playlist: {}", e)
-
-        return song_list
+        return import_jiosaavn_playlist(url, self.cache)
 
     def get_playlist_id(self, url):
         # split the url by "/"
@@ -840,33 +709,7 @@ class PlexSync(BeetsPlugin):
             plexplaylist2collection_cmd,
             plex2spotify_cmd,
             plex_smartplaylists_cmd,
-        ]
-
-    def parse_title(self, title_orig):
-        if '(From "' in title_orig:
-            title = re.sub(r"\(From.*\)", "", title_orig)
-            album = re.sub(r'^[^"]+"|(?<!^)"[^"]+"|"[^"]+$', "", title_orig)
-        elif '[From "' in title_orig:
-            title = re.sub(r"\[From.*\]", "", title_orig)
-            album = re.sub(r'^[^"]+"|(?<!^)"[^"]+$', "", title_orig)
-        else:
-            title = title_orig
-            album = ""
-        return title.strip(), album.strip()
-
-    def clean_album_name(self, album_orig):
-        album_orig = (
-            album_orig.replace("(Original Motion Picture Soundtrack)", "")
-            .replace("- Hindi", "")
-            .strip()
-        )
-        if '(From "' in album_orig:
-            album = re.sub(r'^[^"]+"|(?<!^)"[^"]+$', "", album_orig)
-        elif '[From "' in album_orig:
-            album = re.sub(r'^[^"]+"|(?<!^)"[^"]+$', "", album_orig)
-        else:
-            album = album_orig
-        return album
+        ]    # Using helper functions from helpers.py instead of class methods
 
     saavn = JioSaavn()
 
@@ -2073,70 +1916,11 @@ class PlexSync(BeetsPlugin):
 
     def import_tidal_playlist(self, url):
         """Import Tidal playlist with caching."""
-        # Generate cache key from URL
-        playlist_id = url.split('/')[-1]
-
-        # Check cache
-        cached_data = self.cache.get_playlist_cache(playlist_id, 'tidal')
-        if (cached_data):
-            self._log.info("Using cached Tidal playlist data")
-            return cached_data
-
-        try:
-            from beetsplug.tidal import TidalPlugin
-        except ModuleNotFoundError:
-            self._log.error("Tidal plugin not installed")
-            return None
-
-        try:
-            tidal = TidalPlugin()
-            song_list = tidal.import_tidal_playlist(url)
-
-            # Cache successful results
-            if song_list:
-                self.cache.set_playlist_cache(playlist_id, 'tidal', song_list)
-                self._log.info("Cached {} tracks from Tidal playlist", len(song_list))
-
-            return song_list
-        except Exception as e:
-            self._log.error("Unable to initialize Tidal plugin. Error: {}", e)
-            return None
+        return import_tidal_playlist(url, self.cache)
 
     def import_gaana_playlist(self, url):
         """Import Gaana playlist with caching."""
-        # Generate cache key from URL
-        playlist_id = url.split('/')[-1]
-
-        # Check cache
-        cached_data = self.cache.get_playlist_cache(playlist_id, 'gaana')
-        if (cached_data):
-            self._log.info("Using cached Gaana playlist data")
-            return cached_data
-
-        try:
-            from beetsplug.gaana import GaanaPlugin
-        except ModuleNotFoundError:
-            self._log.error(
-                "Gaana plugin not installed. \
-                            See https://github.com/arsaboo/beets-gaana"
-            )
-            return None
-
-        try:
-            gaana = GaanaPlugin()
-        except Exception as e:
-            self._log.error("Unable to initialize Gaana plugin. Error: {}", e)
-            return None
-
-        # Get songs from Gaana
-        song_list = gaana.import_gaana_playlist(url)
-
-        # Cache successful results
-        if song_list:
-            self.cache.set_playlist_cache(playlist_id, 'gaana', song_list)
-            self._log.info("Cached {} tracks from Gaana playlist", len(song_list))
-
-        return song_list
+        return import_gaana_playlist(url, self.cache)
 
     def _plex2spotify(self, lib, playlist):
         """Transfer Plex playlist to Spotify using plex_lookup."""
