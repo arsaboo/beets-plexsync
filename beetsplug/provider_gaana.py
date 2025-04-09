@@ -34,7 +34,7 @@ def import_gaana_playlist(url, cache=None):
     try:
         gaana = GaanaPlugin()
     except Exception as e:
-        _log.error("Unable to initialize Gaana plugin. Error: {}", e)
+        _log.error("Unable to initialize Gaana plugin. Error: %s", e)
         return None
 
     # Get songs from Gaana

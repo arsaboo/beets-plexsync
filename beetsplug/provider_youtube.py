@@ -39,11 +39,11 @@ def import_yt_playlist(url, cache=None):
         # Cache successful results
         if cache and song_list:
             cache.set_playlist_cache(playlist_id, 'youtube', song_list)
-            _log.info("Cached {} tracks from YouTube playlist", len(song_list))
+            _log.info("Cached %s tracks from YouTube playlist", len(song_list))
 
         return song_list
     except Exception as e:
-        _log.error("Unable to initialize YouTube plugin. Error: {}", e)
+        _log.error("Unable to initialize YouTube plugin. Error: %s", e)
         return None
 
 
@@ -67,5 +67,5 @@ def import_yt_search(query, limit, cache=None):
         ytp = YouTubePlugin()
         return ytp.import_youtube_search(query, limit)
     except Exception as e:
-        _log.error("Unable to initialize YouTube plugin. Error: {}", e)
+        _log.error("Unable to initialize YouTube plugin. Error: %s", e)
         return []
