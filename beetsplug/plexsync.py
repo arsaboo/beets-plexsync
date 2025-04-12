@@ -1467,10 +1467,15 @@ class PlexSync(BeetsPlugin):
 
             cleaned_metadata = search_track_info(search_query)
             if cleaned_metadata:
+                # Use original value if LLM returns None for a field
+                cleaned_title = cleaned_metadata.get("title")
+                cleaned_album = cleaned_metadata.get("album")
+                cleaned_artist = cleaned_metadata.get("artist")
+
                 cleaned_song = {
-                    "title": cleaned_metadata.get("title", song["title"]),
-                    "album": cleaned_metadata.get("album", song["album"]),
-                    "artist": cleaned_metadata.get("artist", song["artist"])
+                    "title": cleaned_title if cleaned_title is not None else song["title"],
+                    "album": cleaned_album if cleaned_album is not None else song.get("album"),
+                    "artist": cleaned_artist if cleaned_artist is not None else song.get("artist")
                 }
                 self._log.debug("Using LLM cleaned metadata: {}", cleaned_song)
 

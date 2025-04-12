@@ -67,9 +67,9 @@ class SongBasicInfo(BaseModel):
     @field_validator('title', 'artist', 'album', mode='before')
     @classmethod
     def default_unknown(cls, v):
-        if not v or not isinstance(v, str):
-            return "Unknown"
-        return v.strip() if v.strip() else "Unknown"
+        if not v or not isinstance(v, str) or not v.strip():
+            return None  # Return None instead of "Unknown"
+        return v.strip()
 
 
 class MusicSearchTools:
@@ -376,7 +376,8 @@ class MusicSearchTools:
             return response.content
         except Exception as e:
             logger.error("Ollama extraction failed: {0}", str(e))
-            return SongBasicInfo(title=song_name, artist="Unknown")
+            # Return None for artist and album on failure
+            return SongBasicInfo(title=song_name, artist=None, album=None)
 
     def search_song_info(self, song_name: str) -> Dict:
         """Search for song information using available search engines."""
@@ -385,7 +386,7 @@ class MusicSearchTools:
         if (search_results["source"] == "error"):
             return {
                 "title": song_name,
-                "artist": "Unknown",
+                "artist": None,
                 "album": None,
                 "error": search_results["content"]
             }
@@ -458,7 +459,8 @@ def search_track_info(query: str) -> Dict:
 
     if not toolkit:
         logger.error("Search toolkit unavailable. Install agno and configure search engines.")
-        return {"title": query, "artist": "Unknown", "album": None}
+        # Return None for artist and album
+        return {"title": query, "artist": None, "album": None}
 
     try:
         logger.info("Searching for track info: {0}", query)
@@ -476,4 +478,5 @@ def search_track_info(query: str) -> Dict:
         return result
     except Exception as e:
         logger.error("Error in agent-based search: {0}", str(e))
-        return {"title": query, "artist": "Unknown", "album": None}
+        # Return None for artist and album
+        return {"title": query, "artist": None, "album": None}
