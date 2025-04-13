@@ -1427,6 +1427,10 @@ class PlexSync(BeetsPlugin):
                     # Try with simplified title (no parentheses)
                     song["title"] = clean_string(song["title"])
                     tracks = self.music.searchTracks(**{"track.title": song["title"]}, limit=50)
+            if song["title"] is None or song["title"] == "" and song["album"] and song["artist"]:
+                tracks = self.music.searchTracks(
+                    **{"album.title": song["album"], "artist.title": song["artist"]}, limit=50
+                )
         except Exception as e:
             self._log.debug(
                 "Error searching for {} - {}. Error: {}",
