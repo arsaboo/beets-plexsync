@@ -388,7 +388,7 @@ class MusicSearchTools:
                 "title": song_name,
                 "artist": None,
                 "album": None,
-                "error": search_results["content"]
+                "search_source": "error"
             }
 
         song_details = self._extract_song_details(search_results["content"], song_name).model_dump()
@@ -459,25 +459,23 @@ def search_track_info(query: str) -> Dict:
 
     if not toolkit:
         logger.error("Search toolkit unavailable. Install agno and configure search engines.")
-        # Return None for artist and album
         return {"title": query, "artist": None, "album": None}
 
     try:
         logger.info("Searching for track info: {0}", query)
         song_info = toolkit.search_song_info(query)
 
-        # Format response to match expected structure
+        # Format response: Use extracted title if available, otherwise fallback to original query.
+        # Pass through artist and album (which could be None if not found).
         result = {
-            # Preserve the original query as title if the search returns None, empty string or "Unknown"
-            "title": query if not song_info.get("title") or song_info.get("title") == "Unknown" else song_info.get("title"),
+            "title": song_info.get("title") or query, # Use query if title is None or empty
             "album": song_info.get("album"),
             "artist": song_info.get("artist")
         }
 
-        # Use beets' numbered placeholder style for logging
         logger.info("Found track info: {}", result)
         return result
     except Exception as e:
         logger.error("Error in agent-based search: {0}", str(e))
-        # Return None for artist and album
+        # General fallback: use original query for title
         return {"title": query, "artist": None, "album": None}
