@@ -352,13 +352,13 @@ class MusicSearchTools:
         - Album Name: The album that contains this song (if mentioned)
 
         If any information is not clearly stated in the search results, use the most likely value based on available context.
-        If you cannot determine a value with reasonable confidence, respond with "Unknown" for that field.
+        If you cannot determine a value with reasonable confidence, return null for that field.
 
         Format your response as valid JSON with these exact keys:
         {{
-            "title": "The song title",
-            "artist": "The artist name",
-            "album": "The album name"
+            "title": "The song title or null if uncertain",
+            "artist": "The artist name or null if uncertain",
+            "album": "The album name or null if uncertain"
         }}
         </instruction>
 
@@ -468,7 +468,8 @@ def search_track_info(query: str) -> Dict:
 
         # Format response to match expected structure
         result = {
-            "title": song_info.get("title"),
+            # Preserve the original query as title if the search returns None, empty string or "Unknown"
+            "title": query if not song_info.get("title") or song_info.get("title") == "Unknown" else song_info.get("title"),
             "album": song_info.get("album"),
             "artist": song_info.get("artist")
         }
