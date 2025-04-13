@@ -1412,111 +1412,52 @@ class PlexSync(BeetsPlugin):
                 except Exception as e:
                     self._log.debug("Failed to fetch cached item {}: {}", cached_result, e)
 
-        # Determine search strategy based on available info
-        title = song.get("title")
-        album = song.get("album")
-        artist = song.get("artist") # Keep artist for potential filtering later
-
-        search_params = {}
-        search_strategy = "none"
-
-        if title and album:
-            search_params = {"album.title": album, "track.title": title}
-            search_strategy = "album_and_title"
-        elif album: # Title is missing or empty, but album is present
-            search_params = {"album.title": album}
-            # Optionally add artist if available to narrow down album-only search
-            if artist:
-                 search_params["artist.title"] = artist
-            search_strategy = "album_only"
-        elif title: # Album is missing, but title is present
-            search_params = {"track.title": title}
-            if artist:
-                 search_params["artist.title"] = artist
-            search_strategy = "title_only"
-        else: # Neither title nor album provided
-             self._log.debug("Cannot search Plex: Both title and album are missing for song: {}", song)
-             self._cache_result(cache_key, None) # Cache negative result
-             return None
-
-        self._log.debug("Attempting Plex search with strategy '{}' and params: {}", search_strategy, search_params)
-
+        # Try regular search
+        # Ensure song["artist"] is not None before splitting
         try:
-            tracks = self.music.searchTracks(**search_params, limit=50)
-
-            # Fallback 1: If album_and_title failed, try album_only (if album exists)
-            if not tracks and search_strategy == "album_and_title" and album:
-                self._log.debug("Fallback 1: Trying album-only search for album: {}", album)
-                fallback_params = {"album.title": album}
-                if artist: fallback_params["artist.title"] = artist
-                tracks = self.music.searchTracks(**fallback_params, limit=50)
-
-            # Fallback 2: If still no tracks, try title_only (if title exists)
-            if not tracks and title:
-                 # Use cleaned title for broader match potential if initial search failed
-                 cleaned_title = clean_string(title)
-                 self._log.debug("Fallback 2: Trying title-only search for title: {}", cleaned_title)
-                 fallback_params = {"track.title": cleaned_title}
-                 if artist: fallback_params["artist.title"] = artist
-                 tracks = self.music.searchTracks(**fallback_params, limit=50)
-
+            if song["artist"] is None:
+                song["artist"] = ""
+            if song["album"] is None:
+                tracks = self.music.searchTracks(**{"track.title": song["title"]}, limit=50)
+            else:
+                tracks = self.music.searchTracks(
+                    **{"album.title": song["album"], "track.title": song["title"]}, limit=50
+                )
+                if len(tracks) == 0:
+                    # Try with simplified title (no parentheses)
+                    song["title"] = clean_string(song["title"])
+                    tracks = self.music.searchTracks(**{"track.title": song["title"]}, limit=50)
         except Exception as e:
             self._log.debug(
-                "Error during Plex search for song {}. Strategy: {}. Params: {}. Error: {}",
-                song, search_strategy, search_params, e
+                "Error searching for {} - {}. Error: {}",
+                song["album"],
+                song["title"],
+                e,
             )
-            tracks = [] # Ensure tracks is empty list on error
-
-        # --- The rest of the function remains largely the same ---
-        # Process search results (len == 1, len > 1, LLM, manual search)
+            return None
 
         # Process search results
         if len(tracks) == 1:
             result = tracks[0]
-            self._log.debug("Found unique match: {}", result.title)
             self._cache_result(cache_key, result)
             return result
         elif len(tracks) > 1:
-            # Ensure song dict has values for matching, even if None initially
-            match_song = {
-                "title": title or "",
-                "album": album or "",
-                "artist": artist or ""
-            }
-            sorted_tracks = self.find_closest_match(match_song, tracks)
-            self._log.debug("Found {} potential matches for {}", len(sorted_tracks), match_song["title"] or match_song["album"])
+            sorted_tracks = self.find_closest_match(song, tracks)
+            self._log.debug("Found {} tracks for {}", len(sorted_tracks), song["title"])
 
             # Try manual search first if enabled and we have matches
             if manual_search and len(sorted_tracks) > 0:
-                manual_result = self._handle_manual_search(sorted_tracks, song) # Pass original song for caching key
+                manual_result = self._handle_manual_search(sorted_tracks, song)
                 if manual_result:
-                    # Cache is handled within _handle_manual_search
                     return manual_result
-                # If user skipped or aborted, the negative cache was stored, return None
-                elif manual_result is None:
-                     # Check cache again in case manual search stored a negative result
-                     cached_after_manual = self.cache.get(cache_key)
-                     if cached_after_manual == -1:
-                         return None
-                     # If still no cache entry after manual skip/abort, proceed (might trigger LLM)
-                     pass
-
+                # If user skipped, the negative cache was already stored, return None
+                return None
 
             # Otherwise try automatic matching with improved threshold
-            if sorted_tracks: # Check if sorted_tracks is not empty
-                best_match, best_score = sorted_tracks[0]
-                # Adjust threshold based on search strategy
-                # Require higher confidence if searching only by album or title
-                threshold = 0.75 if search_strategy != "album_and_title" else 0.80
-                if best_score >= threshold:
-                    self._log.debug("Automatic match found with score {:.2f} >= {:.2f}: {}", best_score, threshold, best_match.title)
-                    self._cache_result(cache_key, best_match)
-                    return best_match
-                else:
-                     self._log.debug("Best automatic match score {:.2f} below threshold {:.2f}", best_score, threshold)
-            else:
-                 self._log.debug("No suitable matches found after sorting.")
-
+            best_match = sorted_tracks[0]
+            if best_match[1] >= 0.8:  # Require 80% match score for automatic matching
+                self._cache_result(cache_key, best_match[0])
+                return best_match[0]
 
         # Try LLM cleaning if enabled and not already attempted
         if not llm_attempted and self.search_llm and config["plexsync"]["use_llm_search"].get(bool):
