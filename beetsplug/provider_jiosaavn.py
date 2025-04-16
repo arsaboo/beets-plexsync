@@ -22,6 +22,8 @@ async def get_playlist_songs(playlist_url):
     # Return a list of songs with details
     return songs
 
+import asyncio
+
 def import_jiosaavn_playlist(url, cache=None):
     """Import JioSaavn playlist with caching.
 
@@ -41,23 +43,30 @@ def import_jiosaavn_playlist(url, cache=None):
             _log.info(f"Using cached JioSaavn playlist data")
             return cached_data
 
-    # Initialize empty song list
     song_list = []
 
     try:
-        import asyncio
-
-        # Get or create an event loop
+        # Try to get the running event loop
         try:
             loop = asyncio.get_running_loop()
+            # If we're already in an event loop, schedule the coroutine and wait for result
+            if loop.is_running():
+                future = asyncio.ensure_future(get_playlist_songs(url))
+                # If running in the main thread, use asyncio.run_coroutine_threadsafe
+                import threading
+                if threading.current_thread() is threading.main_thread():
+                    # Use asyncio.run if possible (Python 3.7+)
+                    data = loop.run_until_complete(future)
+                else:
+                    # Use run_coroutine_threadsafe for non-main threads
+                    data = asyncio.run_coroutine_threadsafe(get_playlist_songs(url), loop).result()
+            else:
+                data = loop.run_until_complete(get_playlist_songs(url))
         except RuntimeError:
+            # No running event loop, create a new one
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-
-        # Run the async operation and get results
-        data = loop.run_until_complete(
-            get_playlist_songs(url)
-        )
+            data = loop.run_until_complete(get_playlist_songs(url))
 
         if not data or "data" not in data or "list" not in data["data"]:
             _log.error(f"Invalid response from JioSaavn API")

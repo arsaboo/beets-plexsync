@@ -288,6 +288,12 @@ class MusicSearchTools:
         except concurrent.futures.TimeoutError:
             logger.warning(f"Exa search timed out for: {query}")
             return None
+        except Exception as http_err:
+            if http_err.response.status_code == 504:
+                logger.error(f"Exa API returned 504 Gateway Timeout for query: {query}")
+            else:
+                logger.error(f"HTTP error occurred during Exa search: {http_err}")
+            return None
         except Exception as e:
             logger.warning(f"Exa search failed: {e}")
             return None
