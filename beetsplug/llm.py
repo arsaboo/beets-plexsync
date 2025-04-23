@@ -106,7 +106,6 @@ class MusicSearchTools:
             self.ollama_agent = Agent(
                 model=Ollama(id=self.model_id, host=self.ollama_host),
                 response_model=SongBasicInfo,
-                reasoning=True,
                 structured_outputs=True
             )
         except Exception as e:
