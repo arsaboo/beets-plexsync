@@ -313,8 +313,14 @@ class Cache:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
 
-                # For debugging
-                original_query_key = json.dumps(query) if isinstance(query, dict) else query
+                # Use the same datetime_handler as in set() to ensure consistency
+                def datetime_handler(obj):
+                    if isinstance(obj, datetime):
+                        return obj.isoformat()
+                    raise TypeError(f'Object of type {type(obj)} is not JSON serializable')
+
+                # For debugging - use the SAME json.dumps parameters as in set()
+                original_query_key = json.dumps(query, default=datetime_handler) if isinstance(query, dict) else query
                 logger.debug('Looking up with original key: {}', original_query_key)
 
                 # Normalize the query for lookup
