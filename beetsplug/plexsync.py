@@ -13,6 +13,7 @@ import json
 import logging  # Add logging import
 import os
 import re
+import sqlite3
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
@@ -1185,25 +1186,39 @@ class PlexSync(BeetsPlugin):
 
         selected_track = sorted_tracks[sel - 1][0] if sel > 0 else None
 
-        # NEW ADDITION: Update any existing negative cache entries for this song
+        # Store the manual selection in cache
         if selected_track:
-            # Create the normalized cache key
-            final_key = self.cache._make_cache_key(song)
-            self._log.debug("Storing manual selection in cache for key: {} ratingKey: {}",
-                            final_key, selected_track.ratingKey)
+            # First store with the original query key
+            original_cache_key = self.cache._make_cache_key(song)
+            self._log.debug("Storing manual selection in cache with key: {}", original_cache_key)
+            self._cache_result(original_cache_key, selected_track)
 
-            # Store the manually selected track in the cache
-            self._cache_result(final_key, selected_track)
+            # Check if this song came from cleaned metadata (has _original_song)
+            original_song = getattr(song, '_original_song', None)
+            if original_song:
+                # Also store the result for the original song key
+                orig_key = self.cache._make_cache_key(original_song)
+                self._log.debug("Also storing selection for original query key: {}", orig_key)
+                self._cache_result(orig_key, selected_track)
 
-            # Update any negative cache entries for this song to point to the selected track
+            # Also store with album preserved in case it was normalized
+            if isinstance(song, dict) and song.get('album') and song.get('album').lower() != song.get('album'):
+                album_preserved_key = json.dumps([
+                    ["album", song.get('album')],  # Original album
+                    ["artist", self.cache.normalize_text(song.get("artist", ""))],
+                    ["title", self.cache.normalize_text(song.get("title", ""))]
+                ])
+                self._log.debug("Also storing with album-preserved key: {}", album_preserved_key)
+                self._cache_result(album_preserved_key, selected_track)
+
+            # Update any negative cache entries for this song
             with sqlite3.connect(self.cache.db_path) as conn:
                 cursor = conn.cursor()
 
-                # Get normalized title and artist for broader matching
+                # Get normalized title for broader matching
                 normalized_title = self.cache.normalize_text(song.get("title", ""))
-                normalized_artist = self.cache.normalize_text(song.get("artist", ""))
 
-                # Search for similar negative cache entries
+                # Search for negative cache entries with similar title
                 cursor.execute(
                     'SELECT query FROM cache WHERE plex_ratingkey = -1 AND query LIKE ?',
                     (f'%{normalized_title}%',)
@@ -1223,10 +1238,7 @@ class PlexSync(BeetsPlugin):
                                 key_dict[k] = v
 
                             # Check if this appears to be the same song
-                            title_match = self.cache.normalize_text(key_dict.get("title", "")) == normalized_title
-                            artist_match = self.cache.normalize_text(key_dict.get("artist", "")) == normalized_artist
-
-                            if title_match and artist_match:
+                            if self.cache.normalize_text(key_dict.get("title", "")) == normalized_title:
                                 cursor.execute(
                                     'UPDATE cache SET plex_ratingkey = ? WHERE query = ?',
                                     (selected_track.ratingKey, key)
@@ -1448,6 +1460,10 @@ class PlexSync(BeetsPlugin):
                 if rating_key == -1 or rating_key is None:  # Handle both None and -1
                     if cleaned_metadata and not llm_attempted:
                         self._log.debug("Using cached cleaned metadata: {}", cleaned_metadata)
+                        # Add original song reference to cleaned metadata
+                        if isinstance(cleaned_metadata, dict):
+                            cleaned_metadata = cleaned_metadata.copy()
+                            cleaned_metadata['_original_song'] = song
                         return self.search_plex_song(cleaned_metadata, manual_search, llm_attempted=True)
                     return None  # Return None if we have a negative cache result
                 try:
@@ -1470,7 +1486,9 @@ class PlexSync(BeetsPlugin):
             if song["artist"] is None:
                 song["artist"] = ""
             if song["album"] is None:
-                tracks = self.music.searchTracks(**{"track.title": song["title"]}, limit=50)
+                tracks = self.music.searchTracks(
+                    **{"track.title": song["title"]}, limit=50
+                )
             else:
                 tracks = self.music.searchTracks(
                     **{"album.title": song["album"], "track.title": song["title"]}, limit=50
