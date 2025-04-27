@@ -418,7 +418,7 @@ class Cache:
                 logger.debug('Skipping cache for empty query')
                 return None
 
-            # Also store normalized version
+            # Generate normalized version of the query
             normalized_key = self._make_cache_key(query)
 
             # Use -1 for negative cache entries (when plex_ratingkey is None)
@@ -429,6 +429,7 @@ class Cache:
 
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
+
                 # Store both original and normalized versions
                 for key in [cache_key, normalized_key]:
                     cursor.execute(
@@ -436,15 +437,42 @@ class Cache:
                         (str(key), rating_key, cleaned_json)
                     )
 
-                # NEW PART: Also store the cleaned metadata as its own entry if it exists
+                # Also store the cleaned metadata as its own entry if it exists
                 if cleaned_metadata:
-                    # Create a cache key for the cleaned metadata
+                    # Store cleaned metadata with full normalized key
                     cleaned_key = self._make_cache_key(cleaned_metadata)
                     cursor.execute(
                         'REPLACE INTO cache (query, plex_ratingkey, cleaned_query) VALUES (?, ?, ?)',
                         (str(cleaned_key), rating_key, None)
                     )
-                    logger.debug('Also cached cleaned metadata with key: {}', cleaned_key)
+                    logger.debug('Cached cleaned metadata with key: {}', cleaned_key)
+
+                    # Also store with original album name preserved but normalized title/artist
+                    if isinstance(cleaned_metadata, dict) and cleaned_metadata.get('album'):
+                        # This key preserves the full album name as-is
+                        preserved_album_key = json.dumps([
+                            ["album", cleaned_metadata.get('album', '')],  # Keep original album
+                            ["artist", self.normalize_text(cleaned_metadata.get("artist", ""))],
+                            ["title", self.normalize_text(cleaned_metadata.get("title", ""))]
+                        ])
+                        cursor.execute(
+                            'REPLACE INTO cache (query, plex_ratingkey, cleaned_query) VALUES (?, ?, ?)',
+                            (str(preserved_album_key), rating_key, None)
+                        )
+                        logger.debug('Cached with preserved album name: {}', preserved_album_key)
+
+                        # Additionally store a version with just title and artist (no album)
+                        # This helps when album names completely differ
+                        title_artist_key = json.dumps([
+                            ["album", ""],
+                            ["artist", self.normalize_text(cleaned_metadata.get("artist", ""))],
+                            ["title", self.normalize_text(cleaned_metadata.get("title", ""))]
+                        ])
+                        cursor.execute(
+                            'REPLACE INTO cache (query, plex_ratingkey, cleaned_query) VALUES (?, ?, ?)',
+                            (str(title_artist_key), rating_key, None)
+                        )
+                        logger.debug('Cached title+artist only: {}', title_artist_key)
 
                 conn.commit()
                 logger.debug('Cached result for query: "{}" (rating_key: {}, cleaned: {})',
