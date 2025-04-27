@@ -359,12 +359,14 @@ class MusicSearchTools:
         - Artist Name: The primary artist or band who performed the song
         - Album Name: The album that contains this song (if mentioned)
 
-        IMPORTANT FORMATTING RULES:
-        Clean the album name by removing excessive details such as:
-        - Years and dates in any format (e.g., "Album Name (2020)", "Album Name - 2020")
-        - Soundtrack indicators (e.g., "(Soundtrack)", "[Original Score]", "OST")
-        - Movie references (e.g., "(From the Film)", "(Music from the Motion Picture)")
-        - Any parentheses or brackets with descriptive text
+        IMPORTANT CLEANING RULES:
+        For album and title, remove:
+        - Years/dates (e.g., "(2020)", "- 2020")
+        - Soundtrack/OST indicators (e.g., "(Soundtrack)", "[Original Score]", "OST")
+        - Movie/film references (e.g., "(From the Film)", "(Music from the Motion Picture)")
+        - Parentheses/brackets with descriptive text
+        - Descriptors like remix, extended, deluxe edition, etc.
+        - Trailing spaces or punctuation
 
         Return only the core album name without these extra details, cleaning up any trailing spaces or punctuation.
 
