@@ -1098,7 +1098,7 @@ class PlexSync(BeetsPlugin):
 
         # Use beets UI formatting for the query header
         print_(ui.colorize('text_highlight', '\nChoose candidates for: ') +
-               ui.colorize('text_highlight_minor', f"{source_album} - {source_title} - {source_artist}"))
+            ui.colorize('text_highlight_minor', f"{source_album} - {source_title} - {source_artist}"))
 
         # Format and display the matches
         for i, (track, score) in enumerate(sorted_tracks, start=1):
@@ -1184,11 +1184,61 @@ class PlexSync(BeetsPlugin):
             return self.manual_track_search(song)
 
         selected_track = sorted_tracks[sel - 1][0] if sel > 0 else None
+
+        # NEW ADDITION: Update any existing negative cache entries for this song
         if selected_track:
+            # Create the normalized cache key
             final_key = self.cache._make_cache_key(song)
             self._log.debug("Storing manual selection in cache for key: {} ratingKey: {}",
                             final_key, selected_track.ratingKey)
-            self._cache_result(final_key, selected_track.ratingKey, cleaned_metadata=song)
+
+            # Store the manually selected track in the cache
+            self._cache_result(final_key, selected_track)
+
+            # Update any negative cache entries for this song to point to the selected track
+            with sqlite3.connect(self.cache.db_path) as conn:
+                cursor = conn.cursor()
+
+                # Get normalized title and artist for broader matching
+                normalized_title = self.cache.normalize_text(song.get("title", ""))
+                normalized_artist = self.cache.normalize_text(song.get("artist", ""))
+
+                # Search for similar negative cache entries
+                cursor.execute(
+                    'SELECT query FROM cache WHERE plex_ratingkey = -1 AND query LIKE ?',
+                    (f'%{normalized_title}%',)
+                )
+                negative_keys = cursor.fetchall()
+
+                # Update these negative entries to point to the selected track
+                updated_count = 0
+                for key_tuple in negative_keys:
+                    key = key_tuple[0]
+                    try:
+                        # Try to parse the key to check if it's for the same song
+                        if key.startswith('['):
+                            key_data = json.loads(key)
+                            key_dict = {}
+                            for k, v in key_data:
+                                key_dict[k] = v
+
+                            # Check if this appears to be the same song
+                            title_match = self.cache.normalize_text(key_dict.get("title", "")) == normalized_title
+                            artist_match = self.cache.normalize_text(key_dict.get("artist", "")) == normalized_artist
+
+                            if title_match and artist_match:
+                                cursor.execute(
+                                    'UPDATE cache SET plex_ratingkey = ? WHERE query = ?',
+                                    (selected_track.ratingKey, key)
+                                )
+                                updated_count += 1
+                    except Exception as e:
+                        self._log.debug("Error processing cache key {}: {}", key, e)
+
+                if updated_count > 0:
+                    conn.commit()
+                    self._log.debug("Updated {} related negative cache entries to point to selected track", updated_count)
+
         return selected_track
 
     def manual_track_search(self, original_song=None):
