@@ -226,8 +226,6 @@ class Cache:
             return ""
         # Convert to lowercase
         text = text.lower()
-        # Remove year markers like [1977]
-        text = re.sub(r'\s*\[\d{4}\]\s*$', '', text)
         # Remove featuring artists
         text = re.sub(r'\s*[\(\[]?(?:feat\.?|ft\.?|featuring)\s+[^\]\)]+[\]\)]?\s*$', '', text)
         # Remove any remaining parentheses or brackets at the end
@@ -312,25 +310,13 @@ class Cache:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-
-                # Use the same datetime_handler as in set() to ensure consistency
-                def datetime_handler(obj):
-                    if isinstance(obj, datetime):
-                        return obj.isoformat()
-                    raise TypeError(f'Object of type {type(obj)} is not JSON serializable')
-
-                # For debugging - use the SAME json.dumps parameters as in set()
-                original_query_key = json.dumps(query, default=datetime_handler) if isinstance(query, dict) else query
-                logger.debug('Looking up with original key: {}', original_query_key)
-
                 # Normalize the query for lookup
                 cache_key = self._make_cache_key(query)
-                logger.debug('Looking up with normalized key: {}', cache_key)
 
                 # Try exact match first
                 cursor.execute(
                     'SELECT plex_ratingkey, cleaned_query FROM cache WHERE query = ?',
-                    (original_query_key,)
+                    (json.dumps(query) if isinstance(query, dict) else query,)
                 )
                 row = cursor.fetchone()
 
@@ -369,41 +355,13 @@ class Cache:
                     cleaned_metadata = json.loads(cleaned_metadata_json) if cleaned_metadata_json else None
 
                     logger.debug('Cache hit for query: {} (rating_key: {}, cleaned: {})',
-                            self._sanitize_query_for_log(cache_key),
-                            plex_ratingkey,
-                            cleaned_metadata)
+                               self._sanitize_query_for_log(cache_key),
+                               plex_ratingkey,
+                               cleaned_metadata)
                     return (plex_ratingkey, cleaned_metadata)
 
-                # Additional attempt: Try with un-normalized keys but compared in a normalized way
-                cursor.execute('SELECT query, plex_ratingkey, cleaned_query FROM cache')
-                all_keys = cursor.fetchall()
-
-                for stored_key, stored_rating_key, stored_cleaned in all_keys:
-                    try:
-                        # Check if the stored key can be parsed as JSON
-                        if stored_key.startswith('[') or stored_key.startswith('{'):
-                            stored_dict = json.loads(stored_key)
-                            # If both are dicts, compare normalized versions
-                            if isinstance(stored_dict, list) and isinstance(query, dict):
-                                # Convert the stored list format [["album", "value"], ...] to dict
-                                stored_as_dict = {}
-                                for k, v in stored_dict:
-                                    stored_as_dict[k] = v
-
-                                # Compare normalized versions
-                                if (self.normalize_text(stored_as_dict.get("title", "")) == self.normalize_text(query.get("title", "")) and
-                                    self.normalize_text(stored_as_dict.get("artist", "")) == self.normalize_text(query.get("artist", "")) and
-                                    self.normalize_text(stored_as_dict.get("album", "")) == self.normalize_text(query.get("album", ""))):
-
-                                    logger.debug('Cache hit with deep normalized comparison')
-                                    cleaned_metadata = json.loads(stored_cleaned) if stored_cleaned else None
-                                    return (stored_rating_key, cleaned_metadata)
-                    except:
-                        # Skip any parsing errors
-                        pass
-
                 logger.debug('Cache miss for query: {}',
-                        self._sanitize_query_for_log(cache_key))
+                            self._sanitize_query_for_log(cache_key))
                 return None
 
         except Exception as e:
@@ -424,7 +382,7 @@ class Cache:
                 logger.debug('Skipping cache for empty query')
                 return None
 
-            # Generate normalized version of the query
+            # Also store normalized version
             normalized_key = self._make_cache_key(query)
 
             # Use -1 for negative cache entries (when plex_ratingkey is None)
@@ -435,56 +393,17 @@ class Cache:
 
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-
                 # Store both original and normalized versions
                 for key in [cache_key, normalized_key]:
                     cursor.execute(
                         'REPLACE INTO cache (query, plex_ratingkey, cleaned_query) VALUES (?, ?, ?)',
                         (str(key), rating_key, cleaned_json)
                     )
-
-                # Also store the cleaned metadata as its own entry if it exists
-                if cleaned_metadata:
-                    # Store cleaned metadata with full normalized key
-                    cleaned_key = self._make_cache_key(cleaned_metadata)
-                    cursor.execute(
-                        'REPLACE INTO cache (query, plex_ratingkey, cleaned_query) VALUES (?, ?, ?)',
-                        (str(cleaned_key), rating_key, None)
-                    )
-                    logger.debug('Cached cleaned metadata with key: {}', cleaned_key)
-
-                    # Also store with original album name preserved but normalized title/artist
-                    if isinstance(cleaned_metadata, dict) and cleaned_metadata.get('album'):
-                        # This key preserves the full album name as-is
-                        preserved_album_key = json.dumps([
-                            ["album", cleaned_metadata.get('album', '')],  # Keep original album
-                            ["artist", self.normalize_text(cleaned_metadata.get("artist", ""))],
-                            ["title", self.normalize_text(cleaned_metadata.get("title", ""))]
-                        ])
-                        cursor.execute(
-                            'REPLACE INTO cache (query, plex_ratingkey, cleaned_query) VALUES (?, ?, ?)',
-                            (str(preserved_album_key), rating_key, None)
-                        )
-                        logger.debug('Cached with preserved album name: {}', preserved_album_key)
-
-                        # Additionally store a version with just title and artist (no album)
-                        # This helps when album names completely differ
-                        title_artist_key = json.dumps([
-                            ["album", ""],
-                            ["artist", self.normalize_text(cleaned_metadata.get("artist", ""))],
-                            ["title", self.normalize_text(cleaned_metadata.get("title", ""))]
-                        ])
-                        cursor.execute(
-                            'REPLACE INTO cache (query, plex_ratingkey, cleaned_query) VALUES (?, ?, ?)',
-                            (str(title_artist_key), rating_key, None)
-                        )
-                        logger.debug('Cached title+artist only: {}', title_artist_key)
-
                 conn.commit()
                 logger.debug('Cached result for query: "{}" (rating_key: {}, cleaned: {})',
-                        self._sanitize_query_for_log(cache_key),
-                        rating_key,
-                        cleaned_metadata)
+                           self._sanitize_query_for_log(cache_key),
+                           rating_key,
+                           cleaned_metadata)
         except Exception as e:
             logger.error('Cache storage failed for query "{}": {}',
                         self._sanitize_query_for_log(query), str(e))
