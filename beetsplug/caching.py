@@ -312,13 +312,19 @@ class Cache:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
+
+                # For debugging
+                original_query_key = json.dumps(query) if isinstance(query, dict) else query
+                logger.debug('Looking up with original key: {}', original_query_key)
+
                 # Normalize the query for lookup
                 cache_key = self._make_cache_key(query)
+                logger.debug('Looking up with normalized key: {}', cache_key)
 
                 # Try exact match first
                 cursor.execute(
                     'SELECT plex_ratingkey, cleaned_query FROM cache WHERE query = ?',
-                    (json.dumps(query) if isinstance(query, dict) else query,)
+                    (original_query_key,)
                 )
                 row = cursor.fetchone()
 
@@ -357,13 +363,41 @@ class Cache:
                     cleaned_metadata = json.loads(cleaned_metadata_json) if cleaned_metadata_json else None
 
                     logger.debug('Cache hit for query: {} (rating_key: {}, cleaned: {})',
-                               self._sanitize_query_for_log(cache_key),
-                               plex_ratingkey,
-                               cleaned_metadata)
+                            self._sanitize_query_for_log(cache_key),
+                            plex_ratingkey,
+                            cleaned_metadata)
                     return (plex_ratingkey, cleaned_metadata)
 
+                # Additional attempt: Try with un-normalized keys but compared in a normalized way
+                cursor.execute('SELECT query, plex_ratingkey, cleaned_query FROM cache')
+                all_keys = cursor.fetchall()
+
+                for stored_key, stored_rating_key, stored_cleaned in all_keys:
+                    try:
+                        # Check if the stored key can be parsed as JSON
+                        if stored_key.startswith('[') or stored_key.startswith('{'):
+                            stored_dict = json.loads(stored_key)
+                            # If both are dicts, compare normalized versions
+                            if isinstance(stored_dict, list) and isinstance(query, dict):
+                                # Convert the stored list format [["album", "value"], ...] to dict
+                                stored_as_dict = {}
+                                for k, v in stored_dict:
+                                    stored_as_dict[k] = v
+
+                                # Compare normalized versions
+                                if (self.normalize_text(stored_as_dict.get("title", "")) == self.normalize_text(query.get("title", "")) and
+                                    self.normalize_text(stored_as_dict.get("artist", "")) == self.normalize_text(query.get("artist", "")) and
+                                    self.normalize_text(stored_as_dict.get("album", "")) == self.normalize_text(query.get("album", ""))):
+
+                                    logger.debug('Cache hit with deep normalized comparison')
+                                    cleaned_metadata = json.loads(stored_cleaned) if stored_cleaned else None
+                                    return (stored_rating_key, cleaned_metadata)
+                    except:
+                        # Skip any parsing errors
+                        pass
+
                 logger.debug('Cache miss for query: {}',
-                            self._sanitize_query_for_log(cache_key))
+                        self._sanitize_query_for_log(cache_key))
                 return None
 
         except Exception as e:
