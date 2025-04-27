@@ -1389,6 +1389,8 @@ class PlexSync(BeetsPlugin):
 
         # Check cache first
         cache_key = self.cache._make_cache_key(song)
+        self._log.debug("Generated cache key: {}", cache_key)
+        self._log.debug("Original song data: {}", song)
         cached_result = self.cache.get(cache_key)
         if cached_result is not None:
             if isinstance(cached_result, tuple):
