@@ -435,11 +435,22 @@ class Cache:
                         'REPLACE INTO cache (query, plex_ratingkey, cleaned_query) VALUES (?, ?, ?)',
                         (str(key), rating_key, cleaned_json)
                     )
+
+                # NEW PART: Also store the cleaned metadata as its own entry if it exists
+                if cleaned_metadata:
+                    # Create a cache key for the cleaned metadata
+                    cleaned_key = self._make_cache_key(cleaned_metadata)
+                    cursor.execute(
+                        'REPLACE INTO cache (query, plex_ratingkey, cleaned_query) VALUES (?, ?, ?)',
+                        (str(cleaned_key), rating_key, None)
+                    )
+                    logger.debug('Also cached cleaned metadata with key: {}', cleaned_key)
+
                 conn.commit()
                 logger.debug('Cached result for query: "{}" (rating_key: {}, cleaned: {})',
-                           self._sanitize_query_for_log(cache_key),
-                           rating_key,
-                           cleaned_metadata)
+                        self._sanitize_query_for_log(cache_key),
+                        rating_key,
+                        cleaned_metadata)
         except Exception as e:
             logger.error('Cache storage failed for query "{}": {}',
                         self._sanitize_query_for_log(query), str(e))
