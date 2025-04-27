@@ -356,6 +356,14 @@ class MusicSearchTools:
         - Song Title: The exact title of the song (not an album or artist name)
         - Artist Name: The primary artist or band who performed the song
         - Album Name: The album that contains this song (if mentioned)
+        IMPORTANT FORMATTING RULES:
+        Clean the album name by removing excessive details such as:
+        - Years and dates in any format (e.g., "Album Name (2020)", "Album Name - 2020")
+        - Soundtrack indicators (e.g., "(Soundtrack)", "[Original Score]", "OST")
+        - Movie references (e.g., "(From the Film)", "(Music from the Motion Picture)")
+        - Any parentheses or brackets with descriptive text
+
+        Return only the core album name without these extra details, cleaning up any trailing spaces or punctuation.
 
         If any information is not clearly stated in the search results, use the most likely value based on available context.
         If you cannot determine a value with reasonable confidence, return null for that field.
@@ -364,7 +372,7 @@ class MusicSearchTools:
         {{
             "title": "The song title or null if uncertain",
             "artist": "The artist name or null if uncertain",
-            "album": "The album name or null if uncertain"
+            "album": "The album name WITHOUT any years or null if uncertain"
         }}
         </instruction>
 
