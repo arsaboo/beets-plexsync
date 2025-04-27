@@ -226,6 +226,8 @@ class Cache:
             return ""
         # Convert to lowercase
         text = text.lower()
+        # Remove year markers like [1977]
+        text = re.sub(r'\s*\[\d{4}\]\s*$', '', text)
         # Remove featuring artists
         text = re.sub(r'\s*[\(\[]?(?:feat\.?|ft\.?|featuring)\s+[^\]\)]+[\]\)]?\s*$', '', text)
         # Remove any remaining parentheses or brackets at the end
