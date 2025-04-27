@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import textwrap
 from typing import Optional, Dict
 
 from beets import config
@@ -348,14 +349,16 @@ class MusicSearchTools:
 
     def _extract_song_details(self, content: str, song_name: str) -> SongBasicInfo:
         """Extract structured song details from search results."""
-        prompt = f"""
+        prompt = textwrap.dedent(f"""
         <instruction>
-        Based on the search results below, extract specific information about the song "{song_name}".
+        IMPORTANT: Analyze ONLY the search results data below to extract accurate information about a song.
+        The query "{song_name}" may contain incorrect or incomplete information - DO NOT rely on the query itself for extracting details.
 
-        Return ONLY these fields in a structured JSON format:
-        - Song Title: The exact title of the song (not an album or artist name)
+        Based EXCLUSIVELY on the search results content, extract these fields:
+        - Song Title: The exact title of the song as mentioned in the search results (not the query)
         - Artist Name: The primary artist or band who performed the song
         - Album Name: The album that contains this song (if mentioned)
+
         IMPORTANT FORMATTING RULES:
         Clean the album name by removing excessive details such as:
         - Years and dates in any format (e.g., "Album Name (2020)", "Album Name - 2020")
@@ -370,16 +373,16 @@ class MusicSearchTools:
 
         Format your response as valid JSON with these exact keys:
         {{
-            "title": "The song title or null if uncertain",
+            "title": "The song title based ONLY on search results, or null if uncertain",
             "artist": "The artist name or null if uncertain",
-            "album": "The album name WITHOUT any years or null if uncertain"
+            "album": "The cleaned album name or null if uncertain"
         }}
         </instruction>
 
         <search_results>
         {content}
         </search_results>
-        """
+        """)
 
         logger.debug("Sending to Ollama for parsing - Song: {0}", song_name)
         content_preview = content[:1000] if len(content) > 1000 else content
