@@ -2,8 +2,6 @@
 
 import json
 import logging
-import os
-import re
 import textwrap
 from typing import Optional, Dict
 
@@ -50,7 +48,7 @@ except ImportError:
 config['llm'].add({
     'search': {
         'provider': 'ollama',
-        'model': 'qwen2.5:latest',
+        'model': 'qwen3:latest',
         'ollama_host': 'http://localhost:11434',
         'tavily_api_key': '',
         'searxng_host': '',
@@ -87,7 +85,7 @@ class MusicSearchTools:
             exa_api_key: API key for Exa search
         """
         self.name = "music_search_tools"
-        self.model_id = model_id or "qwen2.5:latest"
+        self.model_id = model_id or "qwen3:latest"
         self.ollama_host = ollama_host or "http://localhost:11434"
 
         # Initialize Ollama agent for extraction (required for all search methods)
@@ -289,12 +287,6 @@ class MusicSearchTools:
         except concurrent.futures.TimeoutError:
             logger.warning(f"Exa search timed out for: {query}")
             return None
-        except Exception as http_err:
-            if http_err.response.status_code == 504:
-                logger.error(f"Exa API returned 504 Gateway Timeout for query: {query}")
-            else:
-                logger.error(f"HTTP error occurred during Exa search: {http_err}")
-            return None
         except Exception as e:
             logger.warning(f"Exa search failed: {e}")
             return None
@@ -345,6 +337,7 @@ class MusicSearchTools:
 
                 return {"source": "tavily", "content": str(response)}
 
+        # Return error if all search methods failed
         return {"source": "error", "content": f"No results for '{song_name}'"}
 
     def _extract_song_details(self, content: str, song_name: str) -> SongBasicInfo:
@@ -395,8 +388,8 @@ class MusicSearchTools:
             return response.content
         except Exception as e:
             logger.error("Ollama extraction failed: {0}", str(e))
-            # Return None for artist and album on failure
-            return SongBasicInfo(title=song_name, artist=None, album=None)
+            # Return empty strings for artist and album on failure to avoid validation errors
+            return SongBasicInfo(title=song_name, artist="", album=None)
 
     def search_song_info(self, song_name: str) -> Dict:
         """Search for song information using available search engines."""
@@ -428,7 +421,7 @@ def initialize_search_toolkit():
     # Get configuration from beets config
     tavily_api_key = config["llm"]["search"]["tavily_api_key"].get()
     searxng_host = config["llm"]["search"]["searxng_host"].get()
-    model_id = config["llm"]["search"]["model"].get() or "qwen2.5:latest"
+    model_id = config["llm"]["search"]["model"].get() or "qwen3:latest"
     ollama_host = config["llm"]["search"]["ollama_host"].get() or "http://localhost:11434"
     exa_api_key = config["llm"]["search"]["exa_api_key"].get()
 
@@ -478,7 +471,7 @@ def search_track_info(query: str) -> Dict:
 
     if not toolkit:
         logger.error("Search toolkit unavailable. Install agno and configure search engines.")
-        return {"title": query, "artist": None, "album": None}
+        return {"title": query, "artist": "", "album": None}
 
     try:
         logger.info("Searching for track info: {0}", query)
@@ -486,15 +479,16 @@ def search_track_info(query: str) -> Dict:
 
         # Format response: Use extracted title if available, otherwise fallback to original query.
         # Pass through artist and album (which could be None if not found).
+        # Ensure artist is never None to prevent validation errors
         result = {
             "title": song_info.get("title") or query, # Use query if title is None or empty
             "album": song_info.get("album"),
-            "artist": song_info.get("artist")
+            "artist": song_info.get("artist") or ""  # Default to empty string to avoid None
         }
 
         logger.info("Found track info: {}", result)
         return result
     except Exception as e:
         logger.error("Error in agent-based search: {0}", str(e))
-        # General fallback: use original query for title
-        return {"title": query, "artist": None, "album": None}
+        # General fallback: use original query for title and empty string for artist to avoid validation errors
+        return {"title": query, "artist": "", "album": None}
