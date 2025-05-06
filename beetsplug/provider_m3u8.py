@@ -1,5 +1,4 @@
 import logging
-import os
 from pathlib import Path
 
 _log = logging.getLogger('beets.plexsync.m3u8')
@@ -19,7 +18,7 @@ def import_m3u8_playlist(filepath, cache=None):
     if cache:
         cached_data = cache.get_playlist_cache(playlist_id, 'm3u8')
         if cached_data:
-            _log.info(f"Using cached M3U8 playlist data")
+            _log.info("Using cached M3U8 playlist data")
             return cached_data
 
     song_list = []
