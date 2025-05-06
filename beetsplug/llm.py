@@ -2,8 +2,7 @@
 
 import json
 import logging
-import os
-import re
+import textwrap
 from typing import Optional, Dict
 
 from beets import config
@@ -49,7 +48,7 @@ except ImportError:
 config['llm'].add({
     'search': {
         'provider': 'ollama',
-        'model': 'qwen2.5:latest',
+        'model': 'qwen3:latest',
         'ollama_host': 'http://localhost:11434',
         'tavily_api_key': '',
         'searxng_host': '',
@@ -67,9 +66,9 @@ class SongBasicInfo(BaseModel):
     @field_validator('title', 'artist', 'album', mode='before')
     @classmethod
     def default_unknown(cls, v):
-        if not v or not isinstance(v, str):
-            return "Unknown"
-        return v.strip() if v.strip() else "Unknown"
+        if not v or not isinstance(v, str) or not v.strip():
+            return None  # Return None instead of "Unknown"
+        return v.strip()
 
 
 class MusicSearchTools:
@@ -86,7 +85,7 @@ class MusicSearchTools:
             exa_api_key: API key for Exa search
         """
         self.name = "music_search_tools"
-        self.model_id = model_id or "qwen2.5:latest"
+        self.model_id = model_id or "qwen3:latest"
         self.ollama_host = ollama_host or "http://localhost:11434"
 
         # Initialize Ollama agent for extraction (required for all search methods)
@@ -338,34 +337,47 @@ class MusicSearchTools:
 
                 return {"source": "tavily", "content": str(response)}
 
+        # Return error if all search methods failed
         return {"source": "error", "content": f"No results for '{song_name}'"}
 
     def _extract_song_details(self, content: str, song_name: str) -> SongBasicInfo:
         """Extract structured song details from search results."""
-        prompt = f"""
+        prompt = textwrap.dedent(f"""
         <instruction>
-        Based on the search results below, extract specific information about the song "{song_name}".
+        IMPORTANT: Analyze ONLY the search results data below to extract accurate information about a song.
+        The query "{song_name}" may contain incorrect or incomplete information - DO NOT rely on the query itself for extracting details.
 
-        Return ONLY these fields in a structured JSON format:
-        - Song Title: The exact title of the song (not an album or artist name)
+        Based EXCLUSIVELY on the search results content, extract these fields:
+        - Song Title: The exact title of the song as mentioned in the search results (not the query)
         - Artist Name: The primary artist or band who performed the song
         - Album Name: The album that contains this song (if mentioned)
 
+        IMPORTANT CLEANING RULES:
+        For album and title, remove:
+        - Years/dates (e.g., "(2020)", "- 2020")
+        - Soundtrack/OST indicators (e.g., "(Soundtrack)", "[Original Score]", "OST")
+        - Movie/film references (e.g., "(From the Film)", "(Music from the Motion Picture)")
+        - Parentheses/brackets with descriptive text
+        - Descriptors like remix, extended, deluxe edition, etc.
+        - Trailing spaces or punctuation
+
+        Return only the core album name without these extra details, cleaning up any trailing spaces or punctuation.
+
         If any information is not clearly stated in the search results, use the most likely value based on available context.
-        If you cannot determine a value with reasonable confidence, respond with "Unknown" for that field.
+        If you cannot determine a value with reasonable confidence, return null for that field.
 
         Format your response as valid JSON with these exact keys:
         {{
-            "title": "The song title",
-            "artist": "The artist name",
-            "album": "The album name"
+            "title": "The song title based ONLY on search results, or null if uncertain",
+            "artist": "The artist name or null if uncertain",
+            "album": "The cleaned album name or null if uncertain"
         }}
         </instruction>
 
         <search_results>
         {content}
         </search_results>
-        """
+        """)
 
         logger.debug("Sending to Ollama for parsing - Song: {0}", song_name)
         content_preview = content[:1000] if len(content) > 1000 else content
@@ -376,7 +388,8 @@ class MusicSearchTools:
             return response.content
         except Exception as e:
             logger.error("Ollama extraction failed: {0}", str(e))
-            return SongBasicInfo(title=song_name, artist="Unknown")
+            # Return empty strings for artist and album on failure to avoid validation errors
+            return SongBasicInfo(title=song_name, artist="", album=None)
 
     def search_song_info(self, song_name: str) -> Dict:
         """Search for song information using available search engines."""
@@ -385,9 +398,9 @@ class MusicSearchTools:
         if (search_results["source"] == "error"):
             return {
                 "title": song_name,
-                "artist": "Unknown",
+                "artist": None,
                 "album": None,
-                "error": search_results["content"]
+                "search_source": "error"
             }
 
         song_details = self._extract_song_details(search_results["content"], song_name).model_dump()
@@ -408,7 +421,7 @@ def initialize_search_toolkit():
     # Get configuration from beets config
     tavily_api_key = config["llm"]["search"]["tavily_api_key"].get()
     searxng_host = config["llm"]["search"]["searxng_host"].get()
-    model_id = config["llm"]["search"]["model"].get() or "qwen2.5:latest"
+    model_id = config["llm"]["search"]["model"].get() or "qwen3:latest"
     ollama_host = config["llm"]["search"]["ollama_host"].get() or "http://localhost:11434"
     exa_api_key = config["llm"]["search"]["exa_api_key"].get()
 
@@ -458,22 +471,24 @@ def search_track_info(query: str) -> Dict:
 
     if not toolkit:
         logger.error("Search toolkit unavailable. Install agno and configure search engines.")
-        return {"title": query, "artist": "Unknown", "album": None}
+        return {"title": query, "artist": "", "album": None}
 
     try:
         logger.info("Searching for track info: {0}", query)
         song_info = toolkit.search_song_info(query)
 
-        # Format response to match expected structure
+        # Format response: Use extracted title if available, otherwise fallback to original query.
+        # Pass through artist and album (which could be None if not found).
+        # Ensure artist is never None to prevent validation errors
         result = {
-            "title": song_info.get("title"),
+            "title": song_info.get("title") or query, # Use query if title is None or empty
             "album": song_info.get("album"),
-            "artist": song_info.get("artist")
+            "artist": song_info.get("artist") or ""  # Default to empty string to avoid None
         }
 
-        # Use beets' numbered placeholder style for logging
         logger.info("Found track info: {}", result)
         return result
     except Exception as e:
         logger.error("Error in agent-based search: {0}", str(e))
-        return {"title": query, "artist": "Unknown", "album": None}
+        # General fallback: use original query for title and empty string for artist to avoid validation errors
+        return {"title": query, "artist": "", "album": None}

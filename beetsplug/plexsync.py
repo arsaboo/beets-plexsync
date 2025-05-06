@@ -10,6 +10,7 @@ Put something like the following in your config.yaml to configure:
 import asyncio
 import difflib
 import json
+import logging  # Add logging import
 import os
 import re
 import time
@@ -20,13 +21,14 @@ from typing import List
 
 import confuse
 import dateutil.parser
+import enlighten  # Add enlighten library import
 import openai
 import requests
 import spotipy
 from beets import config, ui
 from beets.dbcore import types
 from beets.dbcore.query import MatchQuery
-from beets.library import Item, DateType  # Added Item to import
+from beets.library import DateType, Item  # Added Item to import
 from beets.plugins import BeetsPlugin
 from beets.ui import input_, print_
 from bs4 import BeautifulSoup
@@ -40,9 +42,16 @@ from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
 
 from beetsplug.caching import Cache
 from beetsplug.llm import search_track_info
-from beetsplug.matching import plex_track_distance, clean_string
-import enlighten  # Add enlighten library import
-import logging  # Add logging import
+from beetsplug.matching import clean_string, plex_track_distance
+from beetsplug.provider_gaana import import_gaana_playlist
+from beetsplug.provider_tidal import import_tidal_playlist
+from beetsplug.provider_youtube import import_yt_playlist, import_yt_search
+from beetsplug.provider_apple import import_apple_playlist
+from beetsplug.provider_jiosaavn import import_jiosaavn_playlist
+from beetsplug.provider_m3u8 import import_m3u8_playlist
+from beetsplug.provider_post import import_post_playlist
+from beetsplug.helpers import parse_title, clean_album_name
+
 
 class Song(BaseModel):
     title: str
@@ -220,14 +229,13 @@ class PlexSync(BeetsPlugin):
 
     def process_spotify_track(self, track):
         """Process a single Spotify track into a standardized format."""
-        try:
-            # Find and store the song title
+        try:            # Find and store the song title
             if ('From "' in track['name']) or ("From &quot" in track['name']):
                 title_orig = track['name'].replace("&quot;", '"')
-                title, album = self.parse_title(title_orig)
+                title, album = parse_title(title_orig)
             else:
                 title = track['name']
-                album = self.clean_album_name(track['album']['name'])
+                album = clean_album_name(track['album']['name'])
 
             # Get year if available
             try:
@@ -378,145 +386,10 @@ class PlexSync(BeetsPlugin):
 
     def import_apple_playlist(self, url):
         """Import Apple Music playlist with caching."""
-        # Generate cache key from URL
-        playlist_id = url.split('/')[-1]
-
-        # Check cache
-        cached_data = self.cache.get_playlist_cache(playlist_id, 'apple')
-        if (cached_data):
-            self._log.info("Using cached Apple Music playlist data")
-            return cached_data
-
-        song_list = []
-
-        try:
-            # Send a GET request to the URL and get the HTML content
-            response = requests.get(url, headers=self.headers)
-            content = response.text
-
-            # Create a BeautifulSoup object with the HTML content
-            soup = BeautifulSoup(content, "html.parser")
-            try:
-                data = soup.find("script", id="serialized-server-data").text
-            except AttributeError:
-                self._log.debug("Error parsing Apple Music playlist")
-                return None
-
-            # load the data as a JSON object
-            data = json.loads(data)
-
-            # Extract songs from the sections
-            try:
-                songs = data[0]["data"]["sections"][1]["items"]
-            except (KeyError, IndexError) as e:
-                self._log.error("Failed to extract songs from Apple Music data: {}", e)
-                return None
-
-            # Loop through each song element
-            for song in songs:
-                try:
-                    # Find and store the song title
-                    title = song["title"].strip()
-                    album = song["tertiaryLinks"][0]["title"]
-                    # Find and store the song artist
-                    artist = song["subtitleLinks"][0]["title"]
-                    # Create a dictionary with the song information
-                    song_dict = {
-                        "title": title.strip(),
-                        "album": album.strip(),
-                        "artist": artist.strip(),
-                    }
-                    # Append the dictionary to the list of songs
-                    song_list.append(song_dict)
-                except (KeyError, IndexError) as e:
-                    self._log.debug("Error processing song {}: {}", song.get("title", "Unknown"), e)
-                    continue
-
-            if (song_list):
-                self.cache.set_playlist_cache(playlist_id, 'apple', song_list)
-                self._log.info("Cached {} tracks from Apple Music playlist", len(song_list))
-
-        except Exception as e:
-            self._log.error("Error importing Apple Music playlist: {}", e)
-            return []
-
-        return song_list
-
+        return import_apple_playlist(url, self.cache, self.headers)
     def import_jiosaavn_playlist(self, url):
         """Import JioSaavn playlist with caching."""
-        playlist_id = url.split('/')[-1]
-
-        # Check cache first
-        cached_data = self.cache.get_playlist_cache(playlist_id, 'jiosaavn')
-        if (cached_data):
-            self._log.info("Using cached JioSaavn playlist data")
-            return cached_data
-
-        # Initialize empty song list
-        song_list = []
-
-        try:
-            loop = self.get_event_loop()
-
-            # Run the async operation and get results
-            data = loop.run_until_complete(
-                self.saavn.get_playlist_songs(url, page=1, limit=100)
-            )
-
-            if not data or "data" not in data or "list" not in data["data"]:
-                self._log.error("Invalid response from JioSaavn API")
-                return song_list
-
-            songs = data["data"]["list"]
-
-            for song in songs:
-                try:
-                    # Process song title
-                    if ('From "' in song["title"]) or ("From &quot" in song["title"]):
-                        title_orig = song["title"].replace("&quot;", '"')
-                        title, album = self.parse_title(title_orig)
-                    else:
-                        title = song["title"]
-                        album = self.clean_album_name(song["more_info"]["album"])
-
-                    # Get year if available
-                    year = song.get("year", None)
-
-                    # Get primary artist from artistMap
-                    try:
-                        artist = song["more_info"]["artistMap"]["primary_artists"][0]["name"]
-                    except (KeyError, IndexError):
-                        # Fallback to first featured artist if primary not found
-                        try:
-                            artist = song["more_info"]["artistMap"]["featured_artists"][0]["name"]
-                        except (KeyError, IndexError):
-                            # Skip if no artist found
-                            continue
-
-                    # Create song dictionary with cleaned data
-                    song_dict = {
-                        "title": title.strip(),
-                        "album": album.strip(),
-                        "artist": artist.strip(),
-                        "year": year,
-                    }
-
-                    song_list.append(song_dict)
-                    self._log.debug("Added song: {} - {}", song_dict["title"], song_dict["artist"])
-
-                except Exception as e:
-                    self._log.debug("Error processing JioSaavn song: {}", e)
-                    continue
-
-            # Cache successful results
-            if song_list:
-                self.cache.set_playlist_cache(playlist_id, 'jiosaavn', song_list)
-                self._log.info("Cached {} tracks from JioSaavn playlist", len(song_list))
-
-        except Exception as e:
-            self._log.error("Error importing JioSaavn playlist: {}", e)
-
-        return song_list
+        return import_jiosaavn_playlist(url, self.cache)
 
     def get_playlist_id(self, url):
         # split the url by "/"
@@ -839,42 +712,8 @@ class PlexSync(BeetsPlugin):
             plexplaylist2collection_cmd,
             plex2spotify_cmd,
             plex_smartplaylists_cmd,
-        ]
+        ]    # Using helper functions from helpers.py instead of class methods
 
-    def parse_title(self, title_orig):
-        if '(From "' in title_orig:
-            title = re.sub(r"\(From.*\)", "", title_orig)
-            album = re.sub(r'^[^"]+"|(?<!^)"[^"]+"|"[^"]+$', "", title_orig)
-        elif '[From "' in title_orig:
-            title = re.sub(r"\[From.*\]", "", title_orig)
-            album = re.sub(r'^[^"]+"|(?<!^)"[^"]+$', "", title_orig)
-        else:
-            title = title_orig
-            album = ""
-        return title.strip(), album.strip()
-
-    def clean_album_name(self, album_orig):
-        album_orig = (
-            album_orig.replace("(Original Motion Picture Soundtrack)", "")
-            .replace("- Hindi", "")
-            .strip()
-        )
-        if '(From "' in album_orig:
-            album = re.sub(r'^[^"]+"|(?<!^)"[^"]+$', "", album_orig)
-        elif '[From "' in album_orig:
-            album = re.sub(r'^[^"]+"|(?<!^)"[^"]+$', "", album_orig)
-        else:
-            album = album_orig
-        return album
-
-    saavn = JioSaavn()
-
-    # Define a function to get playlist songs by id
-    async def get_playlist_songs(playlist_url):
-        # Use the async method from saavn
-        songs = await saavn.get_playlist_songs(playlist_url)
-        # Return a list of songs with details
-        return songs
 
     def get_fuzzy_score(self, str1, str2):
         """Calculate fuzzy match score between two strings."""
@@ -1588,6 +1427,10 @@ class PlexSync(BeetsPlugin):
                     # Try with simplified title (no parentheses)
                     song["title"] = clean_string(song["title"])
                     tracks = self.music.searchTracks(**{"track.title": song["title"]}, limit=50)
+            if song["title"] is None or song["title"] == "" and song["album"] and song["artist"]:
+                tracks = self.music.searchTracks(
+                    **{"album.title": song["album"], "artist.title": song["artist"]}, limit=50
+                )
         except Exception as e:
             self._log.debug(
                 "Error searching for {} - {}. Error: {}",
@@ -1628,10 +1471,15 @@ class PlexSync(BeetsPlugin):
 
             cleaned_metadata = search_track_info(search_query)
             if cleaned_metadata:
+                # Use original value if LLM returns None for a field
+                cleaned_title = cleaned_metadata.get("title")
+                cleaned_album = cleaned_metadata.get("album")
+                cleaned_artist = cleaned_metadata.get("artist")
+
                 cleaned_song = {
-                    "title": cleaned_metadata.get("title", song["title"]),
-                    "album": cleaned_metadata.get("album", song["album"]),
-                    "artist": cleaned_metadata.get("artist", song["artist"])
+                    "title": cleaned_title if cleaned_title is not None else song["title"],
+                    "album": cleaned_album if cleaned_album is not None else song.get("album"),
+                    "artist": cleaned_artist if cleaned_artist is not None else song.get("artist")
                 }
                 self._log.debug("Using LLM cleaned metadata: {}", cleaned_song)
 
@@ -2064,114 +1912,19 @@ class PlexSync(BeetsPlugin):
 
     def import_yt_playlist(self, url):
         """Import YouTube playlist with caching."""
-        # Generate cache key from URL
-        playlist_id = url.split('list=')[-1].split('&')[0]  # Extract playlist ID from URL
-
-        # Check cache
-        cached_data = self.cache.get_playlist_cache(playlist_id, 'youtube')
-        if (cached_data):
-            self._log.info("Using cached YouTube playlist data")
-            return cached_data
-
-        try:
-            from beetsplug.youtube import YouTubePlugin
-        except ModuleNotFoundError:
-            self._log.error("YouTube plugin not installed")
-            return None
-
-        try:
-            ytp = YouTubePlugin()
-            song_list = ytp.import_youtube_playlist(url)
-
-            # Cache successful results
-            if song_list:
-                self.cache.set_playlist_cache(playlist_id, 'youtube', song_list)
-                self._log.info("Cached {} tracks from YouTube playlist", len(song_list))
-
-            return song_list
-        except Exception as e:
-            self._log.error("Unable to initialize YouTube plugin. Error: {}", e)
-            return None
+        return import_yt_playlist(url, self.cache)
 
     def import_yt_search(self, query, limit):
-        try:
-            from beetsplug.youtube import YouTubePlugin
-        except ModuleNotFoundError:
-            self._log.error("YouTube plugin not installed")
-            return
-        try:
-            ytp = YouTubePlugin()
-        except Exception as e:
-            self._log.error("Unable to initialize YouTube plugin. Error: {}", e)
-            return
-        return ytp.import_youtube_search(query, limit)
+        """Import YouTube search results."""
+        return import_yt_search(query, limit, self.cache)
 
     def import_tidal_playlist(self, url):
         """Import Tidal playlist with caching."""
-        # Generate cache key from URL
-        playlist_id = url.split('/')[-1]
-
-        # Check cache
-        cached_data = self.cache.get_playlist_cache(playlist_id, 'tidal')
-        if (cached_data):
-            self._log.info("Using cached Tidal playlist data")
-            return cached_data
-
-        try:
-            from beetsplug.tidal import TidalPlugin
-        except ModuleNotFoundError:
-            self._log.error("Tidal plugin not installed")
-            return None
-
-        try:
-            tidal = TidalPlugin()
-            song_list = tidal.import_tidal_playlist(url)
-
-            # Cache successful results
-            if song_list:
-                self.cache.set_playlist_cache(playlist_id, 'tidal', song_list)
-                self._log.info("Cached {} tracks from Tidal playlist", len(song_list))
-
-            return song_list
-        except Exception as e:
-            self._log.error("Unable to initialize Tidal plugin. Error: {}", e)
-            return None
+        return import_tidal_playlist(url, self.cache)
 
     def import_gaana_playlist(self, url):
         """Import Gaana playlist with caching."""
-        # Generate cache key from URL
-        playlist_id = url.split('/')[-1]
-
-        # Check cache
-        cached_data = self.cache.get_playlist_cache(playlist_id, 'gaana')
-        if (cached_data):
-            self._log.info("Using cached Gaana playlist data")
-            return cached_data
-
-        try:
-            from beetsplug.gaana import GaanaPlugin
-        except ModuleNotFoundError:
-            self._log.error(
-                "Gaana plugin not installed. \
-                            See https://github.com/arsaboo/beets-gaana"
-            )
-            return None
-
-        try:
-            gaana = GaanaPlugin()
-        except Exception as e:
-            self._log.error("Unable to initialize Gaana plugin. Error: {}", e)
-            return None
-
-        # Get songs from Gaana
-        song_list = gaana.import_gaana_playlist(url)
-
-        # Cache successful results
-        if song_list:
-            self.cache.set_playlist_cache(playlist_id, 'gaana', song_list)
-            self._log.info("Cached {} tracks from Gaana playlist", len(song_list))
-
-        return song_list
+        return import_gaana_playlist(url, self.cache)
 
     def _plex2spotify(self, lib, playlist):
         """Transfer Plex playlist to Spotify using plex_lookup."""
@@ -3107,139 +2860,12 @@ class PlexSync(BeetsPlugin):
         self._log.info("Successfully updated {} playlist with {} tracks", playlist_name, len(selected_tracks))
 
     def import_m3u8_playlist(self, filepath):
-        playlist_id = str(Path(filepath).stem)
-
-        cached_data = self.cache.get_playlist_cache(playlist_id, 'm3u8')
-        if cached_data:
-            self._log.info("Using cached M3U8 playlist data")
-            return cached_data
-
-        song_list = []
-
-        try:
-            with open(filepath, 'r', encoding='utf-8') as f:
-                lines = [line.strip() for line in f if line.strip()]
-
-            i = 0
-            while i < len(lines):
-                line = lines[i]
-
-                if line.startswith('#EXTINF:'):
-                    meta = line.split(',', 1)[1]
-                    self._log.debug("EXTINF meta raw line: '{}'", meta)
-
-                    if ' - ' in meta:
-                        artist, title = meta.split(' - ', 1)
-                        artist, title = artist.strip(), title.strip()
-                        self._log.debug("Parsed EXTINF as artist='{}', title='{}'", artist, title)
-                    else:
-                        self._log.warning("EXTINF missing '-': '{}'", meta)
-                        artist, title = None, None
-
-                    current_song = {
-                        'artist': artist,
-                        'title': title,
-                        'album': None
-                    }
-
-                    # Optional EXTALB line
-                    next_idx = i + 1
-                    if next_idx < len(lines) and lines[next_idx].startswith('#EXTALB:'):
-                        album = lines[next_idx][8:].strip()
-                        current_song['album'] = album if album else None
-                        self._log.debug("Found album: '{}'", current_song['album'])
-                        next_idx += 1
-
-                    # Optional file path (we'll skip)
-                    if next_idx < len(lines) and not lines[next_idx].startswith('#'):
-                        next_idx += 1
-
-                    # Log before appending:
-                    self._log.debug("Appending song entry: {}", current_song)
-
-                    song_list.append(current_song.copy())
-                    i = next_idx - 1  # Set to the last processed line
-
-                i += 1
-
-            if song_list:
-                self.cache.set_playlist_cache(playlist_id, 'm3u8', song_list)
-                self._log.info("Cached {} tracks from M3U8 playlist", len(song_list))
-
-            return song_list
-
-        except Exception as e:
-            self._log.error("Error importing M3U8 playlist '{}': {}", filepath, e)
-            return []
+        """Import M3U8 playlist with caching."""
+        return import_m3u8_playlist(filepath, self.cache)
 
     def import_post_playlist(self, source_config):
         """Import playlist from a POST request endpoint with caching."""
-        # Generate cache key from URL in payload
-        playlist_url = source_config.get("payload", {}).get("playlist_url")
-        if not playlist_url:
-            self._log.error("No playlist_url provided in POST request payload")
-            return []
-
-        playlist_id = playlist_url.split('/')[-1]
-
-        # Check cache
-        cached_data = self.cache.get_playlist_cache(playlist_id, 'post')
-        if (cached_data):
-            self._log.info("Using cached POST request playlist data")
-            return cached_data
-
-        server_url = source_config.get("server_url")
-        if not server_url:
-            self._log.error("No server_url provided for POST request")
-            return []
-
-        headers = source_config.get("headers", {})
-        payload = source_config.get("payload", {})
-
-        try:
-            response = requests.post(server_url, headers=headers, json=payload)
-            response.raise_for_status()  # Raise exception for non-200 status codes
-
-            data = response.json()
-            if not isinstance(data, dict) or "song_list" not in data:
-                self._log.error("Invalid response format. Expected 'song_list' in JSON response")
-                return []
-
-            # Convert response to our standard format
-            song_list = []
-            for song in data["song_list"]:
-                song_dict = {
-                    "title": song.get("title", "").strip(),
-                    "artist": song.get("artist", "").strip(),
-                    "album": song.get("album", "").strip() if song.get("album") else None,
-                }
-                # Add year if available
-                if "year" in song and song["year"]:
-                    try:
-                        year = int(song["year"])
-                        song_dict["year"] = year
-                    except (ValueError, TypeError):
-                        pass
-
-                if song_dict["title"] and song_dict["artist"]:  # Only add if we have minimum required fields
-                    song_list.append(song_dict)
-
-            # Cache successful results
-            if song_list:
-                self.cache.set_playlist_cache(playlist_id, 'post', song_list)
-                self._log.info("Cached {} tracks from POST request playlist", len(song_list))
-
-            return song_list
-
-        except requests.exceptions.RequestException as e:
-            self._log.error("Error making POST request: {}", e)
-            return []
-        except ValueError as e:
-            self._log.error("Error parsing JSON response: {}", e)
-            return []
-        except Exception as e:
-            self._log.error("Unexpected error during POST request: {}", e)
-            return []
+        return import_post_playlist(source_config, self.cache)
 
     def generate_imported_playlist(self, lib, playlist_config, plex_lookup=None):
         """Generate a playlist by importing from external sources."""
