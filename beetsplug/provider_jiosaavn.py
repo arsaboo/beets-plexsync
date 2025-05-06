@@ -1,5 +1,6 @@
 import logging
 import re
+import asyncio
 from jiosaavn import JioSaavn
 from beetsplug.helpers import parse_title, clean_album_name
 
@@ -22,6 +23,7 @@ async def get_playlist_songs(playlist_url):
     # Return a list of songs with details
     return songs
 
+
 def import_jiosaavn_playlist(url, cache=None):
     """Import JioSaavn playlist with caching.
 
@@ -37,30 +39,33 @@ def import_jiosaavn_playlist(url, cache=None):
     # Check cache first
     if cache:
         cached_data = cache.get_playlist_cache(playlist_id, 'jiosaavn')
-        if (cached_data):
-            _log.info(f"Using cached JioSaavn playlist data")
+        if cached_data:
+            _log.info("Using cached JioSaavn playlist data")
             return cached_data
 
-    # Initialize empty song list
     song_list = []
 
     try:
-        import asyncio
-
-        # Get or create an event loop
         try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
-        # Run the async operation and get results
-        data = loop.run_until_complete(
-            get_playlist_songs(url)
-        )
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # If already running, schedule the coroutine and wait for result
+                import concurrent.futures
+                future = asyncio.ensure_future(get_playlist_songs(url))
+                # Use run_coroutine_threadsafe for thread-safe execution
+                data = asyncio.run_coroutine_threadsafe(get_playlist_songs(url), loop).result()
+            else:
+                # If not running, just run until complete
+                data = loop.run_until_complete(get_playlist_songs(url))
+        except (RuntimeError, AssertionError):
+            # No event loop or closed, create a new one
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
+            data = new_loop.run_until_complete(get_playlist_songs(url))
+            new_loop.close()
 
         if not data or "data" not in data or "list" not in data["data"]:
-            _log.error(f"Invalid response from JioSaavn API")
+            _log.error("Invalid response from JioSaavn API")
             return song_list
 
         songs = data["data"]["list"]

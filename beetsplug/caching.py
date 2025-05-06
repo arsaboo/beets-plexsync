@@ -1,6 +1,5 @@
 import json
 import logging
-import os
 import re
 import sqlite3
 from datetime import datetime, timedelta
@@ -8,6 +7,7 @@ from datetime import datetime, timedelta
 from plexapi.audio import Track
 from plexapi.server import PlexServer
 from plexapi.video import Video
+from xml.etree.ElementTree import Element
 
 # Initialize logger with plexsync prefix
 logger = logging.getLogger('beets')
@@ -313,10 +313,16 @@ class Cache:
                 # Normalize the query for lookup
                 cache_key = self._make_cache_key(query)
 
-                # Try exact match first
+                # Use the same datetime_handler as set() method for consistent serialization
+                def datetime_handler(obj):
+                    if isinstance(obj, datetime):
+                        return obj.isoformat()
+                    raise TypeError(f'Object of type {type(obj)} is not JSON serializable')
+
+                # Try exact match first using same serialization as set() method
                 cursor.execute(
                     'SELECT plex_ratingkey, cleaned_query FROM cache WHERE query = ?',
-                    (json.dumps(query) if isinstance(query, dict) else query,)
+                    (json.dumps(query, default=datetime_handler) if isinstance(query, dict) else query,)
                 )
                 row = cursor.fetchone()
 
