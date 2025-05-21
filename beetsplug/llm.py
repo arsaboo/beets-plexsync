@@ -301,7 +301,8 @@ class MusicSearchTools:
 
         # Use exa_answer to get AI-generated answers
         try:
-            response = exa_tool.exa_answer(query, text=True)
+            # Add timeout parameter to prevent indefinite waiting
+            response = exa_tool.exa_answer(query, text=True, timeout=10)
             return response
         except Exception as e:
             logger.warning(f"Exa answer failed: {e}")
