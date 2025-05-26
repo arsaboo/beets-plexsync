@@ -161,7 +161,7 @@ class MusicSearchTools:
         try:
             return Agent(
                 model=Ollama(id=self.model_id, host=self.ollama_host),
-                tools=[ExaTools(api_key=api_key)]
+                tools=[ExaTools(api_key=api_key, timeout=15)]
             )
         except Exception as e:
             logger.warning(f"Failed to initialize Exa agent: {e}")
@@ -261,31 +261,25 @@ class MusicSearchTools:
         query = f"{song_name} song album, title, and artist"
         logger.debug(f"Searching Exa for: {query}")
         try:
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(self._exa_search, query)
-                response = future.result(timeout=15)  # 15 second timeout
+            response = self._exa_search(query)
 
-                if response:
-                    try:
-                        # Parse the response as JSON
-                        results = json.loads(response) if isinstance(response, str) else response
+            if response:
+                try:
+                    # Parse the response as JSON
+                    results = json.loads(response) if isinstance(response, str) else response
 
-                        # Extract the answer from the response
-                        if isinstance(results, dict) and "answer" in results:
-                            logger.debug(f"AI Generated Answer from Exa: {results['answer'][:100]}...")
-                            return results["answer"]
+                    # Extract the answer from the response
+                    if isinstance(results, dict) and "answer" in results:
+                        logger.debug(f"AI Generated Answer from Exa: {results['answer'][:100]}...")
+                        return results["answer"]
 
-                        # Return raw response if we couldn't extract answer
-                        return str(response)
+                    # Return raw response if we couldn't extract answer
+                    return str(response)
 
-                    except (json.JSONDecodeError, TypeError) as e:
-                        logger.warning(f"Failed to process Exa response: {e}")
-                        return str(response)
+                except (json.JSONDecodeError, TypeError) as e:
+                    logger.warning(f"Failed to process Exa response: {e}")
+                    return str(response)
 
-                return None
-        except concurrent.futures.TimeoutError:
-            logger.warning(f"Exa search timed out for: {query}")
             return None
         except Exception as e:
             logger.warning(f"Exa search failed: {e}")
@@ -299,10 +293,8 @@ class MusicSearchTools:
             logger.warning("Exa tool not found in agent tools")
             return None
 
-        # Use exa_answer to get AI-generated answers
         try:
-            # Add timeout parameter to prevent indefinite waiting
-            response = exa_tool.exa_answer(query, text=True, timeout=10)
+            response = exa_tool.exa_answer(query, text=True)
             return response
         except Exception as e:
             logger.warning(f"Exa answer failed: {e}")
