@@ -195,7 +195,7 @@ class MusicSearchTools:
         Returns:
             String containing search results or None if search failed
         """
-        query = f"{song_name} song album, title, and artist"
+        query = f"{song_name} song album, title, and artist. Please respond in English only."
         logger.debug(f"SearxNG querying: {query}")
         try:
             response = self.searxng_agent.run(query, timeout=20)
@@ -213,7 +213,7 @@ class MusicSearchTools:
         Returns:
             Dictionary containing search results or None if search failed
         """
-        query = f"{song_name} song album, title, and artist"
+        query = f"{song_name} song album, title, and artist. Please respond in English only."
         logger.debug(f"Tavily querying: {query}")
 
         try:
@@ -258,7 +258,7 @@ class MusicSearchTools:
         Returns:
             String containing AI-generated answer or None if search failed
         """
-        query = f"{song_name} song album, title, and artist"
+        query = f"{song_name} song album, title, and artist. Please respond in English only."
         logger.debug(f"Searching Exa for: {query}")
         try:
             response = self._exa_search(query)
@@ -328,9 +328,7 @@ class MusicSearchTools:
                     content = json.dumps(response["results"])
                     return {"source": "tavily", "content": content}
 
-                return {"source": "tavily", "content": str(response)}
-
-        # Return error if all search methods failed
+                return {"source": "tavily", "content": str(response)}        # Return error if all search methods failed
         return {"source": "error", "content": f"No results for '{song_name}'"}
 
     def _extract_song_details(self, content: str, song_name: str) -> SongBasicInfo:
