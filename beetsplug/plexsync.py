@@ -7,24 +7,25 @@ Put something like the following in your config.yaml to configure:
         token: token
 """
 
-import asyncio
-import difflib
-import json
-import logging  # Add logging import
+import logging
 import os
+import asyncio
+import random
 import re
 import time
+import difflib
+import json
+import spotipy
+import numpy as np
+import confuse
+import enlighten
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List
 
-import confuse
 import dateutil.parser
-import enlighten  # Add enlighten library import
-import openai
 import requests
-import spotipy
 from beets import config, ui
 from beets.dbcore import types
 from beets.dbcore.query import MatchQuery

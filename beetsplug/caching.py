@@ -9,7 +9,6 @@ from plexapi.server import PlexServer
 from plexapi.video import Video
 from xml.etree.ElementTree import Element
 
-# Initialize logger with plexsync prefix
 logger = logging.getLogger('beets')
 
 class PlexJSONEncoder(json.JSONEncoder):
@@ -21,7 +20,7 @@ class PlexJSONEncoder(json.JSONEncoder):
             try:
                 encoded = {
                     '_type': obj.__class__.__name__,
-                    'plex_ratingkey': getattr(obj, 'ratingKey', None),  # Use ratingKey from Plex but encode as plex_ratingkey
+                    'plex_ratingkey': getattr(obj, 'ratingKey', None),
                     'title': getattr(obj, 'title', ''),
                     'parentTitle': getattr(obj, 'parentTitle', ''),
                     'originalTitle': getattr(obj, 'originalTitle', ''),
@@ -49,7 +48,7 @@ class Cache:
         self.plugin = plugin_instance
         logger.debug('Initializing cache at: {}', db_path)
         self._initialize_db()
-        self._initialize_spotify_cache()  # Initialize without migration
+        self._initialize_spotify_cache()
 
     def _initialize_db(self):
         """Initialize the SQLite database."""
@@ -246,63 +245,19 @@ class Cache:
                 "artist": self.normalize_text(query_data.get("artist", "")),
                 "album": self.normalize_text(query_data.get("album", ""))
             }
-            # Create a consistent string representation without using sorted()
-            # which was causing title and artist to be swapped
-            key_str = json.dumps([
-                ["album", key_data["album"]],
-                ["artist", key_data["artist"]],
-                ["title", key_data["title"]]
-            ])
+            # Create a simple pipe-separated key that's more readable and consistent
+            key_str = f"{key_data['title']}|{key_data['artist']}|{key_data['album']}"
             logger.debug('_make_cache_key output: {}', key_str)
             return key_str
         return str(query_data)
 
     def _verify_track_exists(self, plex_ratingkey, query):
-        """Verify track exists, checking both original and cleaned metadata."""
+        """Verify track exists in Plex."""
         try:
             # First try direct lookup
             self.plugin.music.fetchItem(plex_ratingkey)
             return True
         except Exception:
-            # If direct lookup fails, check if we have cleaned metadata
-            if self.plugin.search_llm and self.plugin.config["plexsync"]["use_llm_search"].get(bool):
-                try:
-                    # Create search query from available metadata
-                    search_query = ""
-                    if isinstance(query, dict):
-                        parts = []
-                        if query.get("title"): parts.append(query["title"])
-                        if query.get("artist"): parts.append(f"by {query['artist']}")
-                        if query.get("album"): parts.append(f"from {query['album']}")
-                        search_query = " ".join(parts)
-                    else:
-                        search_query = str(query)
-
-                    # Get cleaned metadata
-                    cleaned = self.plugin.search_track_info(search_query)
-                    if cleaned:
-                        # Look for cache entry with cleaned metadata
-                        cleaned_key = self._make_cache_key({
-                            "title": cleaned.get("title", ""),
-                            "album": cleaned.get("album", ""),
-                            "artist": cleaned.get("artist", "")
-                        })
-                        # Check if we have a valid cache entry with cleaned metadata
-                        with sqlite3.connect(self.db_path) as conn:
-                            cursor = conn.cursor()
-                            cursor.execute(
-                                'SELECT plex_ratingkey FROM cache WHERE query = ?',
-                                (cleaned_key,)
-                            )
-                            row = cursor.fetchone()
-                            if row and row[0] != -1:
-                                try:
-                                    self.plugin.music.fetchItem(row[0])
-                                    return True
-                                except Exception:
-                                    pass
-                except Exception as e:
-                    logger.debug('Error checking cleaned metadata: {}', e)
             return False
 
     def get(self, query):
@@ -310,64 +265,71 @@ class Cache:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                # Normalize the query for lookup
-                cache_key = self._make_cache_key(query)
 
-                # Use the same datetime_handler as set() method for consistent serialization
-                def datetime_handler(obj):
-                    if isinstance(obj, datetime):
-                        return obj.isoformat()
-                    raise TypeError(f'Object of type {type(obj)} is not JSON serializable')
+                # Try multiple key formats for backward compatibility
+                search_keys = []
 
-                # Try exact match first using same serialization as set() method
-                cursor.execute(
-                    'SELECT plex_ratingkey, cleaned_query FROM cache WHERE query = ?',
-                    (json.dumps(query, default=datetime_handler) if isinstance(query, dict) else query,)
-                )
-                row = cursor.fetchone()
+                if isinstance(query, dict):
+                    # Primary: New simple pipe-separated format
+                    simple_key = self._make_cache_key(query)
+                    search_keys.append(simple_key)
 
-                if not row:
-                    # Try normalized match if exact match fails
+                    # Backward compatibility: Legacy JSON format
+                    def datetime_handler(obj):
+                        if isinstance(obj, datetime):
+                            return obj.isoformat()
+                        raise TypeError(f'Object of type {type(obj)} is not JSON serializable')
+
+                    legacy_key = json.dumps(query, default=datetime_handler)
+                    search_keys.append(legacy_key)
+
+                    # Backward compatibility: Old complex JSON array format
+                    key_data = {
+                        "title": self.normalize_text(query.get("title", "")),
+                        "artist": self.normalize_text(query.get("artist", "")),
+                        "album": self.normalize_text(query.get("album", ""))
+                    }
+                    old_format_key = json.dumps([
+                        ["album", key_data["album"]],
+                        ["artist", key_data["artist"]],
+                        ["title", key_data["title"]]
+                    ])
+                    search_keys.append(old_format_key)
+
+                    # Backward compatibility: Try with raw values too (no normalization)
+                    raw_key_data = {
+                        "title": query.get("title", ""),
+                        "artist": query.get("artist", ""),
+                        "album": query.get("album", "")
+                    }
+                    raw_pipe_key = f"{raw_key_data['title']}|{raw_key_data['artist']}|{raw_key_data['album']}"
+                    search_keys.append(raw_pipe_key)
+
+                else:
+                    # String query - use as-is
+                    search_keys.append(str(query))
+
+                # Try each key format
+                for search_key in search_keys:
                     cursor.execute(
                         'SELECT plex_ratingkey, cleaned_query FROM cache WHERE query = ?',
-                        (cache_key,)
+                        (search_key,)
                     )
                     row = cursor.fetchone()
 
-                    # If still not found and this is a dict with artist and title, try with swapped values
-                    if not row and isinstance(query, dict) and 'artist' in query and 'title' in query:
-                        # Try with artist and title swapped
-                        swapped_query = {
-                            'title': query.get('artist', ''),
-                            'artist': query.get('title', ''),
-                            'album': query.get('album', '')
-                        }
-                        swapped_key = self._make_cache_key(swapped_query)
+                    if row:
+                        plex_ratingkey, cleaned_metadata_json = row
+                        cleaned_metadata = json.loads(cleaned_metadata_json) if cleaned_metadata_json else None
 
-                        # Debug the swapped attempt
-                        logger.debug('Trying with swapped artist/title: {}', swapped_key)
-
-                        cursor.execute(
-                            'SELECT plex_ratingkey, cleaned_query FROM cache WHERE query = ?',
-                            (swapped_key,)
-                        )
-                        row = cursor.fetchone()
-
-                        if row:
-                            logger.debug('Cache hit with swapped artist/title')
-
-                if row:
-                    plex_ratingkey, cleaned_metadata_json = row
-                    cleaned_metadata = json.loads(cleaned_metadata_json) if cleaned_metadata_json else None
-
-                    logger.debug('Cache hit for query: {} (rating_key: {}, cleaned: {})',
-                               self._sanitize_query_for_log(cache_key),
-                               plex_ratingkey,
-                               cleaned_metadata)
-                    return (plex_ratingkey, cleaned_metadata)
+                        logger.debug('Cache hit for query: {} (key: {}, rating_key: {}, cleaned: {})',
+                                   self._sanitize_query_for_log(query),
+                                   search_key,
+                                   plex_ratingkey,
+                                   cleaned_metadata)
+                        return (plex_ratingkey, cleaned_metadata)
 
                 logger.debug('Cache miss for query: {}',
-                            self._sanitize_query_for_log(cache_key))
+                            self._sanitize_query_for_log(query))
                 return None
 
         except Exception as e:
@@ -375,21 +337,12 @@ class Cache:
             return None
 
     def set(self, query, plex_ratingkey, cleaned_metadata=None):
-        """Store both original and cleaned metadata in cache."""
+        """Store result in cache using both new and old key formats for future compatibility."""
         try:
             def datetime_handler(obj):
                 if isinstance(obj, datetime):
                     return obj.isoformat()
                 raise TypeError(f'Object of type {type(obj)} is not JSON serializable')
-
-            # Store the original query as-is
-            cache_key = json.dumps(query, default=datetime_handler) if isinstance(query, dict) else query
-            if not cache_key:
-                logger.debug('Skipping cache for empty query')
-                return None
-
-            # Also store normalized version
-            normalized_key = self._make_cache_key(query)
 
             # Use -1 for negative cache entries (when plex_ratingkey is None)
             rating_key = -1 if plex_ratingkey is None else int(plex_ratingkey)
@@ -397,31 +350,48 @@ class Cache:
             # Store cleaned metadata as JSON string
             cleaned_json = json.dumps(cleaned_metadata, default=datetime_handler) if cleaned_metadata else None
 
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                # Store both original and normalized versions
-                for key in [cache_key, normalized_key]:
+            # Store primary key format (simple pipe-separated)
+            if isinstance(query, dict):
+                primary_key = self._make_cache_key(query)
+
+                # Also store the legacy JSON format for backward compatibility
+                legacy_key = json.dumps(query, default=datetime_handler)
+
+                with sqlite3.connect(self.db_path) as conn:
+                    cursor = conn.cursor()
+
+                    # Store both primary and legacy formats
+                    for key in [primary_key, legacy_key]:
+                        cursor.execute(
+                            'REPLACE INTO cache (query, plex_ratingkey, cleaned_query) VALUES (?, ?, ?)',
+                            (str(key), rating_key, cleaned_json)
+                        )
+
+                    conn.commit()
+                    logger.debug('Cached result for query: "{}" (rating_key: {}, cleaned: {})',
+                               self._sanitize_query_for_log(primary_key),
+                               rating_key,
+                               cleaned_metadata)
+            else:
+                # String query
+                cache_key = str(query)
+                with sqlite3.connect(self.db_path) as conn:
+                    cursor = conn.cursor()
                     cursor.execute(
                         'REPLACE INTO cache (query, plex_ratingkey, cleaned_query) VALUES (?, ?, ?)',
-                        (str(key), rating_key, cleaned_json)
+                        (cache_key, rating_key, cleaned_json)
                     )
-                conn.commit()
-                logger.debug('Cached result for query: "{}" (rating_key: {}, cleaned: {})',
-                           self._sanitize_query_for_log(cache_key),
-                           rating_key,
-                           cleaned_metadata)
+                    conn.commit()
+                    logger.debug('Cached result for string query: "{}" (rating_key: {})',
+                               cache_key, rating_key)
+
         except Exception as e:
             logger.error('Cache storage failed for query "{}": {}',
                         self._sanitize_query_for_log(query), str(e))
             return None
 
     def get_playlist_cache(self, playlist_id, source):
-        """Get cached playlist data for any source.
-
-        Args:
-            playlist_id: Unique identifier for the playlist
-            source: Source platform (e.g., 'spotify', 'apple', 'jiosaavn')
-        """
+        """Get cached playlist data for any source."""
         try:
             # Clear expired entries first
             self.clear_expired_playlist_cache()
@@ -448,13 +418,7 @@ class Cache:
             return None
 
     def set_playlist_cache(self, playlist_id, source, data):
-        """Store playlist data in cache for any source.
-
-        Args:
-            playlist_id: Unique identifier for the playlist
-            source: Source platform (e.g., 'spotify', 'apple', 'jiosaavn')
-            data: Playlist data to cache
-        """
+        """Store playlist data in cache for any source."""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
@@ -479,7 +443,7 @@ class Cache:
         except Exception as e:
             logger.error('{} playlist cache storage failed: {}', source, e)
 
-    # Remove these methods as they're replaced by the generic versions above
+    # Legacy methods for backward compatibility
     def get_spotify_cache(self, playlist_id, cache_type='api'):
         """Legacy method - redirects to generic get_playlist_cache."""
         return self.get_playlist_cache(playlist_id, f'spotify_{cache_type}')
