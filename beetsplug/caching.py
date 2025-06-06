@@ -263,6 +263,9 @@ class Cache:
     def get(self, query):
         """Retrieve cached result for a given query."""
         try:
+            # Debug: show what's in cache for this query
+            self.debug_cache_keys(query)
+
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
 
@@ -370,7 +373,7 @@ class Cache:
             return None
 
     def set(self, query, plex_ratingkey, cleaned_metadata=None):
-        """Store result in cache using both new and old key formats for future compatibility."""
+        """Store result in cache using the ORIGINAL key format for compatibility."""
         try:
             def datetime_handler(obj):
                 if isinstance(obj, datetime):
@@ -383,23 +386,25 @@ class Cache:
             # Store cleaned metadata as JSON string
             cleaned_json = json.dumps(cleaned_metadata, default=datetime_handler) if cleaned_metadata else None
 
-            # Store primary key format (simple pipe-separated)
             if isinstance(query, dict):
-                primary_key = self._make_cache_key(query)
-
-                # Also store the legacy JSON format for backward compatibility
-                legacy_key = json.dumps(query, default=datetime_handler)
+                # Use the ORIGINAL complex JSON array format for compatibility
+                key_data = {
+                    "title": self.normalize_text(query.get("title", "")),
+                    "artist": self.normalize_text(query.get("artist", "")),
+                    "album": self.normalize_text(query.get("album", ""))
+                }
+                primary_key = json.dumps([
+                    ["album", key_data["album"]],
+                    ["artist", key_data["artist"]],
+                    ["title", key_data["title"]]
+                ])
 
                 with sqlite3.connect(self.db_path) as conn:
                     cursor = conn.cursor()
-
-                    # Store both primary and legacy formats
-                    for key in [primary_key, legacy_key]:
-                        cursor.execute(
-                            'REPLACE INTO cache (query, plex_ratingkey, cleaned_query) VALUES (?, ?, ?)',
-                            (str(key), rating_key, cleaned_json)
-                        )
-
+                    cursor.execute(
+                        'REPLACE INTO cache (query, plex_ratingkey, cleaned_query) VALUES (?, ?, ?)',
+                        (primary_key, rating_key, cleaned_json)
+                    )
                     conn.commit()
                     logger.debug('Cached result for query: "{}" (rating_key: {}, cleaned: {})',
                                self._sanitize_query_for_log(primary_key),
@@ -499,3 +504,39 @@ class Cache:
                 logger.info('Cleared {} entries from cache', count_before)
         except Exception as e:
             logger.error('Failed to clear cache: {}', e)
+
+    def debug_cache_keys(self, query):
+        """Debug method to see what cache keys exist for a query."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+
+                # Get all cache entries that might match
+                if isinstance(query, dict):
+                    title = self.normalize_text(query.get("title", ""))
+                    artist = self.normalize_text(query.get("artist", ""))
+
+                    logger.debug("=== CACHE DEBUG for title='{}', artist='{}', album='{}' ===",
+                               title, artist, query.get("album"))
+
+                    # Show all entries that contain the title or artist
+                    cursor.execute(
+                        'SELECT query, plex_ratingkey FROM cache WHERE query LIKE ? OR query LIKE ?',
+                        (f'%{title}%', f'%{artist}%')
+                    )
+                    rows = cursor.fetchall()
+
+                    logger.debug("Found {} potential cache matches:", len(rows))
+                    for i, (cached_query, rating_key) in enumerate(rows):
+                        logger.debug("  {}: key='{}' -> rating_key={}", i+1, cached_query, rating_key)
+                          # Try to parse if it's JSON
+                        try:
+                            parsed = json.loads(cached_query)
+                            logger.debug("      Parsed as JSON: {}", parsed)
+                        except Exception:
+                            logger.debug("      Not JSON format")
+
+                    logger.debug("=== END CACHE DEBUG ===")
+
+        except Exception as e:
+            logger.error('Cache debug failed: {}', e)
