@@ -161,7 +161,7 @@ class MusicSearchTools:
         try:
             return Agent(
                 model=Ollama(id=self.model_id, host=self.ollama_host),
-                tools=[ExaTools(api_key=api_key)]
+                tools=[ExaTools(api_key=api_key, timeout=15)]
             )
         except Exception as e:
             logger.warning(f"Failed to initialize Exa agent: {e}")
@@ -195,7 +195,7 @@ class MusicSearchTools:
         Returns:
             String containing search results or None if search failed
         """
-        query = f"{song_name} song album, title, and artist"
+        query = f"{song_name} song album, title, and artist. Please respond in English only."
         logger.debug(f"SearxNG querying: {query}")
         try:
             response = self.searxng_agent.run(query, timeout=20)
@@ -213,7 +213,7 @@ class MusicSearchTools:
         Returns:
             Dictionary containing search results or None if search failed
         """
-        query = f"{song_name} song album, title, and artist"
+        query = f"{song_name} song album, title, and artist. Please respond in English only."
         logger.debug(f"Tavily querying: {query}")
 
         try:
@@ -258,34 +258,28 @@ class MusicSearchTools:
         Returns:
             String containing AI-generated answer or None if search failed
         """
-        query = f"{song_name} song album, title, and artist"
+        query = f"{song_name} song album, title, and artist. Please respond in English only."
         logger.debug(f"Searching Exa for: {query}")
         try:
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(self._exa_search, query)
-                response = future.result(timeout=15)  # 15 second timeout
+            response = self._exa_search(query)
 
-                if response:
-                    try:
-                        # Parse the response as JSON
-                        results = json.loads(response) if isinstance(response, str) else response
+            if response:
+                try:
+                    # Parse the response as JSON
+                    results = json.loads(response) if isinstance(response, str) else response
 
-                        # Extract the answer from the response
-                        if isinstance(results, dict) and "answer" in results:
-                            logger.debug(f"AI Generated Answer from Exa: {results['answer'][:100]}...")
-                            return results["answer"]
+                    # Extract the answer from the response
+                    if isinstance(results, dict) and "answer" in results:
+                        logger.debug(f"AI Generated Answer from Exa: {results['answer'][:100]}...")
+                        return results["answer"]
 
-                        # Return raw response if we couldn't extract answer
-                        return str(response)
+                    # Return raw response if we couldn't extract answer
+                    return str(response)
 
-                    except (json.JSONDecodeError, TypeError) as e:
-                        logger.warning(f"Failed to process Exa response: {e}")
-                        return str(response)
+                except (json.JSONDecodeError, TypeError) as e:
+                    logger.warning(f"Failed to process Exa response: {e}")
+                    return str(response)
 
-                return None
-        except concurrent.futures.TimeoutError:
-            logger.warning(f"Exa search timed out for: {query}")
             return None
         except Exception as e:
             logger.warning(f"Exa search failed: {e}")
@@ -299,7 +293,6 @@ class MusicSearchTools:
             logger.warning("Exa tool not found in agent tools")
             return None
 
-        # Use exa_answer to get AI-generated answers
         try:
             response = exa_tool.exa_answer(query, text=True)
             return response
@@ -335,9 +328,7 @@ class MusicSearchTools:
                     content = json.dumps(response["results"])
                     return {"source": "tavily", "content": content}
 
-                return {"source": "tavily", "content": str(response)}
-
-        # Return error if all search methods failed
+                return {"source": "tavily", "content": str(response)}        # Return error if all search methods failed
         return {"source": "error", "content": f"No results for '{song_name}'"}
 
     def _extract_song_details(self, content: str, song_name: str) -> SongBasicInfo:

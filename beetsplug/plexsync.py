@@ -2370,56 +2370,36 @@ class PlexSync(BeetsPlugin):
 
     def _apply_exclusion_filters(self, tracks, exclude_config):
         """Apply exclusion filters to tracks."""
-        filtered_tracks = tracks[:]
-        original_count = len(filtered_tracks)
+        import xml.etree.ElementTree as ET
+        filtered_tracks = []
+        original_count = len(tracks)
 
-        # Filter by genres
-        if 'genres' in exclude_config:
-            exclude_genres = [g.lower() for g in exclude_config['genres']]
-            filtered_tracks = [
-                track for track in filtered_tracks
-                if hasattr(track, 'genres') and not any(
-                    g.tag.lower() in exclude_genres
-                    for g in track.genres
-                )
-            ]
-            self._log.debug(
-                "Genre exclusion filter: {} -> {} tracks",
-                exclude_genres,
-                len(filtered_tracks)
-            )
+        for track in tracks:
+            try:
+                # Filter by genres
+                if 'genres' in exclude_config:
+                    exclude_genres = [g.lower() for g in exclude_config['genres']]
+                    if hasattr(track, 'genres') and any(
+                        g.tag.lower() in exclude_genres for g in track.genres
+                    ):
+                        continue  # Exclude this track
 
-        # Filter by years
-        if 'years' in exclude_config:
-            years_config = exclude_config['years']
+                # Filter by years
+                if 'years' in exclude_config:
+                    years_config = exclude_config['years']
+                    if 'before' in years_config:
+                        year_before = years_config['before']
+                        if not hasattr(track, 'year') or track.year is None or track.year < year_before:
+                            continue  # Exclude this track
+                    if 'after' in years_config:
+                        year_after = years_config['after']
+                        if not hasattr(track, 'year') or track.year is None or track.year > year_after:
+                            continue  # Exclude this track
 
-            if 'before' in years_config:
-                year_before = years_config['before']
-                filtered_tracks = [
-                    track for track in filtered_tracks
-                    if not hasattr(track, 'year') or
-                    track.year is None or
-                    track.year >= year_before
-                ]
-                self._log.debug(
-                    "Year before {} filter: {} tracks",
-                    year_before,
-                    len(filtered_tracks)
-                )
-
-            if 'after' in years_config:
-                year_after = years_config['after']
-                filtered_tracks = [
-                    track for track in filtered_tracks
-                    if not hasattr(track, 'year') or
-                    track.year is None or
-                    track.year <= year_after
-                ]
-                self._log.debug(
-                    "Year after {} filter: {} tracks",
-                    year_after,
-                    len(filtered_tracks)
-                )
+                filtered_tracks.append(track)
+            except (ET.ParseError, Exception) as e:
+                self._log.debug("Skipping track due to exception in exclusion filter: {}", e)
+                continue
 
         self._log.debug(
             "Exclusion filters removed {} tracks",
@@ -2429,43 +2409,32 @@ class PlexSync(BeetsPlugin):
 
     def _apply_inclusion_filters(self, tracks, include_config):
         """Apply inclusion filters to tracks."""
-        filtered_tracks = tracks[:]
-        original_count = len(filtered_tracks)
+        import xml.etree.ElementTree as ET
+        filtered_tracks = []
+        original_count = len(tracks)
 
-        # Filter by genres
-        if 'genres' in include_config:
-            include_genres = [g.lower() for g in include_config['genres']]
-            filtered_tracks = [
-                track for track in filtered_tracks
-                if hasattr(track, 'genres') and any(
-                    g.tag.lower() in include_genres
-                    for g in track.genres
-                )
-            ]
-            self._log.debug(
-                "Genre inclusion filter: {} -> {} tracks",
-                include_genres,
-                len(filtered_tracks)
-            )
+        for track in tracks:
+            try:
+                # Filter by genres
+                if 'genres' in include_config:
+                    include_genres = [g.lower() for g in include_config['genres']]
+                    if not (hasattr(track, 'genres') and any(
+                        g.tag.lower() in include_genres for g in track.genres
+                    )):
+                        continue  # Exclude this track
 
-        # Filter by years
-        if 'years' in include_config:
-            years_config = include_config['years']
+                # Filter by years
+                if 'years' in include_config:
+                    years_config = include_config['years']
+                    if 'between' in years_config:
+                        start_year, end_year = years_config['between']
+                        if not (hasattr(track, 'year') and track.year is not None and start_year <= track.year <= end_year):
+                            continue  # Exclude this track
 
-            if 'between' in years_config:
-                start_year, end_year = years_config['between']
-                filtered_tracks = [
-                    track for track in filtered_tracks
-                    if hasattr(track, 'year') and
-                    track.year is not None and
-                    start_year <= track.year <= end_year
-                ]
-                self._log.debug(
-                    "Year between {}-{} filter: {} tracks",
-                    start_year,
-                    end_year,
-                    len(filtered_tracks)
-                )
+                filtered_tracks.append(track)
+            except (ET.ParseError, Exception) as e:
+                self._log.debug("Skipping track due to exception in inclusion filter: {}", e)
+                continue
 
         self._log.debug(
             "Inclusion filters removed {} tracks",
