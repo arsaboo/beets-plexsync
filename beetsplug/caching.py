@@ -294,9 +294,7 @@ class Cache:
                         ["artist", key_data["artist"]],
                         ["title", key_data["title"]]
                     ])
-                    search_keys.append(old_format_key)
-
-                    # Backward compatibility: Try with raw values too (no normalization)
+                    search_keys.append(old_format_key)                    # Backward compatibility: Try with raw values too (no normalization)
                     raw_key_data = {
                         "title": query.get("title", ""),
                         "artist": query.get("artist", ""),
@@ -305,11 +303,25 @@ class Cache:
                     raw_pipe_key = f"{raw_key_data['title']}|{raw_key_data['artist']}|{raw_key_data['album']}"
                     search_keys.append(raw_pipe_key)
 
+                    # Handle None album cases - try variations
+                    if query.get("album") is None:
+                        # Try with empty string for album
+                        alt_query = query.copy()
+                        alt_query["album"] = ""
+                        search_keys.append(self._make_cache_key(alt_query))
+
+                        # Try with "Unknown" for album (common default)
+                        alt_query["album"] = "Unknown"
+                        search_keys.append(self._make_cache_key(alt_query))
+                          # Try without album field at all - title|artist format
+                        title_artist_only = f"{self.normalize_text(query.get('title', ''))}|{self.normalize_text(query.get('artist', ''))}"
+                        search_keys.append(title_artist_only)
+
                 else:
                     # String query - use as-is
                     search_keys.append(str(query))
 
-                # Try each key format
+                # Try each key format first
                 for search_key in search_keys:
                     cursor.execute(
                         'SELECT plex_ratingkey, cleaned_query FROM cache WHERE query = ?',
@@ -327,6 +339,27 @@ class Cache:
                                    plex_ratingkey,
                                    cleaned_metadata)
                         return (plex_ratingkey, cleaned_metadata)
+
+                # If no exact match found and this is a dict query, try fuzzy matching
+                if isinstance(query, dict):
+                    title = self.normalize_text(query.get("title", ""))
+                    artist = self.normalize_text(query.get("artist", ""))
+                    if title and artist:
+                        # Look for any cache entries that match title and artist with pipe format
+                        cursor.execute(
+                            'SELECT query, plex_ratingkey, cleaned_query FROM cache WHERE query LIKE ?',
+                            (f'{title}|{artist}|%',)
+                        )
+                        fuzzy_rows = cursor.fetchall()
+
+                        for cached_query, plex_ratingkey, cleaned_metadata_json in fuzzy_rows:
+                            # Found a match with different album - use it
+                            cleaned_metadata = json.loads(cleaned_metadata_json) if cleaned_metadata_json else None
+                            logger.debug('Fuzzy cache hit (title+artist) for query: {} (key: {}, rating_key: {})',
+                                       self._sanitize_query_for_log(query),
+                                       cached_query,
+                                       plex_ratingkey)
+                            return (plex_ratingkey, cleaned_metadata)
 
                 logger.debug('Cache miss for query: {}',
                             self._sanitize_query_for_log(query))
