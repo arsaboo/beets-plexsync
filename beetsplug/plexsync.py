@@ -1159,11 +1159,11 @@ class PlexSync(BeetsPlugin):
         except Exception as e:
             self._log.error("Failed to cache result: {}", e)
 
-    def _handle_manual_search(self, sorted_tracks, song_dict):
+    def _handle_manual_search(self, sorted_tracks, original_song):
         """Helper function to handle manual search."""
-        source_title = song_dict.get("title", "")
-        source_album = song_dict.get("album", "Unknown")
-        source_artist = song_dict.get("artist", "")
+        source_title = original_song.get("title", "")
+        source_album = original_song.get("album", "Unknown")
+        source_artist = original_song.get("artist", "")
 
         # Use beets UI formatting for the query header
         print_(ui.colorize('text_highlight', '\nChoose candidates for: ') +
@@ -1244,20 +1244,20 @@ class PlexSync(BeetsPlugin):
         )
 
         if sel in ("b", "B"):
+            self._log.debug("User aborted, storing negative cache result.")
+            self._cache_result(original_song, None)
             return None
         elif sel in ("s", "S"):
             self._log.debug("User skipped, storing negative cache result.")
-            self._cache_result(song_dict, None)
+            self._cache_result(original_song, None)
             return None
         elif sel in ("e", "E"):
-            return self.manual_track_search(song_dict)
+            return self.manual_track_search(original_song)
 
         selected_track = sorted_tracks[sel - 1][0] if sel > 0 else None
         if selected_track:
-            final_key = self.cache._make_cache_key(song_dict)
-            self._log.debug("Storing manual selection in cache for key: {} ratingKey: {}",
-                            final_key, selected_track.ratingKey)
-            self._cache_result(final_key, selected_track.ratingKey, cleaned_metadata=song_dict)
+            final_key = self.cache._make_cache_key(original_song)
+            self._cache_result(final_key, selected_track.ratingKey, cleaned_metadata=original_song)
         return selected_track
 
     def manual_track_search(self, original_song=None):
@@ -1306,6 +1306,8 @@ class PlexSync(BeetsPlugin):
 
             if not tracks:
                 self._log.info("No matching tracks found")
+                if original_song:
+                    self._cache_result(original_song, None)
                 return None
 
             # Filter results with more sophisticated matching
@@ -1354,6 +1356,8 @@ class PlexSync(BeetsPlugin):
 
             if not filtered_tracks:
                 self._log.info("No matching tracks found after filtering")
+                if original_song:
+                    self._cache_result(original_song, None)
                 return None
 
             # Create song_dict for match scoring
@@ -1433,20 +1437,20 @@ class PlexSync(BeetsPlugin):
             )
 
             if sel in ("b", "B"):
+                self._log.debug("User aborted, storing negative cache result.")
+                self._cache_result(original_song, None)
                 return None
             elif sel in ("s", "S"):
                 self._log.debug("User skipped, storing negative cache result.")
-                self._cache_result(song_dict, None)
+                self._cache_result(original_song, None)
                 return None
             elif sel in ("e", "E"):
-                return self.manual_track_search(song_dict)
+                return self.manual_track_search(original_song)
 
             selected_track = sorted_tracks[sel - 1][0] if sel > 0 else None
             if selected_track:
-                final_key = self.cache._make_cache_key(song_dict)
-                self._log.debug("Storing manual selection in cache for key: {} ratingKey: {}",
-                                final_key, selected_track.ratingKey)
-                self._cache_result(final_key, selected_track.ratingKey, cleaned_metadata=song_dict)
+                final_key = self.cache._make_cache_key(original_song)
+                self._cache_result(final_key, selected_track.ratingKey, cleaned_metadata=original_song)
             return selected_track
         except Exception as e:
             self._log.error("Error during manual search: {}", e)
