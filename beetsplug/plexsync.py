@@ -877,23 +877,91 @@ class PlexSync(BeetsPlugin):
             self._log.warning("{} Update failed", self.config["plex"]["library_name"])
 
     def _fetch_plex_info(self, items, write, force):
-        """Obtain track information from Plex."""
-        items_len = len(items)
-        with ThreadPoolExecutor() as executor:
-            for index, item in enumerate(items, start=1):
-                executor.submit(
-                    self._process_item, index, item, write, force, items_len
-                )
+        """Entry point: runs async version."""
+        loop = self.get_event_loop()
+        loop.run_until_complete(self._fetch_plex_info_async(items, write, force))
 
-    def _process_item(self, index, item, write, force, items_len):
+    async def _fetch_plex_info_async(self, items, write, force):
+        """Obtain track information from Plex asynchronously, deferring manual input."""
+        import asyncio
+        import queue
+
+        # Create a queue for automatic processing
+        auto_queue = queue.Queue()
+        for i, item in enumerate(items, start=1):
+            auto_queue.put((i, item))
+
+        # Create a queue for tracks that need manual intervention
+        manual_queue = queue.Queue()
+
+        items_len = len(items)
+
+        # Process automatic matches in parallel
+        async def process_auto_queue():
+            loop = asyncio.get_event_loop()
+            futures = []
+
+            # Use ThreadPoolExecutor from the class's imports
+            with ThreadPoolExecutor() as executor:
+                while not auto_queue.empty():
+                    index, item = auto_queue.get()
+
+                    # Check if we can skip this item
+                    if not force and "plex_userrating" in item:
+                        self._log.debug("Plex rating already present for: {}", item)
+                        auto_queue.task_done()
+                        continue
+
+                    # Search for track automatically without user interaction
+                    def auto_search(index, item):
+                        self._log.info("Processing {}/{} tracks - {} ", index, items_len, item)
+                        plex_track = self.search_plex_track(item)
+                        if plex_track is None:
+                            self._log.info("No track found for: {}. Needs manual intervention.", item)
+                            # Queue for manual processing
+                            manual_queue.put((index, item))
+                            return None
+                        return (index, item, plex_track)
+
+                    future = loop.run_in_executor(executor, auto_search, index, item)
+                    futures.append(future)
+                    auto_queue.task_done()
+
+                # Wait for all futures to complete
+                results = await asyncio.gather(*futures)
+
+                # Process automatic matches
+                for result in results:
+                    if result:
+                        index, item, plex_track = result
+                        self._process_item(index, item, write, force, items_len, plex_track)
+
+        # Run automatic processing
+        await process_auto_queue()
+
+        # Process manual queue sequentially - this will block for user input
+        while not manual_queue.empty():
+            index, item = manual_queue.get()
+            self._log.info("Manual processing {}/{} - {}", index, items_len, item)
+            # Use the existing _process_item with no pre-found track
+            # This will trigger any normal manual search in the function
+            self._process_item(index, item, write, force, items_len)
+            manual_queue.task_done()
+
+    def _process_item(self, index, item, write, force, items_len, plex_track=None):
+        """Process a single item, optionally with a pre-found plex_track."""
         self._log.info("Processing {}/{} tracks - {} ", index, items_len, item)
         if not force and "plex_userrating" in item:
             self._log.debug("Plex rating already present for: {}", item)
             return
-        plex_track = self.search_plex_track(item)
+
+        # Use provided track or search for one
         if plex_track is None:
-            self._log.info("No track found for: {}", item)
-            return
+            plex_track = self.search_plex_track(item)
+            if plex_track is None:
+                self._log.info("No track found for: {}", item)
+                return
+
         item.plex_guid = plex_track.guid
         item.plex_ratingkey = plex_track.ratingKey
         item.plex_userrating = plex_track.userRating
@@ -1367,18 +1435,16 @@ class PlexSync(BeetsPlugin):
             if sel in ("b", "B"):
                 return None
             elif sel in ("s", "S"):
-                self._cache_result(song_dict, None)
+                self._cache_result(song, None)
                 return None
             elif sel in ("e", "E"):
-                return self.manual_track_search(song_dict)
+                return self.manual_track_search(song)
 
             selected_track = sorted_tracks[sel - 1][0] if sel > 0 else None
-
-            if selected_track and original_song:
-                self._cache_result(self.cache._make_cache_key(original_song), selected_track)
-
+            if selected_track:
+                final_key = self.cache._make_cache_key(song)
+                self._cache_result(final_key, selected_track.ratingKey, cleaned_metadata=song)
             return selected_track
-
         except Exception as e:
             self._log.error("Error during manual search: {}", e)
             return None
