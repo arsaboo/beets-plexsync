@@ -1159,11 +1159,11 @@ class PlexSync(BeetsPlugin):
         except Exception as e:
             self._log.error("Failed to cache result: {}", e)
 
-    def _handle_manual_search(self, sorted_tracks, song):
+    def _handle_manual_search(self, sorted_tracks, song_dict):
         """Helper function to handle manual search."""
-        source_title = song.get("title", "")
-        source_album = song.get("album", "Unknown")  # Changed from None to "Unknown"
-        source_artist = song.get("artist", "")
+        source_title = song_dict.get("title", "")
+        source_album = song_dict.get("album", "Unknown")
+        source_artist = song_dict.get("artist", "")
 
         # Use beets UI formatting for the query header
         print_(ui.colorize('text_highlight', '\nChoose candidates for: ') +
@@ -1247,17 +1247,17 @@ class PlexSync(BeetsPlugin):
             return None
         elif sel in ("s", "S"):
             self._log.debug("User skipped, storing negative cache result.")
-            self._cache_result(song, None)
+            self._cache_result(song_dict, None)
             return None
         elif sel in ("e", "E"):
-            return self.manual_track_search(song)
+            return self.manual_track_search(song_dict)
 
         selected_track = sorted_tracks[sel - 1][0] if sel > 0 else None
         if selected_track:
-            final_key = self.cache._make_cache_key(song)
+            final_key = self.cache._make_cache_key(song_dict)
             self._log.debug("Storing manual selection in cache for key: {} ratingKey: {}",
                             final_key, selected_track.ratingKey)
-            self._cache_result(final_key, selected_track.ratingKey, cleaned_metadata=song)
+            self._cache_result(final_key, selected_track.ratingKey, cleaned_metadata=song_dict)
         return selected_track
 
     def manual_track_search(self, original_song=None):
@@ -1435,15 +1435,18 @@ class PlexSync(BeetsPlugin):
             if sel in ("b", "B"):
                 return None
             elif sel in ("s", "S"):
-                self._cache_result(song, None)
+                self._log.debug("User skipped, storing negative cache result.")
+                self._cache_result(song_dict, None)
                 return None
             elif sel in ("e", "E"):
-                return self.manual_track_search(song)
+                return self.manual_track_search(song_dict)
 
             selected_track = sorted_tracks[sel - 1][0] if sel > 0 else None
             if selected_track:
-                final_key = self.cache._make_cache_key(song)
-                self._cache_result(final_key, selected_track.ratingKey, cleaned_metadata=song)
+                final_key = self.cache._make_cache_key(song_dict)
+                self._log.debug("Storing manual selection in cache for key: {} ratingKey: {}",
+                                final_key, selected_track.ratingKey)
+                self._cache_result(final_key, selected_track.ratingKey, cleaned_metadata=song_dict)
             return selected_track
         except Exception as e:
             self._log.error("Error during manual search: {}", e)
