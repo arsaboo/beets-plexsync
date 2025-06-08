@@ -328,17 +328,17 @@ class Cache:
             cleaned_json = json.dumps(cleaned_metadata, default=datetime_handler) if cleaned_metadata else None
 
             if isinstance(query, dict):
-                # Build original key from user input (no normalization)
                 original_key = f"{query.get('title', '')}|{query.get('artist', '')}|{query.get('album', '')}"
-                # Build normalized key
                 normalized_key = f"{self.normalize_text(query.get('title', ''))}|{self.normalize_text(query.get('artist', ''))}|{self.normalize_text(query.get('album', ''))}"
                 with sqlite3.connect(self.db_path) as conn:
                     cursor = conn.cursor()
                     for cache_key in {original_key, normalized_key}:
-                        cursor.execute(
-                            'REPLACE INTO cache (query, plex_ratingkey, cleaned_query) VALUES (?, ?, ?)',
-                            (cache_key, rating_key, cleaned_json)
-                        )
+                        # Only cache if title is present and non-empty
+                        if query.get('title') and query.get('title').strip():
+                            cursor.execute(
+                                'REPLACE INTO cache (query, plex_ratingkey, cleaned_query) VALUES (?, ?, ?)',
+                                (cache_key, rating_key, cleaned_json)
+                            )
                     conn.commit()
                     logger.debug('Cached result for original and normalized keys: "{}", "{}" (rating_key: {})',
                                original_key, normalized_key, rating_key)
