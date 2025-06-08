@@ -1090,7 +1090,7 @@ class PlexSync(BeetsPlugin):
         except Exception as e:
             self._log.error("Failed to cache result: {}", e)
 
-    def _handle_manual_search(self, sorted_tracks, song, original_song=None):
+    def _handle_manual_search(self, sorted_tracks, song, original_query=None):
         """Helper function to handle manual search."""
         source_title = song.get("title", "")
         source_album = song.get("album", "Unknown")  # Changed from None to "Unknown"
@@ -1185,10 +1185,10 @@ class PlexSync(BeetsPlugin):
 
         selected_track = sorted_tracks[sel - 1][0] if sel > 0 else None
         if selected_track:
-            # Store the cache entry using the ORIGINAL query, not the normalized one
+            cache_query = original_query if original_query is not None else song
             self._log.debug("Storing manual selection in cache for original query: {} ratingKey: {}",
-                            self.cache._sanitize_query_for_log(song), selected_track.ratingKey)
-            self._cache_result(song, selected_track.ratingKey, cleaned_metadata=song)
+                            self._sanitize_query_for_log(cache_query), selected_track.ratingKey)
+            self._cache_result(cache_query, selected_track.ratingKey, cleaned_metadata=cache_query)
         return selected_track
 
     def manual_track_search(self, original_song=None):
@@ -1372,12 +1372,9 @@ class PlexSync(BeetsPlugin):
                 return self.manual_track_search(song_dict)
 
             selected_track = sorted_tracks[sel - 1][0] if sel > 0 else None
-
             if selected_track and original_song:
-                self._cache_result(self.cache._make_cache_key(original_song), selected_track)
-
+                self._cache_result(original_song, selected_track)
             return selected_track
-
         except Exception as e:
             self._log.error("Error during manual search: {}", e)
             return None
@@ -1451,11 +1448,7 @@ class PlexSync(BeetsPlugin):
 
             # Try manual search first if enabled and we have matches
             if manual_search and len(sorted_tracks) > 0:
-                manual_result = self._handle_manual_search(sorted_tracks, song)
-                if manual_result:
-                    return manual_result
-                # If user skipped, the negative cache was already stored, return None
-                return None
+                return self._handle_manual_search(sorted_tracks, song, original_query=song)
 
             # Otherwise try automatic matching with improved threshold
             best_match = sorted_tracks[0]
