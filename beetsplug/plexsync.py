@@ -1186,10 +1186,10 @@ class PlexSync(BeetsPlugin):
 
         selected_track = sorted_tracks[sel - 1][0] if sel > 0 else None
         if selected_track:
-            final_key = self.cache._make_cache_key(song)
-            self._log.debug("Storing manual selection in cache for key: {} ratingKey: {}",
-                            final_key, selected_track.ratingKey)
-            self._cache_result(final_key, selected_track.ratingKey, cleaned_metadata=song)
+            # Store the cache entry using the ORIGINAL query, not the normalized one
+            self._log.debug("Storing manual selection in cache for original query: {} ratingKey: {}",
+                            self._sanitize_query_for_log(song), selected_track.ratingKey)
+            self._cache_result(song, selected_track.ratingKey, cleaned_metadata=song)
         return selected_track
 
     def manual_track_search(self, original_song=None):

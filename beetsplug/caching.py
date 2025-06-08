@@ -354,7 +354,6 @@ class Cache:
                             (f'{title}|{artist}|%',)
                         )
                         fuzzy_rows = cursor.fetchall()
-
                         for cached_query, plex_ratingkey, cleaned_metadata_json in fuzzy_rows:
                             # Found a match with different album - use it
                             cleaned_metadata = json.loads(cleaned_metadata_json) if cleaned_metadata_json else None
@@ -373,7 +372,7 @@ class Cache:
             return None
 
     def set(self, query, plex_ratingkey, cleaned_metadata=None):
-        """Store result in cache using the ORIGINAL key format for compatibility."""
+        """Store result in cache using consistent key format."""
         try:
             def datetime_handler(obj):
                 if isinstance(obj, datetime):
@@ -387,13 +386,16 @@ class Cache:
             cleaned_json = json.dumps(cleaned_metadata, default=datetime_handler) if cleaned_metadata else None
 
             if isinstance(query, dict):
-                # Use the ORIGINAL complex JSON array format for compatibility
+                # Use the NEW simple pipe-separated format as primary key
+                primary_key = self._make_cache_key(query)
+
+                # Also store with legacy format for backward compatibility
                 key_data = {
                     "title": self.normalize_text(query.get("title", "")),
                     "artist": self.normalize_text(query.get("artist", "")),
                     "album": self.normalize_text(query.get("album", ""))
                 }
-                primary_key = json.dumps([
+                legacy_key = json.dumps([
                     ["album", key_data["album"]],
                     ["artist", key_data["artist"]],
                     ["title", key_data["title"]]
@@ -401,9 +403,15 @@ class Cache:
 
                 with sqlite3.connect(self.db_path) as conn:
                     cursor = conn.cursor()
+                    # Store with primary key
                     cursor.execute(
                         'REPLACE INTO cache (query, plex_ratingkey, cleaned_query) VALUES (?, ?, ?)',
                         (primary_key, rating_key, cleaned_json)
+                    )
+                    # Also store with legacy key for backward compatibility
+                    cursor.execute(
+                        'REPLACE INTO cache (query, plex_ratingkey, cleaned_query) VALUES (?, ?, ?)',
+                        (legacy_key, rating_key, cleaned_json)
                     )
                     conn.commit()
                     logger.debug('Cached result for query: "{}" (rating_key: {}, cleaned: {})',
