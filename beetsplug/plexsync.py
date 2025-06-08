@@ -1187,7 +1187,7 @@ class PlexSync(BeetsPlugin):
         if selected_track:
             cache_query = original_query if original_query is not None else song
             self._log.debug("Storing manual selection in cache for original query: {} ratingKey: {}",
-                            self._sanitize_query_for_log(cache_query), selected_track.ratingKey)
+                            self.cache._sanitize_query_for_log(cache_query), selected_track.ratingKey)
             self._cache_result(cache_query, selected_track.ratingKey, cleaned_metadata=cache_query)
         return selected_track
 
