@@ -1181,17 +1181,17 @@ class PlexSync(BeetsPlugin):
             self._cache_result(song, None)
             return None
         elif sel in ("e", "E"):
-            return self.manual_track_search(song)
+            return self.manual_track_search(original_query if original_query is not None else song)
 
         selected_track = sorted_tracks[sel - 1][0] if sel > 0 else None
         if selected_track:
-            cache_query = original_query if original_query is not None else song
-            self._log.debug("Storing manual selection in cache for original query: {} ratingKey: {}",
-                            self.cache._sanitize_query_for_log(cache_query), selected_track.ratingKey)
-            self._cache_result(cache_query, selected_track.ratingKey, cleaned_metadata=cache_query)
+            # Cache for both the original query and the manual query
+            if original_query is not None:
+                self._cache_result(original_query, selected_track)
+            self._cache_result(song, selected_track)
         return selected_track
 
-    def manual_track_search(self, original_song=None):
+    def manual_track_search(self, original_query=None):
         """Manually search for a track in the Plex library."""
         print_(ui.colorize('text_highlight', '\nManual Search'))
         print_(ui.colorize('text', 'Enter search criteria (empty to skip):'))
@@ -1366,14 +1366,15 @@ class PlexSync(BeetsPlugin):
             if sel in ("b", "B"):
                 return None
             elif sel in ("s", "S"):
-                self._cache_result(song_dict, None)
+                self._cache_result(song, None)
                 return None
             elif sel in ("e", "E"):
-                return self.manual_track_search(song_dict)
+                return self.manual_track_search(original_query)
 
             selected_track = sorted_tracks[sel - 1][0] if sel > 0 else None
-            if selected_track and original_song:
-                self._cache_result(original_song, selected_track)
+            if selected_track and original_query:
+                self._cache_result(original_query, selected_track)
+                self._cache_result(song_dict, selected_track)
             return selected_track
         except Exception as e:
             self._log.error("Error during manual search: {}", e)
@@ -3165,7 +3166,6 @@ class PlexSync(BeetsPlugin):
                     self._plex_add_playlist_item(matched_tracks, playlist_name)
                     self._log.info("Added {} tracks to playlist {}",
                                  len(matched_tracks), playlist_name)
-
                     # Update the log file
                     remaining_not_found = [
                         line for i, line in enumerate(log_content)
