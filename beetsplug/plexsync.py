@@ -1079,7 +1079,6 @@ class PlexSync(BeetsPlugin):
                 except exceptions.NotFound:
                     self._log.debug("Track not found in Plex: {}", beets_item)
                     continue
-
     def _cache_result(self, cache_key, result, cleaned_metadata=None):
         """Helper method to safely cache search results."""
         if not cache_key:
@@ -1091,7 +1090,7 @@ class PlexSync(BeetsPlugin):
         except Exception as e:
             self._log.error("Failed to cache result: {}", e)
 
-    def _handle_manual_search(self, sorted_tracks, song):
+    def _handle_manual_search(self, sorted_tracks, song, original_song=None):
         """Helper function to handle manual search."""
         source_title = song.get("title", "")
         source_album = song.get("album", "Unknown")  # Changed from None to "Unknown"
