@@ -289,40 +289,29 @@ class Cache:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-
                 if isinstance(query, dict):
-                    # 1. First try with original query as-is (exact match)
                     original_key = f"{query.get('title', '')}|{query.get('artist', '')}|{query.get('album', '')}"
-
-                    # 2. Then try with normalized query
-                    normalized_key = self._make_cache_key(query)
-
+                    normalized_key = f"{self.normalize_text(query.get('title', ''))}|{self.normalize_text(query.get('artist', ''))}|{self.normalize_text(query.get('album', ''))}"
                     search_keys = [original_key, normalized_key]
                 else:
                     search_keys = [str(query)]
-
-                # Try each key in order of preference
                 for search_key in search_keys:
                     cursor.execute(
                         'SELECT plex_ratingkey, cleaned_query FROM cache WHERE query = ?',
                         (search_key,)
                     )
                     row = cursor.fetchone()
-
                     if row:
                         plex_ratingkey, cleaned_metadata_json = row
                         cleaned_metadata = json.loads(cleaned_metadata_json) if cleaned_metadata_json else None
-
                         logger.debug('Cache hit for query: {} (key: {}, rating_key: {})',
                                    self._sanitize_query_for_log(query),
                                    search_key,
                                    plex_ratingkey)
                         return (plex_ratingkey, cleaned_metadata)
-
                 logger.debug('Cache miss for query: {}',
                             self._sanitize_query_for_log(query))
                 return None
-
         except Exception as e:
             logger.error('Cache lookup failed: {}', str(e))
             return None
@@ -335,39 +324,25 @@ class Cache:
                     return obj.isoformat()
                 raise TypeError(f'Object of type {type(obj)} is not JSON serializable')
 
-            # Use -1 for negative cache entries (when plex_ratingkey is None)
             rating_key = -1 if plex_ratingkey is None else int(plex_ratingkey)
-
-            # Store cleaned metadata as JSON string
             cleaned_json = json.dumps(cleaned_metadata, default=datetime_handler) if cleaned_metadata else None
 
             if isinstance(query, dict):
-                # Store with both original and normalized keys
+                # Build original key from user input (no normalization)
                 original_key = f"{query.get('title', '')}|{query.get('artist', '')}|{query.get('album', '')}"
-                normalized_key = self._make_cache_key(query)
-
+                # Build normalized key
+                normalized_key = f"{self.normalize_text(query.get('title', ''))}|{self.normalize_text(query.get('artist', ''))}|{self.normalize_text(query.get('album', ''))}"
                 with sqlite3.connect(self.db_path) as conn:
                     cursor = conn.cursor()
-
-                    # Store with original key
-                    cursor.execute(
-                        'REPLACE INTO cache (query, plex_ratingkey, cleaned_query) VALUES (?, ?, ?)',
-                        (original_key, rating_key, cleaned_json)
-                    )
-
-                    # Also store with normalized key if different
-                    if original_key != normalized_key:
+                    for cache_key in {original_key, normalized_key}:
                         cursor.execute(
                             'REPLACE INTO cache (query, plex_ratingkey, cleaned_query) VALUES (?, ?, ?)',
-                            (normalized_key, rating_key, cleaned_json)
+                            (cache_key, rating_key, cleaned_json)
                         )
-
                     conn.commit()
-                    logger.debug('Cached result for query: "{}" (rating_key: {})',
-                               self._sanitize_query_for_log(original_key),
-                               rating_key)
+                    logger.debug('Cached result for original and normalized keys: "{}", "{}" (rating_key: {})',
+                               original_key, normalized_key, rating_key)
             else:
-                # String query
                 cache_key = str(query)
                 with sqlite3.connect(self.db_path) as conn:
                     cursor = conn.cursor()
@@ -378,7 +353,6 @@ class Cache:
                     conn.commit()
                     logger.debug('Cached result for string query: "{}" (rating_key: {})',
                                cache_key, rating_key)
-
         except Exception as e:
             logger.error('Cache storage failed for query "{}": {}',
                         self._sanitize_query_for_log(query), str(e))
