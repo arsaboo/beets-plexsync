@@ -1178,18 +1178,35 @@ class PlexSync(BeetsPlugin):
             return None
         elif sel in ("s", "S"):
             self._log.debug("User skipped, storing negative cache result.")
-            self._cache_result(song, None)
+            query_to_neg_cache = None
+            if original_query is not None and original_query.get('title') and original_query.get('title').strip():
+                query_to_neg_cache = original_query
+            elif song.get('title') and song.get('title').strip(): # 'song' is the current search terms
+                query_to_neg_cache = song
+
+            if query_to_neg_cache:
+                self._cache_result(query_to_neg_cache, None)
+            else:
+                self._log.debug("No suitable query to store negative cache against for skip.")
             return None
         elif sel in ("e", "E"):
             return self.manual_track_search(original_query if original_query is not None else song)
 
         selected_track = sorted_tracks[sel - 1][0] if sel > 0 else None
         if selected_track:
-            # Cache for both the original query and the manual query, only if they have a title
-            if original_query is not None and original_query.get('title'):
-                self._cache_result(original_query, selected_track)
-            if song.get('title'):
-                self._cache_result(song, selected_track)
+            # Determine the primary query to cache against
+            query_to_cache = None
+            if original_query is not None and original_query.get('title') and original_query.get('title').strip():
+                query_to_cache = original_query
+                self._log.debug(f"Using original_query for caching: {original_query}")
+            elif song.get('title') and song.get('title').strip():
+                query_to_cache = song
+                self._log.debug(f"Using current song query for caching (original_query was not suitable): {song}")
+
+            if query_to_cache:
+                self._cache_result(query_to_cache, selected_track)
+            else:
+                self._log.debug("No suitable query to cache the selected track against.")
         return selected_track
 
     def manual_track_search(self, original_query=None):
@@ -1367,18 +1384,36 @@ class PlexSync(BeetsPlugin):
             if sel in ("b", "B"):
                 return None
             elif sel in ("s", "S"):
-                self._cache_result(song_dict, None)
+                self._log.debug("User skipped in manual_track_search, storing negative cache result.")
+                query_to_neg_cache = None
+                if original_query is not None and original_query.get('title') and original_query.get('title').strip():
+                    query_to_neg_cache = original_query
+                elif song_dict.get('title') and song_dict.get('title').strip(): # song_dict is from the manual text input
+                    query_to_neg_cache = song_dict
+
+                if query_to_neg_cache:
+                    self._cache_result(query_to_neg_cache, None)
+                else:
+                    self._log.debug("No suitable query to store negative cache against for skip in manual_track_search.")
                 return None
             elif sel in ("e", "E"):
                 return self.manual_track_search(original_query)
 
             selected_track = sorted_tracks[sel - 1][0] if sel > 0 else None
             if selected_track:
-                # Cache for both the original query and the manual query, only if they have a title
-                if original_query is not None and original_query.get('title'):
-                    self._cache_result(original_query, selected_track)
-                if song_dict.get('title'):
-                    self._cache_result(song_dict, selected_track)
+                # Determine the primary query to cache against
+                query_to_cache = None
+                if original_query is not None and original_query.get('title') and original_query.get('title').strip():
+                    query_to_cache = original_query
+                    self._log.debug(f"Using original_query for caching: {original_query}")
+                elif song_dict.get('title') and song_dict.get('title').strip(): # song_dict is from the manual text input
+                    query_to_cache = song_dict
+                    self._log.debug(f"Using current song_dict for caching (original_query was not suitable): {song_dict}")
+
+                if query_to_cache:
+                    self._cache_result(query_to_cache, selected_track)
+                else:
+                    self._log.debug("No suitable query to cache the selected track against.")
             return selected_track
         except Exception as e:
             self._log.error("Error during manual search: {}", e)
