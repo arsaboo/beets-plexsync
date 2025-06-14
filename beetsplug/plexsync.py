@@ -1198,16 +1198,16 @@ class PlexSync(BeetsPlugin):
             query_to_cache = None
             if original_query is not None and original_query.get('title') and original_query.get('title').strip():
                 query_to_cache = original_query
-                self._log.debug(f"Using original_query for caching: {original_query}")
+                self._log.debug("Using original_query for caching: {}", original_query)
             elif song.get('title') and song.get('title').strip():
                 query_to_cache = song
-                self._log.debug(f"Using current song query for caching (original_query was not suitable): {song}")
+                self._log.debug("Using current song query for caching (original_query was not suitable): {}", song)
 
             if query_to_cache:
                 self._cache_result(query_to_cache, selected_track)
             else:
                 self._log.debug("No suitable query to cache the selected track against.")
-        return selected_track
+            return selected_track
 
     def manual_track_search(self, original_query=None):
         """Manually search for a track in the Plex library."""
@@ -1405,10 +1405,10 @@ class PlexSync(BeetsPlugin):
                 query_to_cache = None
                 if original_query is not None and original_query.get('title') and original_query.get('title').strip():
                     query_to_cache = original_query
-                    self._log.debug(f"Using original_query for caching: {original_query}")
+                    self._log.debug("Using original_query for caching: {}", original_query)
                 elif song_dict.get('title') and song_dict.get('title').strip(): # song_dict is from the manual text input
                     query_to_cache = song_dict
-                    self._log.debug(f"Using current song_dict for caching (original_query was not suitable): {song_dict}")
+                    self._log.debug("Using current song_dict for caching (original_query was not suitable): {}", song_dict)
 
                 if query_to_cache:
                     self._cache_result(query_to_cache, selected_track)
@@ -1994,6 +1994,7 @@ class PlexSync(BeetsPlugin):
             if not spotify_track_id:
                 self._log.debug(
                     "Searching for {} {} in Spotify",
+
                     beets_item.title,
                     beets_item.album
                 )
