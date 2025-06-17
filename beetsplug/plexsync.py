@@ -1207,6 +1207,11 @@ class PlexSync(BeetsPlugin):
                 self._cache_result(query_to_cache, selected_track)
             else:
                 self._log.debug("No suitable query to cache the selected track against.")
+
+            # Always update the original key if it differs from the manual/LLM-cleaned query
+            if original_query is not None and song != original_query:
+                self._log.debug("Also caching result for original query key: {}", original_query)
+                self._cache_result(original_query, selected_track)
             return selected_track
 
     def manual_track_search(self, original_query=None):
@@ -1414,6 +1419,11 @@ class PlexSync(BeetsPlugin):
                     self._cache_result(query_to_cache, selected_track)
                 else:
                     self._log.debug("No suitable query to cache the selected track against.")
+
+                # Always update the original key if it differs from the manual/LLM-cleaned query
+                if original_query is not None and song_dict != original_query:
+                    self._log.debug("Also caching result for original query key: {}", original_query)
+                    self._cache_result(original_query, selected_track)
             return selected_track
         except Exception as e:
             self._log.error("Error during manual search: {}", e)
