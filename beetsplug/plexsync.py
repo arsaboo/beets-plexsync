@@ -1157,9 +1157,7 @@ class PlexSync(BeetsPlugin):
             print_(
                 f"{i}. {highlighted_album} - {highlighted_title} - "
                 f"{highlighted_artist} (Match: {ui.colorize(score_color, f'{score:.2f}')})"
-            )
-
-        # Show options footer
+            )        # Show options footer
         print_(ui.colorize('text_highlight', '\nActions:'))
         print_(ui.colorize('text', '  #: Select match by number'))
         print_(
@@ -1194,24 +1192,15 @@ class PlexSync(BeetsPlugin):
 
         selected_track = sorted_tracks[sel - 1][0] if sel > 0 else None
         if selected_track:
-            # Determine the primary query to cache against
-            query_to_cache = None
-            if original_query is not None and original_query.get('title') and original_query.get('title').strip():
-                query_to_cache = original_query
-                self._log.debug("Using original_query for caching: {}", original_query)
-            elif song.get('title') and song.get('title').strip():
-                query_to_cache = song
-                self._log.debug("Using current song query for caching (original_query was not suitable): {}", song)
+            # Cache the result for the current song query
+            self._cache_result(song, selected_track)
+            self._log.debug("Cached result for current song query: {}", song)
 
-            if query_to_cache:
-                self._cache_result(query_to_cache, selected_track)
-            else:
-                self._log.debug("No suitable query to cache the selected track against.")
-
-            # Always update the original key if it differs from the manual/LLM-cleaned query
-            if original_query is not None and song != original_query:
+            # ALWAYS cache for the original query that led to this manual search
+            if original_query is not None and original_query != song:
                 self._log.debug("Also caching result for original query key: {}", original_query)
                 self._cache_result(original_query, selected_track)
+
             return selected_track
 
     def manual_track_search(self, original_query=None):
@@ -1524,13 +1513,18 @@ class PlexSync(BeetsPlugin):
                     "album": cleaned_album if cleaned_album is not None else song.get("album"),
                     "artist": cleaned_artist if cleaned_artist is not None else song.get("artist")
                 }
-                self._log.debug("Using LLM cleaned metadata: {}", cleaned_song)
-
-                # Cache the original query with cleaned metadata
+                self._log.debug("Using LLM cleaned metadata: {}", cleaned_song)                # Cache the original query with cleaned metadata
                 self._cache_result(cache_key, None, cleaned_song)
 
                 # Try search with cleaned metadata
-                return self.search_plex_song(cleaned_song, manual_search, llm_attempted=True)
+                result = self.search_plex_song(cleaned_song, manual_search, llm_attempted=True)
+
+                # If we found a match using LLM-cleaned metadata, also cache it for the original query
+                if result is not None:
+                    self._log.debug("LLM-cleaned search succeeded, also caching for original query: {}", song)
+                    self._cache_result(cache_key, result)
+
+                return result
 
         # Final fallback: try manual search if enabled
         if manual_search:
