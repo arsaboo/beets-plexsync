@@ -432,6 +432,31 @@ class Cache:
         except Exception as e:
             logger.error("Failed to clear cache: {}", e)
 
+    def clear_negative_cache_entries(self, pattern=None):
+        """Clear negative cache entries, optionally matching a pattern."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+
+                if pattern:
+                    # Clear specific pattern
+                    cursor.execute(
+                        "DELETE FROM cache WHERE plex_ratingkey = -1 AND query LIKE ?",
+                        (f"%{pattern}%",)
+                    )
+                    logger.debug("Cleared {} negative cache entries matching pattern: {}",
+                               cursor.rowcount, pattern)
+                else:
+                    # Clear all negative entries
+                    cursor.execute("DELETE FROM cache WHERE plex_ratingkey = -1")
+                    logger.debug("Cleared {} negative cache entries", cursor.rowcount)
+
+                conn.commit()
+                return cursor.rowcount
+        except Exception as e:
+            logger.error("Failed to clear negative cache entries: {}", e)
+            return 0
+
     def debug_cache_keys(self, query):
         """Debug method to see what cache keys exist for a query."""
         try:

@@ -1421,9 +1421,7 @@ class PlexSync(BeetsPlugin):
     def search_plex_song(self, song, manual_search=None, llm_attempted=False):
         """Fetch the Plex track key with fallback options."""
         if manual_search is None:
-            manual_search = config["plexsync"]["manual_search"].get(bool)
-
-        # Check cache first
+            manual_search = config["plexsync"]["manual_search"].get(bool)        # Check cache first
         cache_key = self.cache._make_cache_key(song)
         cached_result = self.cache.get(cache_key)
         if cached_result is not None:
@@ -1432,7 +1430,14 @@ class PlexSync(BeetsPlugin):
                 if rating_key == -1 or rating_key is None:  # Handle both None and -1
                     if cleaned_metadata and not llm_attempted:
                         self._log.debug("Using cached cleaned metadata: {}", cleaned_metadata)
-                        return self.search_plex_song(cleaned_metadata, manual_search, llm_attempted=True)
+                        result = self.search_plex_song(cleaned_metadata, manual_search, llm_attempted=True)
+
+                        # If we found a match using cached cleaned metadata, update the original cache entry
+                        if result is not None:
+                            self._log.debug("Cached cleaned metadata search succeeded, updating original cache: {}", song)
+                            self._cache_result(cache_key, result)
+
+                        return result
                     return None  # Return None if we have a negative cache result
                 try:
                     if rating_key:  # Only try to fetch if we have a valid rating key
@@ -1524,9 +1529,7 @@ class PlexSync(BeetsPlugin):
                     self._log.debug("LLM-cleaned search succeeded, also caching for original query: {}", song)
                     self._cache_result(cache_key, result)
 
-                return result
-
-        # Final fallback: try manual search if enabled
+                return result        # Final fallback: try manual search if enabled
         if manual_search:
             self._log.info(
                 "\nTrack {} - {} - {} not found in Plex".format(
@@ -1535,7 +1538,12 @@ class PlexSync(BeetsPlugin):
                 song["title"])
             )
             if ui.input_yn(ui.colorize('text_highlight', "\nSearch manually?") + " (Y/n)"):
-                return self.manual_track_search(song)
+                result = self.manual_track_search(song)
+                # If manual search succeeds, cache it for the original query
+                if result is not None:
+                    self._log.debug("Manual search succeeded, caching for original query: {}", song)
+                    self._cache_result(cache_key, result)
+                return result
 
         # Store negative result if nothing found
         self._cache_result(cache_key, None)
