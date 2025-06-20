@@ -2435,11 +2435,13 @@ class PlexSync(BeetsPlugin):
                     years_config = exclude_config['years']
                     if 'before' in years_config:
                         year_before = years_config['before']
-                        if not hasattr(track, 'year') or track.year is None or track.year < year_before:
+                        # Only exclude if year is set and less than year_before
+                        if hasattr(track, 'year') and track.year is not None and track.year < year_before:
                             continue  # Exclude this track
                     if 'after' in years_config:
                         year_after = years_config['after']
-                        if not hasattr(track, 'year') or track.year is None or track.year > year_after:
+                        # Only exclude if year is set and greater than year_after
+                        if hasattr(track, 'year') and track.year is not None and track.year > year_after:
                             continue  # Exclude this track
 
                 filtered_tracks.append(track)
