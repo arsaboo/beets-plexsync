@@ -321,14 +321,14 @@ class MusicSearchTools:
             if response:
                 # If Tavily returned an AI-generated answer, use it directly
                 if "ai_answer" in response:
-                    return {"source": "tavily_ai", "content": response["ai_answer"]}
-
-                # Otherwise, format the search results for processing
+                    return {"source": "tavily_ai", "content": response["ai_answer"]}                # Otherwise, format the search results for processing
                 if isinstance(response, dict) and "results" in response:
                     content = json.dumps(response["results"])
                     return {"source": "tavily", "content": content}
 
-                return {"source": "tavily", "content": str(response)}        # Return error if all search methods failed
+                return {"source": "tavily", "content": str(response)}
+
+        # Return error if all search methods failed
         return {"source": "error", "content": f"No results for '{song_name}'"}
 
     def _extract_song_details(self, content: str, song_name: str) -> SongBasicInfo:
@@ -341,18 +341,32 @@ class MusicSearchTools:
         Based EXCLUSIVELY on the search results content, extract these fields:
         - Song Title: The exact title of the song as mentioned in the search results (not the query)
         - Artist Name: The primary artist or band who performed the song
-        - Album Name: The album that contains this song (if mentioned)
+        - Album Name: The album that contains this song (if mentioned). This could be:
+          * An actual album name
+          * A movie/film name (if it's a soundtrack) - KEEP THE MOVIE NAME AS THE ALBUM
+          * An OST or soundtrack name
+          * Any collection or compilation name
 
-        IMPORTANT CLEANING RULES:
-        For album and title, remove:
-        - Years/dates (e.g., "(2020)", "- 2020")
-        - Soundtrack/OST indicators (e.g., "(Soundtrack)", "[Original Score]", "OST")
-        - Movie/film references (e.g., "(From the Film)", "(Music from the Motion Picture)")
-        - Parentheses/brackets with descriptive text
-        - Descriptors like remix, extended, deluxe edition, etc.
-        - Trailing spaces or punctuation
+        IMPORTANT EXTRACTION RULES:
+        For ALBUM extraction:
+        - If the song is "from the film" or "from the movie", use the film/movie name as the album
+        - For Bollywood/Indian songs, the movie name IS the album name - do not remove it
+        - If mentioned as "soundtrack", "OST", or similar, include that information
+        - Clean the album name by removing:
+          * Years/dates in parentheses (e.g., "(1974)")
+          * Excessive descriptive text
+          * Leading/trailing spaces
+        - Keep the core name that identifies the album/movie/collection
+        - IMPORTANT: For songs from movies, the movie name should be the album name
 
-        Return only the core album name without these extra details, cleaning up any trailing spaces or punctuation.
+        For TITLE and ARTIST:
+        - Extract exactly as mentioned in the search results
+        - Clean excessive formatting but keep the essential name
+
+        EXAMPLES:
+        - If content says "from the 1974 film 'Ajanabee'", then album should be "Ajanabee"
+        - If content says "from the movie 'Sholay'", then album should be "Sholay"
+        - If content says "soundtrack of 'Dilwale Dulhania Le Jayenge'", then album should be "Dilwale Dulhania Le Jayenge"
 
         If any information is not clearly stated in the search results, use the most likely value based on available context.
         If you cannot determine a value with reasonable confidence, return null for that field.
@@ -361,10 +375,9 @@ class MusicSearchTools:
         {{
             "title": "The song title based ONLY on search results, or null if uncertain",
             "artist": "The artist name or null if uncertain",
-            "album": "The cleaned album name or null if uncertain"
+            "album": "The album/movie/collection name or null if uncertain"
         }}
         </instruction>
-
         <search_results>
         {content}
         </search_results>
@@ -376,6 +389,10 @@ class MusicSearchTools:
 
         try:
             response = self.ollama_agent.run(prompt)
+
+            # Log the raw response for debugging
+            logger.debug("Raw Ollama response: {}", response.content)
+
             return response.content
         except Exception as e:
             logger.error("Ollama extraction failed: {0}", str(e))
