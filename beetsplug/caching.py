@@ -174,7 +174,6 @@ class Cache:
 
                     for playlist_id, created_at in rows:
                         if created_at:
-                            # Generate random expiration between 36 and 60 hours
                             expiry_hours = random.uniform(60, 200)
                             created_dt = datetime.fromisoformat(created_at)
                             expiry = created_dt + timedelta(hours=expiry_hours)
