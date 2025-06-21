@@ -1879,9 +1879,21 @@ class PlexSync(BeetsPlugin):
                 self.generate_imported_playlist(lib, p_conf, plex_lookup)  # Pass plex_lookup, Use renamed var
             elif playlist_id_conf in ["daily_discovery", "forgotten_gems"]: # Use renamed var
                 if playlist_id_conf == "daily_discovery": # Use renamed var
-                    self.generate_daily_discovery(lib, p_conf, plex_lookup, preferred_genres, similar_tracks_smart) # Use renamed vars
+                    from beetsplug.smart_playlists import generate_daily_discovery_playlist
+                    generate_daily_discovery_playlist(
+                        self.music, lib, plex_lookup, preferred_genres, similar_tracks_smart,
+                        p_conf, config["plexsync"]["playlists"]["defaults"].get({}),
+                        lambda name: plex_utils.plex_clear_playlist(self.plex, name),
+                        lambda tracks, name: plex_utils.plex_add_playlist_item(self.plex, tracks, name)
+                    )
                 else:  # forgotten_gems
-                    self.generate_forgotten_gems(lib, p_conf, plex_lookup, preferred_genres, similar_tracks_smart) # Use renamed vars
+                    from beetsplug.smart_playlists import generate_forgotten_gems_playlist
+                    generate_forgotten_gems_playlist(
+                        self.music, lib, plex_lookup, p_conf, config["plexsync"]["playlists"]["defaults"].get({}),
+                        None, similar_tracks_smart,
+                        lambda name: plex_utils.plex_clear_playlist(self.plex, name),
+                        lambda tracks, name: plex_utils.plex_add_playlist_item(self.plex, tracks, name)
+                    )
             else:
                 self._log.warning(
                     "Unrecognized playlist configuration '{}' - type: '{}', id: '{}'. "
