@@ -1872,7 +1872,8 @@ class PlexSync(BeetsPlugin):
         preferred_genres = None
         similar_tracks_smart = None # Renamed similar_tracks
         if any(p.get("id") in ["daily_discovery", "forgotten_gems"] for p in playlists_config):
-            preferred_genres, similar_tracks_smart = self.get_preferred_attributes() # Use renamed var
+            from beetsplug.smart_playlists import get_preferred_attributes
+            preferred_genres, similar_tracks_smart = get_preferred_attributes() # Use imported function
             self._log.debug("Using preferred genres: {}", preferred_genres)
             self._log.debug("Processing {} pre-filtered similar tracks", len(similar_tracks_smart)) # Use renamed var
 
