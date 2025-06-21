@@ -199,8 +199,11 @@ def scrape_spotify_playlist_web(playlist_id, cache_instance, http_headers):
                         # A more generic search through the JSON might be needed if structure changes often
                         # For now, we'll rely on the older 'Spotify.Entity' or a known path if that fails
 
-            try:
-                if json_data and 'tracks' in json_data: # Primarily for Spotify.Entity structure
+                except Exception as e:
+                    _log.debug(f"Error loading initial-state JSON: {e}")
+
+            if json_data and 'tracks' in json_data: # Primarily for Spotify.Entity structure
+                try:
                     for track_entry in json_data['tracks']['items']:
                         if not track_entry or not track_entry.get('track'):
                             continue
@@ -218,8 +221,8 @@ def scrape_spotify_playlist_web(playlist_id, cache_instance, http_headers):
                             except (ValueError, TypeError):
                                  _log.debug(f"Could not parse year from release_date: {release_date}")
                         song_list.append(song_dict)
-            except Exception as e:
-                _log.debug(f"Error processing tracks from JSON data: {e}")
+                except Exception as e:
+                    _log.debug(f"Error processing tracks from JSON data: {e}")
 
         # Fallback to meta tags if script parsing fails or yields no tracks
         if not song_list:
