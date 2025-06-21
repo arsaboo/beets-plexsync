@@ -259,7 +259,7 @@ def get_preferred_attributes_from_history(plex_music_library, history_days, excl
     Determines preferred genres and identifies similar tracks based on listening history.
     This is a data gathering step.
     """
-    _log.info("Determining preferred attributes from listening history ({} days, excluding last {} days)", history_days, exclusion_days)
+    _log.info("Determining preferred attributes from listening history (%d days, excluding last %d days)", history_days, exclusion_days)
 
     # Fetch tracks played in the configured history period
     history_tracks = plex_music_library.search(filters={"track.lastViewedAt>>": "{}d".format(history_days)}, libtype="track")
@@ -271,7 +271,7 @@ def get_preferred_attributes_from_history(plex_music_library, history_days, excl
     recently_played_keys = {
         track.ratingKey for track in plex_music_library.search(filters={"track.lastViewedAt>>": "{}d".format(exclusion_days)}, libtype="track")
     }
-    _log.debug("Found {} recently played track keys for exclusion.", len(recently_played_keys))
+    _log.debug("Found %d recently played track keys for exclusion.", len(recently_played_keys))
 
     for track in history_tracks:
         track_genres_tags = {genre.tag.lower() for genre in track.genres if genre and genre.tag}
@@ -292,8 +292,8 @@ def get_preferred_attributes_from_history(plex_music_library, history_days, excl
             _log.debug("Error getting sonically similar tracks for {}: {}", track.title, e)
 
     sorted_genres = sorted(genre_counts, key=genre_counts.get, reverse=True)[:5] # Top 5 preferred genres
-    _log.info("Top preferred genres based on history: {}", sorted_genres)
-    _log.info("Found {} potential similar tracks from history analysis.", len(potential_similar_tracks))
+    _log.info("Top preferred genres based on history: %s", sorted_genres)
+    _log.info("Found %d potential similar tracks from history analysis.", len(potential_similar_tracks))
 
     return sorted_genres, list(potential_similar_tracks)
 

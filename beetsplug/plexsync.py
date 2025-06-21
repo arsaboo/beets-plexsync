@@ -10,16 +10,13 @@ Put something like the following in your config.yaml to configure:
 import logging
 import os
 import asyncio
-import random
 import re
-import time
 import difflib
 import json
 import spotipy
 import numpy as np
 import confuse
 import enlighten
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List
@@ -29,16 +26,13 @@ import requests
 from beets import config, ui
 from beets.dbcore import types
 from beets.dbcore.query import MatchQuery
-from beets.library import DateType, Item  # Added Item to import
+from beets.library import DateType, Item
 from beets.plugins import BeetsPlugin
 from beets.ui import input_, print_
-from bs4 import BeautifulSoup
-from jiosaavn import JioSaavn
-from openai import OpenAI
+from requests.exceptions import ConnectionError, ContentDecodingError
 from plexapi import exceptions
 from plexapi.server import PlexServer
 from pydantic import BaseModel, Field
-from requests.exceptions import ConnectionError, ContentDecodingError
 from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
 
 from beetsplug.caching import Cache
@@ -55,8 +49,6 @@ from beetsplug.helpers import parse_title, clean_album_name
 from beetsplug import plex_utils
 from beetsplug import spotify_utils
 from beetsplug import llm_utils
-from beetsplug import playlist_importers
-from beetsplug import smart_playlists
 from beetsplug import playlist_importers
 from beetsplug import smart_playlists
 # Song and SongRecommendations models are now in llm_utils.py,
