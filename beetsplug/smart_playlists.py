@@ -289,7 +289,7 @@ def get_preferred_attributes_from_history(plex_music_library, history_days, excl
                          if match_rating == -1.0 or match_rating is None or match_rating >= 4.0 : # Unrated or highly rated
                             potential_similar_tracks.add(match)
         except Exception as e:
-            _log.debug("Error getting sonically similar tracks for {}: {}", track.title, e)
+            _log.debug("Error getting sonically similar tracks for %s: %s", track.title, e)
 
     sorted_genres = sorted(genre_counts, key=genre_counts.get, reverse=True)[:5] # Top 5 preferred genres
     _log.info("Top preferred genres based on history: %s", sorted_genres)
