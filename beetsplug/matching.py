@@ -4,7 +4,10 @@ import re
 from typing import Optional, Tuple
 
 from beets.autotag import hooks
-from beets.autotag.distance import Distance
+try:
+    from beets.autotag.hooks import Distance
+except ImportError:
+    from beets.autotag.distance import Distance
 from beets.library import Item
 from plexapi.audio import Track
 
