@@ -48,7 +48,7 @@ You can use config filters to finetune any playlist. You can specify the `genre`
 
 ### Library Sync
 - **Plex Library Sync**: `beet plexsync [-f]` imports all the data from your Plex library inside beets. Use the `-f` flag to force update the entire library with fresh information from Plex.
-- **Recent Sync**: `beet plexsyncrecent` updates the information for tracks listened in the last 7 days.
+- **Recent Sync**: `beet plexsyncrecent [--days N]` updates the information for tracks listened in the last N days (default: 7). For example, `beet plexsyncrecent --days 14` will update tracks played in the last 14 days.
 
 ### Playlist Manipulation
 - **Playlist Manipulation**: `plexplaylistadd` and `plexplaylistremove` add or remove tracks from Plex playlists. Use the `-m` flag to provide the playlist name.
