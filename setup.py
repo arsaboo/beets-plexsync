@@ -27,5 +27,8 @@ setup(
         'agno>=1.2.16',
         'tavily-python',
         'exa_py',
+        'scipy',
+        'numpy',
+        'pytz',
     ],
 )
