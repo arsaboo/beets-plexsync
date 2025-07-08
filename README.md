@@ -48,14 +48,14 @@ You can use config filters to finetune any playlist. You can specify the `genre`
 
 ### Library Sync
 - **Plex Library Sync**: `beet plexsync [-f]` imports all the data from your Plex library inside beets. Use the `-f` flag to force update the entire library with fresh information from Plex.
-- **Recent Sync**: `beet plexsyncrecent [--days N]` updates the information for tracks listened in the last N days (default: 7). For example, `beet plexsyncrecent --days 14` will update tracks played in the last 14 days.
+- **Recent Sync**: `beet plexsyncrecent [--days N]` updates the information for tracks listened in the last N days (default: 7). For example, `beet plexsyncrecent [--days 14]` will update tracks played in the last 14 days.
 
 ### Playlist Manipulation
-- **Playlist Manipulation**: `plexplaylistadd` and `plexplaylistremove` add or remove tracks from Plex playlists. Use the `-m` flag to provide the playlist name.
-- **Playlist Clear**: `beet plexplaylistclear` clears a Plex playlist. Use the `-m` flag to specify the playlist name.
+- **Playlist Manipulation**: `beet plexplaylistadd [-m PLAYLIST] [QUERY]` and `beet plexplaylistremove [-m PLAYLIST] [QUERY]` add or remove tracks from Plex playlists. Use the `-m` flag to provide the playlist name. You can use any [beets query][queries_] as an optional filter.
+- **Playlist Clear**: `beet plexplaylistclear [-m PLAYLIST]` clears a Plex playlist. Use the `-m` flag to specify the playlist name.
 
 ### Playlist Import
-- **Playlist Import**: `beet plexplaylistimport` imports individual playlists from Spotify, Apple Music, Gaana.com, JioSaavn, Youtube, Tidal, M3U8 files, and custom APIs. Use the `-m` flag to specify the playlist name and:
+- **Playlist Import**: `beet plexplaylistimport [-m PLAYLIST] [-u URL]` imports individual playlists from Spotify, Apple Music, Gaana.com, JioSaavn, Youtube, Tidal, M3U8 files, and custom APIs. Use the `-m` flag to specify the playlist name and:
   - For online services: use the `-u` flag to supply the full playlist url
   - For M3U8 files: use the `-u` flag with the file path (relative to beets config directory or absolute path)
   - For custom APIs: configure POST requests in config.yaml (see Configuration section)
@@ -80,18 +80,23 @@ You can use config filters to finetune any playlist. You can specify the `genre`
   - Low-rated tracks that were skipped
   - Import statistics and summary
   - The log file helps you identify which tracks need manual attention
-- **Youtube Search Import**: `beet plexsearchimport` imports playlists based on Youtube search. Use the `-m` flag to specify the playlist name, the `-s` flag for the search query, and the `-l` flag to limit the number of search results.
+- **Youtube Search Import**: `beet plexsearchimport [-m PLAYLIST] [-s SEARCH] [-l LIMIT]` imports playlists based on Youtube search. Use the `-m` flag to specify the playlist name, the `-s` flag for the search query, and the `-l` flag to limit the number of search results.
 
 ### Additional Tools
-- **Plex to Spotify**: `beet plex2spotify` copies a Plex playlist to Spotify. Use the `-m` flag to specify the playlist name.
-- **Playlist to Collection**: `beet plexplaylist2collection` converts a Plex playlist to a collection. Use the `-m` flag to specify the playlist name.
-- **Album Collage**: `beet plexcollage` creates a collage of most played albums. Use the `-i` flag to specify the number of days and `-g` flag to specify the grid size.
+- **Plex to Spotify**: `beet plex2spotify [-m PLAYLIST] [QUERY]` copies a Plex playlist to Spotify. Use the `-m` flag to specify the playlist name.
+
+  You can use [beets queries][queries_] with this command to filter which tracks are sent to Spotify. For example, to add only tracks with a `plex_userrating` greater than 2 to the "Sufiyana" playlist, use:
+
+  ```sh
+  beet plex2spotify -m "Sufiyana" plex_userrating:2..
+  ```
+- **Playlist to Collection**: `beet plexplaylist2collection [-m PLAYLIST]` converts a Plex playlist to a collection. Use the `-m` flag to specify the playlist name.
+- **Album Collage**: `beet plexcollage [-i INTERVAL] [-g GRID]` creates a collage of most played albums. Use the `-i` flag to specify the number of days and `-g` flag to specify the grid size.
 
 ### Manual Import for Failed Tracks
 The plugin creates detailed import logs for each playlist import session. You can manually process failed imports using:
 
-- `beet plex_smartplaylists --import-failed`: Process all import logs and attempt manual matching for failed tracks
-- `beet plex_smartplaylists --import-failed --log-file playlist_name_import.log`: Process a specific log file
+- `beet plex_smartplaylists [--import-failed] [--log-file LOGFILE]`: Process all import logs and attempt manual matching for failed tracks, or process a specific log file.
 
 This is especially useful when:
 - You've added new music to your library and want to retry matching previously failed tracks
@@ -204,40 +209,6 @@ spotify:
       ]
   }
   ```
-
-* `beet plexsync [-f]`: allows you to import all the data from your Plex library inside beets. Run the command `beet plexsync` and it will obtain `guid`, `ratingkey`, `userrating`, `skipcount`, `viewcount`, `lastviewedat`, `lastratedat`, and `plex_updated`. See details about these attributes [here][plaxapi]. By default, `plexsync` will not overwrite information for tracks that are already rated. If you want to overwrite all the details again, use the `-f` flag, i.e., `beet plexsync -f` will force update the entire library with fresh information from Plex. This can be useful if you have made significant changes to your Plex library (e.g., updated ratings).
-
-* `beet plexsyncrecent`: If you have a large library, `beets plexsync -f` can take a long time. To update only the recently updated tracks, use `beet plexsyncrecent` to update the information for tracks listened in the last 7 days.
-
-* `plexplaylistadd` and `plexplaylistremove` to add or remove tracks from Plex playlists. These commands should be used in conjunction with beets [queries][queries_] to provide the desired items. Use the `-m` flag to provide the playlist name to be used.
-
-   * To add all country music tracks with `plex_userrating` greater than 5 in a playlist `Country`, you can use the command `beet plexplaylistadd -m Country genre:"Country" plex_userrating:5..`
-
-   * To remove all tracks that are rated less than 5 from the `Country` playlist, use the command `beet plexplaylistremove -m Country plex_userrating:..5`
-
-* `beet plexplaylistimport`: allows you to import playlists from other online services. Spotify, Apple Music, Gaana.com, JioSaavn, Youtube, Tidal, and M3U8 files are currently supported. Use the `-m` flag to specify the playlist name to be created in Plex and:
-  - For online services: use the `-u` flag to supply the full playlist url
-  - For M3U8 files: use the `-u` flag with the file path (relative to beets config directory or absolute path)
-
-  For example, to import the Global Top-100 Apple Music playlist, use the command `beet plexplaylistimport -m Top-100 -u https://music.apple.com/us/playlist/top-100-global/pl.d25f5d1181894928af76c85c967f8f31`. Similarly, to import the Hot-hits USA playlist from Spotify, use the command `beet plexplaylistimport -m HotHitsUSA -u https://open.spotify.com/playlist/37i9dQZF1DX0kbJZpiYdZl`
-
-  You can also use this function to import the weekly jams and weekly exploration playlists from ListenBrainz into Plex. You will need to install and configure the [Listenbrainz plugin][listenbrainz_plugin_]. To import the ListenBrainz playlists, use the command `beet plexplaylistimport --listenbrainz`.
-
-* `beet plexsearchimport`: allows you to import playlists based on Youtube search (results are returned in descending order of the number of views). Use the `-m` flag to specify the playlist name to be created in Plex, supply the search query with the `-s` flag, and use the `-l` flag to limit the number of search results.
-
-  For example, to import the top-20 songs by Taylor Swift, use the command `beet plexsearchimport -s "Taylor Swift" -l 20 -m "Taylor"`.
-
-* `beet plexplaylistclear`: allows you to clear a Plex playlist. Use the `-m` flag to specify the playlist name to be cleared in Plex.
-
-* `beet plex2spotify`: allows you to copy a Plex playlist to Spotify. Use the `-m` flag to specify the playlist name to be copied to Spotify.
-
-* `beet plexplaylist2collection`: converts a Plex playlist to collection. Use the `-m` flag to specify the playlist name. A collection with the same name will be created.
-
-* `beet plexcollage`: allows you to create a collage of most played albums. You can use the `-i` flag to specify the number of days to be used (default is 7 days) and `-g` flag to specify the grid size (default is 3). So, `beet plexcollage -g 5 -i 7` can be used to create a 5x5 collage of the most played albums over the last 7 days. You should get a collage.png file in the beet config folder. The output should look something like the following:
-
-<p align="center">
-  <img src="collage.png">
-</p>
 
 ## Advanced
 Plex matching may be less than perfect and it can miss tracks if the tags don't match perfectly. There are few tools you can use to improve searching:
