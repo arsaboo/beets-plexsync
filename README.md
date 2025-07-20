@@ -41,6 +41,7 @@ The command will only generate the specified playlists, skipping others in your 
       - Controls maximum play count (configurable via `max_plays`, default 2)
       - Minimum rating for rated tracks to be included (configurable via `min_rating`, default 4)
       - Percentage of playlist to fill with unrated but popular tracks (configurable via `discovery_ratio`, default 30%)
+      - Excludes tracks played recently (configurable via `exclusion_days`)
 
   3. **Imported Playlists**:
       - Import playlists from external services (Spotify, Apple Music, YouTube, etc.) and local M3U8 files
@@ -247,6 +248,7 @@ plexsync:
         max_plays: 2        # Maximum number of plays for tracks to be included
         min_rating: 4       # Minimum rating for rated tracks
         discovery_ratio: 30 # Percentage of unrated tracks (0-100); Higher values = more discovery
+        exclusion_days: 30  # Number of days to exclude recently played tracks
         filters:
           include:
             genres:
