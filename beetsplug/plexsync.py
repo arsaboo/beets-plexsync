@@ -675,6 +675,14 @@ class PlexSync(BeetsPlugin):
             default=None,
             help="specific log file to process (default: process all logs)",
         )
+        # Add --only option to filter playlists by id
+        plex_smartplaylists_cmd.parser.add_option(
+            "-o",
+            "--only",
+            dest="only",
+            default=None,
+            help="comma-separated list of playlist IDs to update (e.g. daily_discovery,forgotten_gems)",
+        )
 
         def func_plex_smartplaylists(lib, opts, args):
             if opts.import_failed:
@@ -692,6 +700,12 @@ class PlexSync(BeetsPlugin):
                     "No playlists defined in config['plexsync']['playlists']['items']. Skipping."
                 )
                 return
+
+            # If --only is specified, filter playlists by id
+            if opts.only:
+                only_ids = [x.strip() for x in opts.only.split(",") if x.strip()]
+                playlists_config = [p for p in playlists_config if p.get("id") in only_ids]
+                self._log.info("Filtered playlists to process: {}", only_ids)
 
             # Process all playlists at once
             self._plex_smartplaylists(lib, playlists_config)

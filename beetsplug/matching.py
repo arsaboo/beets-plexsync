@@ -4,6 +4,10 @@ import re
 from typing import Optional, Tuple
 
 from beets.autotag import hooks
+try:
+    from beets.autotag.hooks import Distance
+except ImportError:
+    from beets.autotag.distance import Distance
 from beets.library import Item
 from plexapi.audio import Track
 
@@ -61,7 +65,7 @@ def plex_track_distance(
     item: Item,
     plex_track: Track,
     config: Optional[dict] = None
-) -> Tuple[float, hooks.Distance]:
+) -> Tuple[float, Distance]:
     """Calculate distance between a beets Item and Plex Track."""
     # Define base weights that will be adjusted based on available fields
     base_weights = {
@@ -71,7 +75,7 @@ def plex_track_distance(
     }
 
     # Create distance object
-    dist = hooks.Distance()
+    dist = Distance()
 
     # Check which fields are available
     has_title = bool(item.title and item.title.strip())
