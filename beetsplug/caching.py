@@ -248,35 +248,14 @@ class Cache:
         text = text.lower()
         # Remove featuring artists
         text = re.sub(
-            r"\s*[\(\[]?(?:feat\.?|ft\.?|featuring)\s+[^\]\)]+[\]\)]?\s*$", "", text
+            r"\s*[\(\[]?(?:feat\.?|ft\.?|featuring)\s+[^\]\)]+[\]\)]?\s*", "", text
         )
-        # Remove any remaining parentheses or brackets at the end
-        text = re.sub(r"\s*[\(\[][^\]\)]*[\]\)]\s*$", "", text)
+        # Remove any parentheses or brackets (anywhere in the text, not just at the end)
+        text = re.sub(r"\s*[\(\[][^\]\)]*[\]\)]\s*", "", text)
         # Remove extra whitespace
         text = " ".join(text.split())
         return text
 
-    def _fuzzy_match(self, text1, text2, threshold=0.8):
-        """Check if two texts are similar enough to be considered a match."""
-        if not text1 or not text2:
-            return False
-
-        # Exact match
-        if text1 == text2:
-            return True
-
-        # Remove parenthetical content for comparison
-        clean1 = re.sub(r'\s*\([^)]*\)\s*', ' ', text1).strip()
-        clean2 = re.sub(r'\s*\([^)]*\)\s*', ' ', text2).strip()
-
-        # Check if one is a substring of the other
-        if clean1 in clean2 or clean2 in clean1:
-            return True
-
-        # Calculate similarity ratio
-        import difflib
-        ratio = difflib.SequenceMatcher(None, clean1, clean2).ratio()
-        return ratio >= threshold
 
     def _make_cache_key(self, query_data):
         """Create a consistent cache key regardless of input type."""
@@ -346,42 +325,6 @@ class Cache:
                                    search_key,
                                    plex_ratingkey)
                         return (plex_ratingkey, cleaned_metadata)
-
-                # If no exact match found, try fuzzy matching for pipe-separated keys
-                if isinstance(query, dict):
-                    title = self.normalize_text(query.get('title', ''))
-                    artist = self.normalize_text(query.get('artist', ''))
-                    album = self.normalize_text(query.get('album', ''))
-
-                    # Get all pipe-separated cache entries for fuzzy matching
-                    cursor.execute(
-                        'SELECT query, plex_ratingkey, cleaned_query FROM cache WHERE query LIKE ? AND query NOT LIKE ? AND query NOT LIKE ?',
-                        (f'%{artist}%', '{%', '[%')  # Exclude JSON formats
-                    )
-                    pipe_entries = cursor.fetchall()
-
-                    for cached_query, plex_ratingkey, cleaned_metadata_json in pipe_entries:
-                        try:
-                            # Parse pipe-separated format
-                            parts = cached_query.split('|')
-                            if len(parts) == 3:
-                                cached_title, cached_artist, cached_album = parts
-
-                                # Check for fuzzy matches
-                                title_match = self._fuzzy_match(title, cached_title)
-                                artist_match = self._fuzzy_match(artist, cached_artist)
-                                album_match = self._fuzzy_match(album, cached_album)
-
-                                if title_match and artist_match and album_match:
-                                    cleaned_metadata = json.loads(cleaned_metadata_json) if cleaned_metadata_json else None
-                                    logger.debug('Fuzzy cache hit for query: {} (key: {}, rating_key: {})',
-                                               self._sanitize_query_for_log(query),
-                                               cached_query,
-                                               plex_ratingkey)
-                                    return (plex_ratingkey, cleaned_metadata)
-                        except Exception as e:
-                            logger.debug('Error parsing cached entry {}: {}', cached_query, e)
-                            continue
 
                 logger.debug('Cache miss for query: {}',
                             self._sanitize_query_for_log(query))
