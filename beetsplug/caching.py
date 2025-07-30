@@ -292,8 +292,24 @@ class Cache:
                     original_key = f"{query.get('title', '')}|{query.get('artist', '')}|{query.get('album', '')}"
                     normalized_key = f"{self.normalize_text(query.get('title', ''))}|{self.normalize_text(query.get('artist', ''))}|{self.normalize_text(query.get('album', ''))}"
                     search_keys = [original_key, normalized_key]
+
+                    # Add variations for quote normalization
+                    title_variations = []
+                    normalized_title = self.normalize_text(query.get('title', ''))
+
+                    # Create variations with different quote styles
+                    if '"' in normalized_title:
+                        title_variations.append(normalized_title.replace('"', "'"))
+                    if "'" in normalized_title:
+                        title_variations.append(normalized_title.replace("'", '"'))
+
+                    # Add these variations to search keys
+                    for title_var in title_variations:
+                        var_key = f"{title_var}|{self.normalize_text(query.get('artist', ''))}|{self.normalize_text(query.get('album', ''))}"
+                        search_keys.append(var_key)
                 else:
                     search_keys = [str(query)]
+
                 for search_key in search_keys:
                     cursor.execute(
                         'SELECT plex_ratingkey, cleaned_query FROM cache WHERE query = ?',

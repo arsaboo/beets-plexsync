@@ -1457,7 +1457,7 @@ class PlexSync(BeetsPlugin):
                 rating_key, cleaned_metadata = cached_result
                 # Handle negative cache (skipped tracks)
                 if rating_key == -1 or rating_key is None:
-                    # If we have cleaned metadata from LLM, try that first
+                    # If we have cleaned metadata from LLM and this is the first attempt, try that
                     if cleaned_metadata and not llm_attempted:
                         self._log.debug("Using cached cleaned metadata: {}", cleaned_metadata)
                         result = self.search_plex_song(cleaned_metadata, manual_search, llm_attempted=True)
@@ -1466,8 +1466,12 @@ class PlexSync(BeetsPlugin):
                         if result is not None:
                             self._log.debug("Cached cleaned metadata search succeeded, updating original cache: {}", song)
                             self._cache_result(cache_key, result)
-                        return result
-                    # Return None for definitively skipped tracks
+                            return result
+                        # If LLM search also fails, respect the original negative cache
+                        else:
+                            self._log.debug("Cached cleaned metadata search also failed, respecting original skip for: {}", song)
+                            return None
+                    # Return None for definitively skipped tracks (no cleaned metadata or already tried LLM)
                     self._log.debug("Found cached skip result for: {}", song)
                     return None
 
