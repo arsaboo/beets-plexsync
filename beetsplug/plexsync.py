@@ -1437,9 +1437,20 @@ class PlexSync(BeetsPlugin):
         if manual_search is None:
             manual_search = config["plexsync"]["manual_search"].get(bool)
 
-        # Check cache first - this is the key fix
+        # Debug the cache key generation
         cache_key = self.cache._make_cache_key(song)
+        self._log.debug("Generated cache key: '{}' for song: {}", cache_key, song)
+
+        # Check cache first - this is the key fix
         cached_result = self.cache.get(cache_key)
+
+        # Add debug info about cache lookup
+        if cached_result is not None:
+            self._log.debug("Cache HIT for key: '{}' -> result: {}", cache_key, cached_result)
+        else:
+            self._log.debug("Cache MISS for key: '{}'", cache_key)
+            # Debug what keys exist in cache for this song
+            self.cache.debug_cache_keys(song)
 
         if cached_result is not None:
             if isinstance(cached_result, tuple):
