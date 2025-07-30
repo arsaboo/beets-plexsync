@@ -290,7 +290,7 @@ class Cache:
                 # Generate cache key
                 cache_key = self._make_cache_key(query)
 
-                # Simple exact match lookup
+                # Try exact match first
                 cursor.execute(
                     'SELECT plex_ratingkey, cleaned_query FROM cache WHERE query = ?',
                     (cache_key,)
@@ -301,6 +301,26 @@ class Cache:
                     plex_ratingkey, cleaned_metadata_json = row
                     cleaned_metadata = json.loads(cleaned_metadata_json) if cleaned_metadata_json else None
                     return (plex_ratingkey, cleaned_metadata)
+
+                # If no exact match, try flexible matching for new pipe format only
+                # This handles cases where album names might have slight variations
+                if isinstance(query, dict):
+                    normalized_title = self.normalize_text(query.get("title", ""))
+                    normalized_artist = self.normalize_text(query.get("artist", ""))
+
+                    # Look for entries with same title and artist (new pipe format only)
+                    cursor.execute(
+                        '''SELECT plex_ratingkey, cleaned_query, query
+                           FROM cache
+                           WHERE query LIKE ? AND query LIKE '%|%' ''',
+                        (f'{normalized_title}|{normalized_artist}|%',)
+                    )
+
+                    for row in cursor.fetchall():
+                        plex_ratingkey, cleaned_metadata_json, cached_query = row
+                        cleaned_metadata = json.loads(cleaned_metadata_json) if cleaned_metadata_json else None
+                        logger.debug('Found flexible match: "{}" -> rating_key: {}', cached_query, plex_ratingkey)
+                        return (plex_ratingkey, cleaned_metadata)
 
                 return None
         except Exception as e:
@@ -434,47 +454,23 @@ class Cache:
             logger.error("Failed to clear negative cache entries: {}", e)
             return 0
 
-    def debug_cache_keys(self, query):
-        """Debug method to see what cache keys exist for a query."""
+    def clear_old_format_entries(self):
+        """Clear all old format cache entries (JSON and list formats)."""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
 
-                # Get all cache entries that might match
-                if isinstance(query, dict):
-                    title = self.normalize_text(query.get("title", ""))
-                    artist = self.normalize_text(query.get("artist", ""))
+                # Delete entries that don't use the new pipe format
+                cursor.execute(
+                    "DELETE FROM cache WHERE query NOT LIKE '%|%' OR query LIKE '{%' OR query LIKE '[%'"
+                )
+                cleared_count = cursor.rowcount
 
-                    logger.debug(
-                        "=== CACHE DEBUG for title='{}', artist='{}', album='{}' ===",
-                        title,
-                        artist,
-                        query.get("album"),
-                    )
+                if cleared_count > 0:
+                    logger.info("Cleared {} old format cache entries", cleared_count)
 
-                    # Show all entries that contain the title or artist
-                    cursor.execute(
-                        "SELECT query, plex_ratingkey FROM cache WHERE query LIKE ? OR query LIKE ?",
-                        (f"%{title}%", f"%{artist}%"),
-                    )
-                    rows = cursor.fetchall()
-
-                    logger.debug("Found {} potential cache matches:", len(rows))
-                    for i, (cached_query, rating_key) in enumerate(rows):
-                        logger.debug(
-                            "  {}: key='{}' -> rating_key={}",
-                            i + 1,
-                            cached_query,
-                            rating_key,
-                        )
-                        # Try to parse if it's JSON
-                        try:
-                            parsed = json.loads(cached_query)
-                            logger.debug("      Parsed as JSON: {}", parsed)
-                        except Exception:
-                            logger.debug("      Not JSON format")
-
-                    logger.debug("=== END CACHE DEBUG ===")
-
+                conn.commit()
+                return cleared_count
         except Exception as e:
-            logger.error("Cache debug failed: {}", e)
+            logger.error("Failed to clear old format cache entries: {}", e)
+            return 0
