@@ -259,20 +259,16 @@ class Cache:
 
     def _make_cache_key(self, query_data):
         """Create a consistent cache key regardless of input type."""
-        logger.debug("_make_cache_key input: {}", query_data)
         if isinstance(query_data, str):
             return query_data
         elif isinstance(query_data, dict):
-            # Normalize and clean the key fields - all must be normalized consistently
+            # Normalize and clean the key fields - keep the original 3-part format
             normalized_title = self.normalize_text(query_data.get("title", ""))
             normalized_artist = self.normalize_text(query_data.get("artist", ""))
             normalized_album = self.normalize_text(query_data.get("album", ""))
 
-            # Create a simple pipe-separated key that's more readable and consistent
+            # Create a pipe-separated key with title|artist|album
             key_str = f"{normalized_title}|{normalized_artist}|{normalized_album}"
-            logger.debug("_make_cache_key normalized: title='{}', artist='{}', album='{}'",
-                        normalized_title, normalized_artist, normalized_album)
-            logger.debug("_make_cache_key output: {}", key_str)
             return key_str
         return str(query_data)
 
@@ -290,113 +286,29 @@ class Cache:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                if isinstance(query, dict):
-                    # Generate the primary cache key using the normalized format
-                    cache_key = self._make_cache_key(query)
 
-                    # Debug: show the exact key we're looking for
-                    logger.debug('Looking for exact cache key: "{}"', cache_key)
+                # Generate cache key
+                cache_key = self._make_cache_key(query)
 
-                    # Try exact match first
-                    cursor.execute(
-                        'SELECT plex_ratingkey, cleaned_query FROM cache WHERE query = ?',
-                        (cache_key,)
-                    )
-                    row = cursor.fetchone()
-                    if row:
-                        plex_ratingkey, cleaned_metadata_json = row
-                        cleaned_metadata = json.loads(cleaned_metadata_json) if cleaned_metadata_json else None
-                        logger.debug('Cache hit for query: {} (key: {}, rating_key: {})',
-                                   self._sanitize_query_for_log(query),
-                                   cache_key,
-                                   plex_ratingkey)
-                        return (plex_ratingkey, cleaned_metadata)
+                # Simple exact match lookup
+                cursor.execute(
+                    'SELECT plex_ratingkey, cleaned_query FROM cache WHERE query = ?',
+                    (cache_key,)
+                )
+                row = cursor.fetchone()
 
-                    # Debug: Check if any keys are close matches
-                    normalized_title = self.normalize_text(query.get('title', ''))
-                    normalized_artist = self.normalize_text(query.get('artist', ''))
+                if row:
+                    plex_ratingkey, cleaned_metadata_json = row
+                    cleaned_metadata = json.loads(cleaned_metadata_json) if cleaned_metadata_json else None
+                    return (plex_ratingkey, cleaned_metadata)
 
-                    logger.debug('No exact match found. Searching for title="{}" and artist="{}"',
-                               normalized_title, normalized_artist)
-
-                    # Search for entries with matching title and artist
-                    cursor.execute(
-                        '''SELECT query, plex_ratingkey, cleaned_query
-                           FROM cache
-                           WHERE LOWER(query) LIKE ? AND LOWER(query) LIKE ?''',
-                        (f'%{normalized_title}%', f'%{normalized_artist}%')
-                    )
-
-                    rows = cursor.fetchall()
-                    logger.debug('Found {} potential matches via LIKE query', len(rows))
-
-                    for row in rows:
-                        cached_query, plex_ratingkey, cleaned_metadata_json = row
-                        logger.debug('Checking cached key: "{}"', cached_query)
-
-                        # Try to extract normalized components from cached query
-                        cached_title = None
-                        cached_artist = None
-
-                        if '|' in cached_query:
-                            # New pipe format
-                            parts = cached_query.lower().split('|')
-                            if len(parts) >= 2:
-                                cached_title = parts[0].strip()
-                                cached_artist = parts[1].strip()
-                                logger.debug('Parsed pipe format: title="{}", artist="{}"', cached_title, cached_artist)
-                        else:
-                            # Try JSON format
-                            try:
-                                cached_data = json.loads(cached_query)
-                                cached_title = self.normalize_text(cached_data.get('title', ''))
-                                cached_artist = self.normalize_text(cached_data.get('artist', ''))
-                                logger.debug('Parsed JSON format: title="{}", artist="{}"', cached_title, cached_artist)
-                            except json.JSONDecodeError:
-                                logger.debug('Failed to parse as JSON, skipping')
-                                continue
-
-                        # Check if this is a good match
-                        if cached_title and cached_artist:
-                            title_match = cached_title == normalized_title
-                            artist_match = (cached_artist == normalized_artist or
-                                          normalized_artist in cached_artist or
-                                          cached_artist in normalized_artist)
-
-                            logger.debug('Match check: title_match={}, artist_match={}', title_match, artist_match)
-
-                            # For fuzzy matching, title and artist match is sufficient
-                            # (album can vary more due to different sources/versions)
-                            if title_match and artist_match:
-                                cleaned_metadata = json.loads(cleaned_metadata_json) if cleaned_metadata_json else None
-                                logger.debug('Cache hit via fuzzy match: {} (cached_key: {}, rating_key: {})',
-                                           self._sanitize_query_for_log(query),
-                                           cached_query,
-                                           plex_ratingkey)
-                                return (plex_ratingkey, cleaned_metadata)
-                else:
-                    search_key = str(query)
-                    cursor.execute(
-                        'SELECT plex_ratingkey, cleaned_query FROM cache WHERE query = ?',
-                        (search_key,)
-                    )
-                    row = cursor.fetchone()
-                    if row:
-                        plex_ratingkey, cleaned_metadata_json = row
-                        cleaned_metadata = json.loads(cleaned_metadata_json) if cleaned_metadata_json else None
-                        logger.debug('Cache hit for string query: {} (rating_key: {})',
-                                   search_key, plex_ratingkey)
-                        return (plex_ratingkey, cleaned_metadata)
-
-                logger.debug('Cache miss for query: {}',
-                            self._sanitize_query_for_log(query))
                 return None
         except Exception as e:
             logger.error('Cache lookup failed: {}', str(e))
             return None
 
     def set(self, query, plex_ratingkey, cleaned_metadata=None):
-        """Store result in cache using both original and normalized keys."""
+        """Store result in cache."""
         try:
             def datetime_handler(obj):
                 if isinstance(obj, datetime):
@@ -406,32 +318,18 @@ class Cache:
             rating_key = -1 if plex_ratingkey is None else int(plex_ratingkey)
             cleaned_json = json.dumps(cleaned_metadata, default=datetime_handler) if cleaned_metadata else None
 
-            if isinstance(query, dict):
-                original_key = f"{query.get('title', '')}|{query.get('artist', '')}|{query.get('album', '')}"
-                normalized_key = f"{self.normalize_text(query.get('title', ''))}|{self.normalize_text(query.get('artist', ''))}|{self.normalize_text(query.get('album', ''))}"
-                with sqlite3.connect(self.db_path) as conn:
-                    cursor = conn.cursor()
-                    for cache_key in {original_key, normalized_key}:
-                        # Only cache if title is present and non-empty
-                        if query.get('title') and query.get('title').strip():
-                            cursor.execute(
-                                'REPLACE INTO cache (query, plex_ratingkey, cleaned_query) VALUES (?, ?, ?)',
-                                (cache_key, rating_key, cleaned_json)
-                            )
-                    conn.commit()
-                    logger.debug('Cached result for original and normalized keys: "{}", "{}" (rating_key: {})',
-                               original_key, normalized_key, rating_key)
-            else:
-                cache_key = str(query)
-                with sqlite3.connect(self.db_path) as conn:
-                    cursor = conn.cursor()
-                    cursor.execute(
-                        'REPLACE INTO cache (query, plex_ratingkey, cleaned_query) VALUES (?, ?, ?)',
-                        (cache_key, rating_key, cleaned_json)
-                    )
-                    conn.commit()
-                    logger.debug('Cached result for string query: "{}" (rating_key: {})',
-                               cache_key, rating_key)
+            # Generate cache key using the same method as get()
+            cache_key = self._make_cache_key(query)
+
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    'REPLACE INTO cache (query, plex_ratingkey, cleaned_query) VALUES (?, ?, ?)',
+                    (cache_key, rating_key, cleaned_json)
+                )
+                conn.commit()
+                logger.debug('Cached result: "{}" -> rating_key: {}', cache_key, rating_key)
+
         except Exception as e:
             logger.error('Cache storage failed for query "{}": {}',
                         self._sanitize_query_for_log(query), str(e))
