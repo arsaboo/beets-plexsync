@@ -324,7 +324,7 @@ class Cache:
                                    search_key,
                                    plex_ratingkey)
                         return (plex_ratingkey, cleaned_metadata)
-                logger.debug('Cache miss for query: {}',
+                    logger.debug('Cache miss for query: {}',
                             self._sanitize_query_for_log(query))
                 return None
         except Exception as e:

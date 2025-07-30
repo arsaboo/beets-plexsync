@@ -1499,6 +1499,11 @@ class PlexSync(BeetsPlugin):
                     # If cached item not found in Plex, remove it from cache and continue
                     self.cache.set(cache_key, None)
 
+        # If we reach here and this is an LLM attempt that failed, don't proceed with regular search
+        if llm_attempted:
+            self._log.debug("LLM search attempt failed, not proceeding with regular search for: {}", song)
+            return None
+
         # Try regular search
         # Ensure song["artist"] is not None before splitting
         try:
