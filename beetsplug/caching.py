@@ -474,3 +474,42 @@ class Cache:
         except Exception as e:
             logger.error("Failed to clear old format cache entries: {}", e)
             return 0
+
+    def debug_cache_keys(self, query):
+        """Debug method to see what cache keys exist for a query (new format only)."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+
+                # Get all cache entries that might match
+                if isinstance(query, dict):
+                    title = self.normalize_text(query.get("title", ""))
+                    artist = self.normalize_text(query.get("artist", ""))
+
+                    logger.debug(
+                        "=== CACHE DEBUG for title='{}', artist='{}', album='{}' ===",
+                        title,
+                        artist,
+                        query.get("album"),
+                    )
+
+                    # Show only new format entries that contain the title or artist
+                    cursor.execute(
+                        "SELECT query, plex_ratingkey FROM cache WHERE (query LIKE ? OR query LIKE ?) AND query LIKE '%|%'",
+                        (f"%{title}%", f"%{artist}%"),
+                    )
+                    rows = cursor.fetchall()
+
+                    logger.debug("Found {} new format cache matches:", len(rows))
+                    for i, (cached_query, rating_key) in enumerate(rows):
+                        logger.debug(
+                            "  {}: key='{}' -> rating_key={}",
+                            i + 1,
+                            cached_query,
+                            rating_key,
+                        )
+
+                    logger.debug("=== END CACHE DEBUG ===")
+
+        except Exception as e:
+            logger.error("Cache debug failed: {}", e)
