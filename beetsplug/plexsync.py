@@ -997,7 +997,7 @@ class PlexSync(BeetsPlugin):
             except exceptions.BadRequest as e:
                 self._log.error(
                     "Error adding items {} to {} playlist. Error: {}",
-                    items,
+                    to_add,
                     playlist,
                     e,
                 )
@@ -1028,7 +1028,7 @@ class PlexSync(BeetsPlugin):
             except exceptions.BadRequest as e:
                 self._log.error(
                     "Error adding items {} to {} collection. Error: {}",
-                    items,
+                    to_add,
                     playlist,
                     e,
                 )
@@ -1435,37 +1435,54 @@ class PlexSync(BeetsPlugin):
     def search_plex_song(self, song, manual_search=None, llm_attempted=False):
         """Fetch the Plex track key with fallback options."""
         if manual_search is None:
-            manual_search = config["plexsync"]["manual_search"].get(bool)        # Check cache first
+            manual_search = config["plexsync"]["manual_search"].get(bool)
+
+        # Check cache first - this is the key fix
         cache_key = self.cache._make_cache_key(song)
         cached_result = self.cache.get(cache_key)
+
         if cached_result is not None:
             if isinstance(cached_result, tuple):
                 rating_key, cleaned_metadata = cached_result
-                if rating_key == -1 or rating_key is None:  # Handle both None and -1
+                # Handle negative cache (skipped tracks)
+                if rating_key == -1 or rating_key is None:
+                    # If we have cleaned metadata from LLM, try that first
                     if cleaned_metadata and not llm_attempted:
                         self._log.debug("Using cached cleaned metadata: {}", cleaned_metadata)
                         result = self.search_plex_song(cleaned_metadata, manual_search, llm_attempted=True)
 
-                        # If we found a match using cached cleaned metadata, update the original cache entry
+                        # If LLM search succeeds, update the original cache
                         if result is not None:
                             self._log.debug("Cached cleaned metadata search succeeded, updating original cache: {}", song)
                             self._cache_result(cache_key, result)
-
                         return result
-                    return None  # Return None if we have a negative cache result
+                    # Return None for definitively skipped tracks
+                    self._log.debug("Found cached skip result for: {}", song)
+                    return None
+
+                # Handle positive cache (matched tracks)
                 try:
-                    if rating_key:  # Only try to fetch if we have a valid rating key
-                        return self.music.fetchItem(rating_key)
+                    if rating_key:
+                        cached_track = self.music.fetchItem(rating_key)
+                        self._log.debug("Found cached match for: {} -> {}", song, cached_track.title)
+                        return cached_track
                 except Exception as e:
                     self._log.debug("Failed to fetch cached item {}: {}", rating_key, e)
+                    # If cached item not found in Plex, remove it from cache and continue
+                    self.cache.set(cache_key, None)
             else:  # Legacy cache entry
                 if cached_result == -1 or cached_result is None:
+                    self._log.debug("Found legacy cached skip result for: {}", song)
                     return None
                 try:
-                    if cached_result:  # Only try to fetch if we have a valid rating key
-                        return self.music.fetchItem(cached_result)
+                    if cached_result:
+                        cached_track = self.music.fetchItem(cached_result)
+                        self._log.debug("Found legacy cached match for: {} -> {}", song, cached_track.title)
+                        return cached_track
                 except Exception as e:
-                    self._log.debug("Failed to fetch cached item {}: {}", cached_result, e)
+                    self._log.debug("Failed to fetch legacy cached item {}: {}", cached_result, e)
+                    # If cached item not found in Plex, remove it from cache and continue
+                    self.cache.set(cache_key, None)
 
         # Try regular search
         # Ensure song["artist"] is not None before splitting
