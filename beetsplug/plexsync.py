@@ -2093,24 +2093,49 @@ class PlexSync(BeetsPlugin):
             self._log.debug(
                 f"Playlist {playlist_name} created with id " f"{playlist_id}"
             )
+
+        # Get current playlist tracks
         playlist_tracks = self.get_playlist_tracks(playlist_id)
-        # get the tracks in the playlist
-        uris = [
-            track["track"]["uri"].replace("spotify:track:", "")
-            for track in playlist_tracks
+        current_track_ids = [
+            track["track"]["id"] for track in playlist_tracks
+            if track["track"]
         ]
-        track_uris = list(set(track_uris) - set(uris))
-        self._log.debug(f"Tracks to be added: {track_uris}")
-        if len(track_uris) > 0:
-            for i in range(0, len(track_uris), 100):
-                chunk = track_uris[i : i + 100]
+
+        # Convert track_uris to track IDs (remove spotify:track: prefix if present)
+        target_track_ids = [
+            uri.replace("spotify:track:", "") if uri.startswith("spotify:track:") else uri
+            for uri in track_uris
+        ]
+
+        # Find tracks to add and remove
+        current_set = set(current_track_ids)
+        target_set = set(target_track_ids)
+
+        tracks_to_add = list(target_set - current_set)
+        tracks_to_remove = list(current_set - target_set)
+
+        self._log.debug(f"Current playlist has {len(current_track_ids)} tracks")
+        self._log.debug(f"Target playlist should have {len(target_track_ids)} tracks")
+        self._log.debug(f"Tracks to add: {len(tracks_to_add)}")
+        self._log.debug(f"Tracks to remove: {len(tracks_to_remove)}")
+
+        # Remove tracks that shouldn't be in the playlist
+        if tracks_to_remove:
+            for i in range(0, len(tracks_to_remove), 100):
+                chunk = tracks_to_remove[i : i + 100]
+                self.sp.user_playlist_remove_all_occurrences_of_tracks(user_id, playlist_id, chunk)
+            self._log.debug(f"Removed {len(tracks_to_remove)} tracks from playlist {playlist_id}")
+
+        # Add new tracks to the top of the playlist
+        if tracks_to_add:
+            for i in range(0, len(tracks_to_add), 100):
+                chunk = tracks_to_add[i : i + 100]
                 # Add tracks to the top of the playlist (position 0)
                 self.sp.user_playlist_add_tracks(user_id, playlist_id, chunk, position=0)
-            self._log.debug(
-                f"Added {len(track_uris)} tracks to top of playlist " f"{playlist_id}"
-            )
-        else:
-            self._log.debug("No tracks to add to playlist")
+            self._log.debug(f"Added {len(tracks_to_add)} new tracks to playlist {playlist_id}")
+
+        if not tracks_to_add and not tracks_to_remove:
+            self._log.debug("Playlist is already in sync - no changes needed")
 
     def get_config_value(self, item_cfg, defaults_cfg, key, code_default):
         if key in item_cfg:
