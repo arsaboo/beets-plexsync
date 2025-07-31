@@ -2104,9 +2104,10 @@ class PlexSync(BeetsPlugin):
         if len(track_uris) > 0:
             for i in range(0, len(track_uris), 100):
                 chunk = track_uris[i : i + 100]
-                self.sp.user_playlist_add_tracks(user_id, playlist_id, chunk)
+                # Add tracks to the top of the playlist (position 0)
+                self.sp.user_playlist_add_tracks(user_id, playlist_id, chunk, position=0)
             self._log.debug(
-                f"Added {len(track_uris)} tracks to playlist " f"{playlist_id}"
+                f"Added {len(track_uris)} tracks to top of playlist " f"{playlist_id}"
             )
         else:
             self._log.debug("No tracks to add to playlist")
