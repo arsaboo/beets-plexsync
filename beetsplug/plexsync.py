@@ -2034,6 +2034,7 @@ class PlexSync(BeetsPlugin):
         # Build lookup once for all tracks
         plex_lookup = self.build_plex_lookup(lib)
 
+        # Process tracks in order and maintain the original Plex playlist order
         spotify_tracks = []
         for item in plex_playlist_items:
             self._log.debug("Processing {}", item.ratingKey)
@@ -2059,7 +2060,6 @@ class PlexSync(BeetsPlugin):
             if not spotify_track_id:
                 self._log.debug(
                     "Searching for {} {} in Spotify",
-
                     beets_item.title,
                     beets_item.album
                 )
@@ -2074,6 +2074,8 @@ class PlexSync(BeetsPlugin):
                 spotify_track_id = spotify_search_results["tracks"]["items"][0]["id"]
 
             spotify_tracks.append(spotify_track_id)
+
+        self._log.debug("Found {} Spotify tracks in Plex playlist order", len(spotify_tracks))
 
         self.add_tracks_to_spotify_playlist(playlist, spotify_tracks)
 
@@ -2107,11 +2109,12 @@ class PlexSync(BeetsPlugin):
             for uri in track_uris
         ]
 
-        # Find tracks to add and remove
+        # Find tracks to add and remove while preserving order
         current_set = set(current_track_ids)
         target_set = set(target_track_ids)
 
-        tracks_to_add = list(target_set - current_set)
+        # Use list comprehension to preserve order for tracks to add
+        tracks_to_add = [track_id for track_id in target_track_ids if track_id not in current_set]
         tracks_to_remove = list(current_set - target_set)
 
         self._log.debug(f"Current playlist has {len(current_track_ids)} tracks")
@@ -2123,16 +2126,27 @@ class PlexSync(BeetsPlugin):
         if tracks_to_remove:
             for i in range(0, len(tracks_to_remove), 100):
                 chunk = tracks_to_remove[i : i + 100]
-                self.sp.user_playlist_remove_all_occurrences_of_tracks(user_id, playlist_id, chunk)
+                self.sp.user_playlist_remove_all_occurrences_of_tracks(
+                    user_id, playlist_id, chunk
+                )
             self._log.debug(f"Removed {len(tracks_to_remove)} tracks from playlist {playlist_id}")
 
         # Add new tracks to the top of the playlist
         if tracks_to_add:
-            for i in range(0, len(tracks_to_add), 100):
-                chunk = tracks_to_add[i : i + 100]
-                # Add tracks to the top of the playlist (position 0)
-                self.sp.user_playlist_add_tracks(user_id, playlist_id, chunk, position=0)
-            self._log.debug(f"Added {len(tracks_to_add)} new tracks to playlist {playlist_id}")
+            # Add tracks in reverse order so they appear in correct order at the top
+            # Since position=0 always adds at the very top, we need to add the last track first
+            # Process in reverse order to maintain the original Plex playlist sequence
+            for i in range(len(tracks_to_add) - 1, -1, -100):
+                # Get chunk in reverse order (from end to start)
+                start_idx = max(0, i - 99)  # Ensure we don't go below 0
+                chunk = tracks_to_add[start_idx:i + 1]
+
+                # Add this chunk at position 0
+                self.sp.user_playlist_add_tracks(
+                    user_id, playlist_id, chunk, position=0
+                )
+
+            self._log.debug(f"Added {len(tracks_to_add)} new tracks to top of playlist {playlist_id}")
 
         if not tracks_to_add and not tracks_to_remove:
             self._log.debug("Playlist is already in sync - no changes needed")
