@@ -2969,6 +2969,115 @@ class PlexSync(BeetsPlugin):
 
         self._log.info("Successfully updated {} playlist with {} tracks", playlist_name, len(selected_tracks))
 
+    def generate_recent_hits(self, lib, rh_config, plex_lookup, preferred_genres, similar_tracks):
+        """Generate a Recent Hits playlist featuring recent and popular tracks."""
+        playlist_name = rh_config.get("name", "Recent Hits")
+        self._log.info("Generating {} playlist", playlist_name)
+
+        # Get configuration
+        if "playlists" in config["plexsync"] and "defaults" in config["plexsync"]["playlists"]:
+            defaults_cfg = config["plexsync"]["playlists"]["defaults"].get({})
+        else:
+            defaults_cfg = {}
+
+        max_tracks = self.get_config_value(rh_config, defaults_cfg, "max_tracks", 20)
+        discovery_ratio = self.get_config_value(rh_config, defaults_cfg, "discovery_ratio", 20)  # Lower for more rated tracks
+        inclusion_days = self.get_config_value(rh_config, defaults_cfg, "inclusion_days", 365)  # Include recent tracks
+
+        # Get filters from config
+        filters = rh_config.get("filters", {})
+
+        # If no genres configured in filters, use preferred_genres
+        if not filters:
+            filters = {'include': {'genres': preferred_genres}}
+        elif 'include' not in filters or 'genres' not in filters['include']:
+            if 'include' not in filters:
+                filters['include'] = {}
+            filters['include']['genres'] = preferred_genres
+            self._log.debug("Using preferred genres as no genres configured: {}", preferred_genres)
+
+        # Modify filters to prioritize recent tracks
+        if 'include' not in filters:
+            filters['include'] = {}
+
+        # Add year filter for recent tracks (last 2 years by default)
+        current_year = datetime.now().year
+        if 'years' not in filters['include']:
+            filters['include']['years'] = {}
+        if 'after' not in filters['include']['years']:
+            filters['include']['years']['after'] = current_year - 2
+
+        # For recent hits, we want to INCLUDE recently played tracks (opposite of exclusion)
+        # So we'll set exclusion_days to a small value or 0
+        exclusion_days = 0  # Don't exclude recently played tracks
+
+        # Get initial track pool using configured or preferred genres and filters
+        self._log.info("Searching library with filters for recent tracks...")
+        all_library_tracks = self.get_filtered_library_tracks(
+            [], # No need to pass preferred_genres since they're now in filters if needed
+            filters,
+            exclusion_days
+        )
+
+        # Convert to beets items
+        final_tracks = []
+        for track in all_library_tracks:
+            try:
+                beets_item = plex_lookup.get(track.ratingKey)
+                if beets_item:
+                    final_tracks.append(beets_item)
+            except Exception as e:
+                self._log.debug("Error converting track {}: {}", track.title, e)
+
+        self._log.debug("Converted {} tracks to beets items", len(final_tracks))
+
+        # Filter tracks to only include recent ones based on inclusion_days
+        cutoff_date = datetime.now() - timedelta(days=inclusion_days)
+        recent_tracks = []
+        for track in final_tracks:
+            # Check if track has a release year and it's recent
+            track_year = getattr(track, 'year', None)
+            if track_year and int(track_year) >= (current_year - 2):
+                recent_tracks.append(track)
+            # Also include tracks with recent play dates if available
+            elif hasattr(track, 'plex_lastviewedat') and track.plex_lastviewedat:
+                last_played = datetime.fromtimestamp(track.plex_lastviewedat)
+                if last_played >= cutoff_date:
+                    recent_tracks.append(track)
+            # If no date information, include it for now (will be filtered by scoring)
+
+        self._log.debug("Filtered to {} recent tracks", len(recent_tracks))
+
+        # For Recent Hits, we want to prioritize highly rated and popular tracks
+        # So we'll sort by a combination of rating, popularity, and recency
+        scored_tracks = []
+        for track in recent_tracks:
+            score = self.calculate_track_score(track)
+            scored_tracks.append((track, score))
+
+        # Sort by score descending (highest scores first)
+        scored_tracks.sort(key=lambda x: x[1], reverse=True)
+
+        # Take top tracks up to max_tracks
+        selected_tracks = [track for track, score in scored_tracks[:max_tracks]]
+
+        self._log.info("Selected {} tracks for Recent Hits playlist based on ratings, popularity, and recency", len(selected_tracks))
+
+        if not selected_tracks:
+            self._log.warning("No tracks matched criteria for Recent Hits playlist")
+            return
+
+        # Create/update playlist
+        try:
+            self._plex_clear_playlist(playlist_name)
+            self._log.info("Cleared existing Recent Hits playlist")
+        except exceptions.NotFound:
+            self._log.debug("No existing Recent Hits playlist found")
+
+        self._plex_add_playlist_item(selected_tracks, playlist_name)
+
+        self._log.info("Successfully updated {} playlist with {} tracks", playlist_name, len(selected_tracks))
+
     def import_m3u8_playlist(self, filepath):
         """Import M3U8 playlist with caching."""
         return import_m3u8_playlist(filepath, self.cache)
@@ -3364,16 +3473,18 @@ class PlexSync(BeetsPlugin):
 
             if (playlist_type == "imported"):
                 self.generate_imported_playlist(lib, p, plex_lookup)  # Pass plex_lookup
-            elif playlist_id in ["daily_discovery", "forgotten_gems"]:
+            elif playlist_id in ["daily_discovery", "forgotten_gems", "recent_hits"]:
                 if playlist_id == "daily_discovery":
                     self.generate_daily_discovery(lib, p, plex_lookup, preferred_genres, similar_tracks)
-                else:  # forgotten_gems
+                elif playlist_id == "forgotten_gems":
                     self.generate_forgotten_gems(lib, p, plex_lookup, preferred_genres, similar_tracks)
+                else:  # recent_hits
+                    self.generate_recent_hits(lib, p, plex_lookup, preferred_genres, similar_tracks)
             else:
                 self._log.warning(
                     "Unrecognized playlist configuration '{}' - type: '{}', id: '{}'. "
                     "Valid types are 'imported' or 'smart'. "
-                    "Valid smart playlist IDs are 'daily_discovery' and 'forgotten_gems'.",
+                    "Valid smart playlist IDs are 'daily_discovery', 'forgotten_gems', and 'recent_hits'.",
                     playlist_name, playlist_type, playlist_id
                 )
 

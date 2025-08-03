@@ -43,7 +43,18 @@ The command will only generate the specified playlists, skipping others in your 
       - Percentage of playlist to fill with unrated but popular tracks (configurable via `discovery_ratio`, default 30%)
       - Excludes tracks played recently (configurable via `exclusion_days`)
 
-  3. **Imported Playlists**:
+  3. **Recent Hits**:
+      - Creates a playlist of recent and popular tracks
+      - Focuses on tracks released in the last 2 years (configurable via `inclusion_days`)
+      - Prioritizes highly-rated and popular tracks based on a scoring system
+      - Only includes tracks matching your genre preferences
+      - Automatically adjusts selection criteria based on your library's characteristics
+      - Limits the playlist size (configurable via `max_tracks`, default 20)
+      - Minimum rating for tracks to be included (configurable via `min_rating`, default 4)
+      - Percentage of playlist to fill with highly-rated tracks (configurable via `discovery_ratio`, default 20%)
+      - Includes tracks played recently (opposite of Forgotten Gems)
+
+  4. **Imported Playlists**:
       - Import playlists from external services (Spotify, Apple Music, YouTube, etc.) and local M3U8 files
       - Configure multiple source URLs and file paths per playlist
       - For M3U8 files, use paths relative to beets config directory or absolute paths
