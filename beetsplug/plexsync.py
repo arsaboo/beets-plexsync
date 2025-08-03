@@ -997,7 +997,7 @@ class PlexSync(BeetsPlugin):
             except exceptions.BadRequest as e:
                 self._log.error(
                     "Error adding items {} to {} playlist. Error: {}",
-                    items,
+                    to_add,
                     playlist,
                     e,
                 )
@@ -1028,7 +1028,7 @@ class PlexSync(BeetsPlugin):
             except exceptions.BadRequest as e:
                 self._log.error(
                     "Error adding items {} to {} collection. Error: {}",
-                    items,
+                    to_add,
                     playlist,
                     e,
                 )
@@ -1206,14 +1206,16 @@ class PlexSync(BeetsPlugin):
 
         selected_track = sorted_tracks[sel - 1][0] if sel > 0 else None
         if selected_track:
-            # Cache the result for the current song query
-            self._cache_result(song, selected_track)
+            # Cache the result for the current song query using proper cache key
+            current_cache_key = self.cache._make_cache_key(song)
+            self._cache_result(current_cache_key, selected_track)
             self._log.debug("Cached result for current song query: {}", song)
 
             # ALWAYS cache for the original query that led to this manual search
             if original_query is not None and original_query != song:
+                original_cache_key = self.cache._make_cache_key(original_query)
                 self._log.debug("Also caching result for original query key: {}", original_query)
-                self._cache_result(original_query, selected_track)
+                self._cache_result(original_cache_key, selected_track)
 
             return selected_track
 
@@ -1435,37 +1437,74 @@ class PlexSync(BeetsPlugin):
     def search_plex_song(self, song, manual_search=None, llm_attempted=False):
         """Fetch the Plex track key with fallback options."""
         if manual_search is None:
-            manual_search = config["plexsync"]["manual_search"].get(bool)        # Check cache first
+            manual_search = config["plexsync"]["manual_search"].get(bool)
+
+        # Debug the cache key generation
         cache_key = self.cache._make_cache_key(song)
+        self._log.debug("Generated cache key: '{}' for song: {}", cache_key, song)
+
+        # Check cache first - this is the key fix
         cached_result = self.cache.get(cache_key)
+
+        # Add debug info about cache lookup
+        if cached_result is not None:
+            self._log.debug("Cache HIT for key: '{}' -> result: {}", cache_key, cached_result)
+        else:
+            self._log.debug("Cache MISS for key: '{}'", cache_key)
+            # Debug what keys exist in cache for this song
+            self.cache.debug_cache_keys(song)
+
         if cached_result is not None:
             if isinstance(cached_result, tuple):
                 rating_key, cleaned_metadata = cached_result
-                if rating_key == -1 or rating_key is None:  # Handle both None and -1
+                # Handle negative cache (skipped tracks)
+                if rating_key == -1 or rating_key is None:
+                    # If we have cleaned metadata from LLM and this is the first attempt, try that
                     if cleaned_metadata and not llm_attempted:
                         self._log.debug("Using cached cleaned metadata: {}", cleaned_metadata)
                         result = self.search_plex_song(cleaned_metadata, manual_search, llm_attempted=True)
 
-                        # If we found a match using cached cleaned metadata, update the original cache entry
+                        # If LLM search succeeds, update the original cache
                         if result is not None:
                             self._log.debug("Cached cleaned metadata search succeeded, updating original cache: {}", song)
                             self._cache_result(cache_key, result)
+                            return result
+                        # If LLM search also fails, respect the original negative cache
+                        else:
+                            self._log.debug("Cached cleaned metadata search also failed, respecting original skip for: {}", song)
+                            return None
+                    # Return None for definitively skipped tracks (no cleaned metadata or already tried LLM)
+                    self._log.debug("Found cached skip result for: {}", song)
+                    return None
 
-                        return result
-                    return None  # Return None if we have a negative cache result
+                # Handle positive cache (matched tracks)
                 try:
-                    if rating_key:  # Only try to fetch if we have a valid rating key
-                        return self.music.fetchItem(rating_key)
+                    if rating_key:
+                        cached_track = self.music.fetchItem(rating_key)
+                        self._log.debug("Found cached match for: {} -> {}", song, cached_track.title)
+                        return cached_track
                 except Exception as e:
                     self._log.debug("Failed to fetch cached item {}: {}", rating_key, e)
+                    # If cached item not found in Plex, remove it from cache and continue
+                    self.cache.set(cache_key, None)
             else:  # Legacy cache entry
                 if cached_result == -1 or cached_result is None:
+                    self._log.debug("Found legacy cached skip result for: {}", song)
                     return None
                 try:
-                    if cached_result:  # Only try to fetch if we have a valid rating key
-                        return self.music.fetchItem(cached_result)
+                    if cached_result:
+                        cached_track = self.music.fetchItem(cached_result)
+                        self._log.debug("Found legacy cached match for: {} -> {}", song, cached_track.title)
+                        return cached_track
                 except Exception as e:
-                    self._log.debug("Failed to fetch cached item {}: {}", cached_result, e)
+                    self._log.debug("Failed to fetch legacy cached item {}: {}", cached_result, e)
+                    # If cached item not found in Plex, remove it from cache and continue
+                    self.cache.set(cache_key, None)
+
+        # If we reach here and this is an LLM attempt that failed, don't proceed with regular search
+        if llm_attempted:
+            self._log.debug("LLM search attempt failed, not proceeding with regular search for: {}", song)
+            return None
 
         # Try regular search
         # Ensure song["artist"] is not None before splitting
@@ -1995,6 +2034,7 @@ class PlexSync(BeetsPlugin):
         # Build lookup once for all tracks
         plex_lookup = self.build_plex_lookup(lib)
 
+        # Process tracks in order and maintain the original Plex playlist order
         spotify_tracks = []
         for item in plex_playlist_items:
             self._log.debug("Processing {}", item.ratingKey)
@@ -2020,7 +2060,6 @@ class PlexSync(BeetsPlugin):
             if not spotify_track_id:
                 self._log.debug(
                     "Searching for {} {} in Spotify",
-
                     beets_item.title,
                     beets_item.album
                 )
@@ -2035,6 +2074,8 @@ class PlexSync(BeetsPlugin):
                 spotify_track_id = spotify_search_results["tracks"]["items"][0]["id"]
 
             spotify_tracks.append(spotify_track_id)
+
+        self._log.debug("Found {} Spotify tracks in Plex playlist order", len(spotify_tracks))
 
         self.add_tracks_to_spotify_playlist(playlist, spotify_tracks)
 
@@ -2054,23 +2095,61 @@ class PlexSync(BeetsPlugin):
             self._log.debug(
                 f"Playlist {playlist_name} created with id " f"{playlist_id}"
             )
+
+        # Get current playlist tracks
         playlist_tracks = self.get_playlist_tracks(playlist_id)
-        # get the tracks in the playlist
-        uris = [
-            track["track"]["uri"].replace("spotify:track:", "")
-            for track in playlist_tracks
+        current_track_ids = [
+            track["track"]["id"] for track in playlist_tracks
+            if track["track"]
         ]
-        track_uris = list(set(track_uris) - set(uris))
-        self._log.debug(f"Tracks to be added: {track_uris}")
-        if len(track_uris) > 0:
-            for i in range(0, len(track_uris), 100):
-                chunk = track_uris[i : i + 100]
-                self.sp.user_playlist_add_tracks(user_id, playlist_id, chunk)
-            self._log.debug(
-                f"Added {len(track_uris)} tracks to playlist " f"{playlist_id}"
-            )
-        else:
-            self._log.debug("No tracks to add to playlist")
+
+        # Convert track_uris to track IDs (remove spotify:track: prefix if present)
+        target_track_ids = [
+            uri.replace("spotify:track:", "") if uri.startswith("spotify:track:") else uri
+            for uri in track_uris
+        ]
+
+        # Find tracks to add and remove while preserving order
+        current_set = set(current_track_ids)
+        target_set = set(target_track_ids)
+
+        # Use list comprehension to preserve order for tracks to add
+        tracks_to_add = [track_id for track_id in target_track_ids if track_id not in current_set]
+        tracks_to_remove = list(current_set - target_set)
+
+        self._log.debug(f"Current playlist has {len(current_track_ids)} tracks")
+        self._log.debug(f"Target playlist should have {len(target_track_ids)} tracks")
+        self._log.debug(f"Tracks to add: {len(tracks_to_add)}")
+        self._log.debug(f"Tracks to remove: {len(tracks_to_remove)}")
+
+        # Remove tracks that shouldn't be in the playlist
+        if tracks_to_remove:
+            for i in range(0, len(tracks_to_remove), 100):
+                chunk = tracks_to_remove[i : i + 100]
+                self.sp.user_playlist_remove_all_occurrences_of_tracks(
+                    user_id, playlist_id, chunk
+                )
+            self._log.debug(f"Removed {len(tracks_to_remove)} tracks from playlist {playlist_id}")
+
+        # Add new tracks to the top of the playlist
+        if tracks_to_add:
+            # Add tracks in reverse order so they appear in correct order at the top
+            # Since position=0 always adds at the very top, we need to add the last track first
+            # Process in reverse order to maintain the original Plex playlist sequence
+            for i in range(len(tracks_to_add) - 1, -1, -100):
+                # Get chunk in reverse order (from end to start)
+                start_idx = max(0, i - 99)  # Ensure we don't go below 0
+                chunk = tracks_to_add[start_idx:i + 1]
+
+                # Add this chunk at position 0
+                self.sp.user_playlist_add_tracks(
+                    user_id, playlist_id, chunk, position=0
+                )
+
+            self._log.debug(f"Added {len(tracks_to_add)} new tracks to top of playlist {playlist_id}")
+
+        if not tracks_to_add and not tracks_to_remove:
+            self._log.debug("Playlist is already in sync - no changes needed")
 
     def get_config_value(self, item_cfg, defaults_cfg, key, code_default):
         if key in item_cfg:

@@ -248,29 +248,27 @@ class Cache:
         text = text.lower()
         # Remove featuring artists
         text = re.sub(
-            r"\s*[\(\[]?(?:feat\.?|ft\.?|featuring)\s+[^\]\)]+[\]\)]?\s*$", "", text
+            r"\s*[\(\[]?(?:feat\.?|ft\.?|featuring)\s+[^\]\)]+[\]\)]?\s*", "", text
         )
-        # Remove any remaining parentheses or brackets at the end
-        text = re.sub(r"\s*[\(\[][^\]\)]*[\]\)]\s*$", "", text)
+        # Remove any parentheses or brackets and their contents
+        text = re.sub(r"\s*[\(\[][^\]\)]*[\]\)]\s*", "", text)
         # Remove extra whitespace
         text = " ".join(text.split())
         return text
 
+
     def _make_cache_key(self, query_data):
         """Create a consistent cache key regardless of input type."""
-        logger.debug("_make_cache_key input: {}", query_data)
         if isinstance(query_data, str):
             return query_data
         elif isinstance(query_data, dict):
-            # Normalize and clean the key fields
-            key_data = {
-                "title": self.normalize_text(query_data.get("title", "")),
-                "artist": self.normalize_text(query_data.get("artist", "")),
-                "album": self.normalize_text(query_data.get("album", "")),
-            }
-            # Create a simple pipe-separated key that's more readable and consistent
-            key_str = f"{key_data['title']}|{key_data['artist']}|{key_data['album']}"
-            logger.debug("_make_cache_key output: {}", key_str)
+            # Normalize and clean the key fields - keep the original 3-part format
+            normalized_title = self.normalize_text(query_data.get("title", ""))
+            normalized_artist = self.normalize_text(query_data.get("artist", ""))
+            normalized_album = self.normalize_text(query_data.get("album", ""))
+
+            # Create a pipe-separated key with title|artist|album
+            key_str = f"{normalized_title}|{normalized_artist}|{normalized_album}"
             return key_str
         return str(query_data)
 
@@ -288,35 +286,49 @@ class Cache:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
+
+                # Generate cache key
+                cache_key = self._make_cache_key(query)
+
+                # Try exact match first
+                cursor.execute(
+                    'SELECT plex_ratingkey, cleaned_query FROM cache WHERE query = ?',
+                    (cache_key,)
+                )
+                row = cursor.fetchone()
+
+                if row:
+                    plex_ratingkey, cleaned_metadata_json = row
+                    cleaned_metadata = json.loads(cleaned_metadata_json) if cleaned_metadata_json else None
+                    return (plex_ratingkey, cleaned_metadata)
+
+                # If no exact match, try flexible matching for new pipe format only
+                # This handles cases where album names might have slight variations
                 if isinstance(query, dict):
-                    original_key = f"{query.get('title', '')}|{query.get('artist', '')}|{query.get('album', '')}"
-                    normalized_key = f"{self.normalize_text(query.get('title', ''))}|{self.normalize_text(query.get('artist', ''))}|{self.normalize_text(query.get('album', ''))}"
-                    search_keys = [original_key, normalized_key]
-                else:
-                    search_keys = [str(query)]
-                for search_key in search_keys:
+                    normalized_title = self.normalize_text(query.get("title", ""))
+                    normalized_artist = self.normalize_text(query.get("artist", ""))
+
+                    # Look for entries with same title and artist (new pipe format only)
                     cursor.execute(
-                        'SELECT plex_ratingkey, cleaned_query FROM cache WHERE query = ?',
-                        (search_key,)
+                        '''SELECT plex_ratingkey, cleaned_query, query
+                           FROM cache
+                           WHERE query LIKE ? AND query LIKE '%|%' ''',
+                        (f'{normalized_title}|{normalized_artist}|%',)
                     )
-                    row = cursor.fetchone()
-                    if row:
-                        plex_ratingkey, cleaned_metadata_json = row
+
+                    for row in cursor.fetchall():
+                        plex_ratingkey, cleaned_metadata_json, cached_query = row
                         cleaned_metadata = json.loads(cleaned_metadata_json) if cleaned_metadata_json else None
-                        logger.debug('Cache hit for query: {} (key: {}, rating_key: {})',
-                                   self._sanitize_query_for_log(query),
-                                   search_key,
-                                   plex_ratingkey)
+                        logger.debug('Found flexible match: "{}" -> rating_key: {}', cached_query, plex_ratingkey)
                         return (plex_ratingkey, cleaned_metadata)
-                logger.debug('Cache miss for query: {}',
-                            self._sanitize_query_for_log(query))
+
                 return None
         except Exception as e:
             logger.error('Cache lookup failed: {}', str(e))
             return None
 
     def set(self, query, plex_ratingkey, cleaned_metadata=None):
-        """Store result in cache using both original and normalized keys."""
+        """Store result in cache."""
         try:
             def datetime_handler(obj):
                 if isinstance(obj, datetime):
@@ -326,32 +338,18 @@ class Cache:
             rating_key = -1 if plex_ratingkey is None else int(plex_ratingkey)
             cleaned_json = json.dumps(cleaned_metadata, default=datetime_handler) if cleaned_metadata else None
 
-            if isinstance(query, dict):
-                original_key = f"{query.get('title', '')}|{query.get('artist', '')}|{query.get('album', '')}"
-                normalized_key = f"{self.normalize_text(query.get('title', ''))}|{self.normalize_text(query.get('artist', ''))}|{self.normalize_text(query.get('album', ''))}"
-                with sqlite3.connect(self.db_path) as conn:
-                    cursor = conn.cursor()
-                    for cache_key in {original_key, normalized_key}:
-                        # Only cache if title is present and non-empty
-                        if query.get('title') and query.get('title').strip():
-                            cursor.execute(
-                                'REPLACE INTO cache (query, plex_ratingkey, cleaned_query) VALUES (?, ?, ?)',
-                                (cache_key, rating_key, cleaned_json)
-                            )
-                    conn.commit()
-                    logger.debug('Cached result for original and normalized keys: "{}", "{}" (rating_key: {})',
-                               original_key, normalized_key, rating_key)
-            else:
-                cache_key = str(query)
-                with sqlite3.connect(self.db_path) as conn:
-                    cursor = conn.cursor()
-                    cursor.execute(
-                        'REPLACE INTO cache (query, plex_ratingkey, cleaned_query) VALUES (?, ?, ?)',
-                        (cache_key, rating_key, cleaned_json)
-                    )
-                    conn.commit()
-                    logger.debug('Cached result for string query: "{}" (rating_key: {})',
-                               cache_key, rating_key)
+            # Generate cache key using the same method as get()
+            cache_key = self._make_cache_key(query)
+
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    'REPLACE INTO cache (query, plex_ratingkey, cleaned_query) VALUES (?, ?, ?)',
+                    (cache_key, rating_key, cleaned_json)
+                )
+                conn.commit()
+                logger.debug('Cached result: "{}" -> rating_key: {}', cache_key, rating_key)
+
         except Exception as e:
             logger.error('Cache storage failed for query "{}": {}',
                         self._sanitize_query_for_log(query), str(e))
@@ -456,8 +454,29 @@ class Cache:
             logger.error("Failed to clear negative cache entries: {}", e)
             return 0
 
+    def clear_old_format_entries(self):
+        """Clear all old format cache entries (JSON and list formats)."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+
+                # Delete entries that don't use the new pipe format
+                cursor.execute(
+                    "DELETE FROM cache WHERE query NOT LIKE '%|%' OR query LIKE '{%' OR query LIKE '[%'"
+                )
+                cleared_count = cursor.rowcount
+
+                if cleared_count > 0:
+                    logger.info("Cleared {} old format cache entries", cleared_count)
+
+                conn.commit()
+                return cleared_count
+        except Exception as e:
+            logger.error("Failed to clear old format cache entries: {}", e)
+            return 0
+
     def debug_cache_keys(self, query):
-        """Debug method to see what cache keys exist for a query."""
+        """Debug method to see what cache keys exist for a query (new format only)."""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
@@ -474,14 +493,14 @@ class Cache:
                         query.get("album"),
                     )
 
-                    # Show all entries that contain the title or artist
+                    # Show only new format entries that contain the title or artist
                     cursor.execute(
-                        "SELECT query, plex_ratingkey FROM cache WHERE query LIKE ? OR query LIKE ?",
+                        "SELECT query, plex_ratingkey FROM cache WHERE (query LIKE ? OR query LIKE ?) AND query LIKE '%|%'",
                         (f"%{title}%", f"%{artist}%"),
                     )
                     rows = cursor.fetchall()
 
-                    logger.debug("Found {} potential cache matches:", len(rows))
+                    logger.debug("Found {} new format cache matches:", len(rows))
                     for i, (cached_query, rating_key) in enumerate(rows):
                         logger.debug(
                             "  {}: key='{}' -> rating_key={}",
@@ -489,12 +508,6 @@ class Cache:
                             cached_query,
                             rating_key,
                         )
-                        # Try to parse if it's JSON
-                        try:
-                            parsed = json.loads(cached_query)
-                            logger.debug("      Parsed as JSON: {}", parsed)
-                        except Exception:
-                            logger.debug("      Not JSON format")
 
                     logger.debug("=== END CACHE DEBUG ===")
 
