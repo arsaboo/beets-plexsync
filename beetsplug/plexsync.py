@@ -2987,7 +2987,6 @@ class PlexSync(BeetsPlugin):
 
         max_tracks = self.get_config_value(rh_config, defaults_cfg, "max_tracks", 20)
         discovery_ratio = self.get_config_value(rh_config, defaults_cfg, "discovery_ratio", 20)  # Lower for more rated tracks
-        inclusion_days = self.get_config_value(rh_config, defaults_cfg, "inclusion_days", 365)  # Include recent tracks
 
         # Get filters from config
         filters = rh_config.get("filters", {})
@@ -3036,27 +3035,10 @@ class PlexSync(BeetsPlugin):
 
         self._log.debug("Converted {} tracks to beets items", len(final_tracks))
 
-        # Filter tracks to only include recent ones based on inclusion_days
-        cutoff_date = datetime.now() - timedelta(days=inclusion_days)
-        recent_tracks = []
-        for track in final_tracks:
-            # Check if track has a release year and it's recent
-            track_year = getattr(track, 'year', None)
-            if track_year and int(track_year) >= (current_year - 2):
-                recent_tracks.append(track)
-            # Also include tracks with recent play dates if available
-            elif hasattr(track, 'plex_lastviewedat') and track.plex_lastviewedat:
-                last_played = datetime.fromtimestamp(track.plex_lastviewedat)
-                if last_played >= cutoff_date:
-                    recent_tracks.append(track)
-            # If no date information, include it for now (will be filtered by scoring)
-
-        self._log.debug("Filtered to {} recent tracks", len(recent_tracks))
-
         # For Recent Hits, we want to prioritize highly rated and popular tracks
         # So we'll sort by a combination of rating, popularity, and recency
         scored_tracks = []
-        for track in recent_tracks:
+        for track in final_tracks:
             score = self.calculate_track_score(track)
             scored_tracks.append((track, score))
 
