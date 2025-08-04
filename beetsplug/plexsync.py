@@ -3001,17 +3001,6 @@ class PlexSync(BeetsPlugin):
             filters['include']['genres'] = preferred_genres
             self._log.debug("Using preferred genres as no genres configured: {}", preferred_genres)
 
-        # Modify filters to prioritize recent tracks
-        if 'include' not in filters:
-            filters['include'] = {}
-
-        # Add year filter for recent tracks (last 2 years by default)
-        current_year = datetime.now().year
-        if 'years' not in filters['include']:
-            filters['include']['years'] = {}
-        if 'after' not in filters['include']['years']:
-            filters['include']['years']['after'] = current_year - 2
-
         # For recent hits, we want to INCLUDE recently played tracks (opposite of exclusion)
         # So we'll set exclusion_days to a small value or 0
         exclusion_days = 0  # Don't exclude recently played tracks
@@ -3036,20 +3025,18 @@ class PlexSync(BeetsPlugin):
 
         self._log.debug("Converted {} tracks to beets items", len(final_tracks))
 
-        # Filter tracks to only include recent ones based on inclusion_days
+        # Filter tracks to only include recent ones based on inclusion_days (by last played date)
         cutoff_date = datetime.now() - timedelta(days=inclusion_days)
         recent_tracks = []
         for track in final_tracks:
-            # Check if track has a release year and it's recent
-            track_year = getattr(track, 'year', None)
-            if track_year and int(track_year) >= (current_year - 2):
-                recent_tracks.append(track)
-            # Also include tracks with recent play dates if available
-            elif hasattr(track, 'plex_lastviewedat') and track.plex_lastviewedat:
+            # Use last played date if available
+            if hasattr(track, 'plex_lastviewedat') and track.plex_lastviewedat:
                 last_played = datetime.fromtimestamp(track.plex_lastviewedat)
                 if last_played >= cutoff_date:
                     recent_tracks.append(track)
-            # If no date information, include it for now (will be filtered by scoring)
+            else:
+                # If no last played, include for scoring
+                recent_tracks.append(track)
 
         self._log.debug("Filtered to {} recent tracks", len(recent_tracks))
 
