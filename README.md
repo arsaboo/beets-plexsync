@@ -45,7 +45,7 @@ The command will only generate the specified playlists, skipping others in your 
 
   3. **Recent Hits**:
       - Creates a playlist of recent and popular tracks
-      - Focuses on tracks released in the last 2 years (configurable via `inclusion_days`)
+      - Focuses on tracks released in the last 2 years (configurable via `years.after` filter)
       - Prioritizes highly-rated and popular tracks based on a scoring system
       - Only includes tracks matching your genre preferences
       - Automatically adjusts selection criteria based on your library's characteristics
