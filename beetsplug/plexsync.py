@@ -2987,6 +2987,7 @@ class PlexSync(BeetsPlugin):
 
         max_tracks = self.get_config_value(rh_config, defaults_cfg, "max_tracks", 20)
         discovery_ratio = self.get_config_value(rh_config, defaults_cfg, "discovery_ratio", 20)  # Lower for more rated tracks
+        exclusion_days = self.get_config_value(rh_config, defaults_cfg, "exclusion_days", 0)  # Default to 0
 
         # Get filters from config
         filters = rh_config.get("filters", {})
@@ -3011,9 +3012,10 @@ class PlexSync(BeetsPlugin):
         if 'after' not in filters['include']['years']:
             filters['include']['years']['after'] = current_year - 2
 
+        # Use exclusion_days from config or default (0)
         # For recent hits, we want to INCLUDE recently played tracks (opposite of exclusion)
-        # So we'll set exclusion_days to a small value or 0
-        exclusion_days = 0  # Don't exclude recently played tracks
+        # So we'll set exclusion_days to the configured value (default 0)
+        # (If user sets >0, recently played tracks will be excluded.)
 
         # Get initial track pool using configured or preferred genres and filters
         self._log.info("Searching library with filters for recent tracks...")
@@ -3035,20 +3037,44 @@ class PlexSync(BeetsPlugin):
 
         self._log.debug("Converted {} tracks to beets items", len(final_tracks))
 
-        # For Recent Hits, we want to prioritize highly rated and popular tracks
-        # So we'll sort by a combination of rating, popularity, and recency
-        scored_tracks = []
+        # Split tracks into rated and unrated for weighted randomness
+        rated_tracks = []
+        unrated_tracks = []
         for track in final_tracks:
-            score = self.calculate_track_score(track)
-            scored_tracks.append((track, score))
+            rating = float(getattr(track, 'plex_userrating', 0))
+            if rating > 0:
+                rated_tracks.append(track)
+            else:
+                unrated_tracks.append(track)
 
-        # Sort by score descending (highest scores first)
-        scored_tracks.sort(key=lambda x: x[1], reverse=True)
+        self._log.debug("Split into {} rated and {} unrated tracks", len(rated_tracks), len(unrated_tracks))
 
-        # Take top tracks up to max_tracks
-        selected_tracks = [track for track, score in scored_tracks[:max_tracks]]
+        # Calculate proportions
+        unrated_tracks_count, rated_tracks_count = self.calculate_playlist_proportions(max_tracks, discovery_ratio)
 
-        self._log.info("Selected {} tracks for Recent Hits playlist based on ratings, popularity, and recency", len(selected_tracks))
+        # Select tracks using weighted probability
+        selected_rated = self.select_tracks_weighted(rated_tracks, rated_tracks_count)
+        selected_unrated = self.select_tracks_weighted(unrated_tracks, unrated_tracks_count)
+
+        # If we don't have enough unrated tracks, fill with rated ones
+        if len(selected_unrated) < unrated_tracks_count:
+            additional_count = min(
+                unrated_tracks_count - len(selected_unrated),
+                max_tracks - len(selected_rated) - len(selected_unrated)
+            )
+            remaining_rated = [t for t in rated_tracks if t not in selected_rated]
+            additional_rated = self.select_tracks_weighted(remaining_rated, additional_count)
+            selected_rated.extend(additional_rated)
+
+        # Combine and shuffle
+        selected_tracks = selected_rated + selected_unrated
+        if len(selected_tracks) > max_tracks:
+            selected_tracks = selected_tracks[:max_tracks]
+
+        import random
+        random.shuffle(selected_tracks)
+
+        self._log.info("Selected {} rated tracks and {} unrated tracks", len(selected_rated), len(selected_unrated))
 
         if not selected_tracks:
             self._log.warning("No tracks matched criteria for Recent Hits playlist")
