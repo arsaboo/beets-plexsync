@@ -2815,18 +2815,18 @@ class PlexSync(BeetsPlugin):
                                 {'year<<': end_year}
                             ]
                         })
-                # Add support for 'after' and 'before' in include section
-                if 'after' in years_config:
-                    advanced_filters['and'].append({'year>>': years_config['after']})
-                if 'before' in years_config:
-                    advanced_filters['and'].append({'year<<': years_config['before']})
+                    # Add support for 'after' and 'before' in include section
+                    if 'after' in years_config:
+                        advanced_filters['and'].append({'year>>': years_config['after']})
+                    if 'before' in years_config:
+                        advanced_filters['and'].append({'year<<': years_config['before']})
 
-            if 'exclude' in config_filters and 'years' in config_filters['exclude']:
-                years_config = config_filters['exclude']['years']
-                if 'before' in years_config:
-                    advanced_filters['and'].append({'year>>': years_config['before']})
-                if 'after' in years_config:
-                    advanced_filters['and'].append({'year<<': years_config['after']})
+                if 'exclude' in config_filters and 'years' in config_filters['exclude']:
+                    years_config = config_filters['exclude']['years']
+                    if 'before' in years_config:
+                        advanced_filters['and'].append({'year>>': years_config['before']})
+                    if 'after' in years_config:
+                        advanced_filters['and'].append({'year<<': years_config['after']})
 
             # Handle rating filter
             if config_filters and 'min_rating' in config_filters:
