@@ -2145,8 +2145,6 @@ class PlexSync(BeetsPlugin):
             lambda: f'"{beets_item.title}" "{beets_item.artist}"',
             # Strategy 5: Just title with artist name
             lambda: f"{beets_item.title} {beets_item.artist}",
-            # Strategy 6: Very broad search - just title
-            lambda: f"{beets_item.title}"
         ]
 
         for i, strategy in enumerate(search_strategies, 1):
