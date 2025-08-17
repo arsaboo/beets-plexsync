@@ -651,7 +651,7 @@ class PlexSync(BeetsPlugin):
         )
 
         def func_plex2spotify(lib, opts, args):
-            self._plex2spotify(lib, opts.playlist)
+            self._plex2spotify(lib, opts.playlist, ui.decargs(args))
 
         plex2spotify_cmd.func = func_plex2spotify
 
@@ -2042,8 +2042,8 @@ class PlexSync(BeetsPlugin):
         """Import Gaana playlist with caching."""
         return import_gaana_playlist(url, self.cache)
 
-    def _plex2spotify(self, lib, playlist):
-        """Transfer Plex playlist to Spotify using plex_lookup."""
+    def _plex2spotify(self, lib, playlist, query_args=None):
+        """Transfer Plex playlist to Spotify using plex_lookup with optional query filtering."""
         self.authenticate_spotify()
         plex_playlist = self.plex.playlist(playlist)
         plex_playlist_items = plex_playlist.items()
@@ -2054,6 +2054,16 @@ class PlexSync(BeetsPlugin):
 
         # Process tracks in order and maintain the original Plex playlist order
         spotify_tracks = []
+
+        # If query args are provided, filter the beets items first
+        if query_args:
+            # Get all beets items that match the query
+            query_items = lib.items(query_args)
+            query_rating_keys = {item.plex_ratingkey for item in query_items if hasattr(item, 'plex_ratingkey')}
+            self._log.info("Query matched {} beets items, filtering playlist accordingly", len(query_rating_keys))
+        else:
+            query_rating_keys = None
+
         for item in plex_playlist_items:
             self._log.debug("Processing {}", item.ratingKey)
 
@@ -2063,6 +2073,16 @@ class PlexSync(BeetsPlugin):
                     "Item not found in Beets: {} - {}",
                     item.parentTitle,
                     item.title
+                )
+                continue
+
+            # Apply query filter if provided
+            if query_rating_keys is not None and item.ratingKey not in query_rating_keys:
+                self._log.debug(
+                    "Item filtered out by query: {} - {} - {}",
+                    beets_item.artist,
+                    beets_item.album,
+                    beets_item.title
                 )
                 continue
 
@@ -2093,11 +2113,15 @@ class PlexSync(BeetsPlugin):
 
             spotify_tracks.append(spotify_track_id)
 
-        self._log.debug("Found {} Spotify tracks in Plex playlist order", len(spotify_tracks))
+        if query_args:
+            self._log.info("Found {} Spotify tracks matching query in Plex playlist order", len(spotify_tracks))
+        else:
+            self._log.debug("Found {} Spotify tracks in Plex playlist order", len(spotify_tracks))
 
         self.add_tracks_to_spotify_playlist(playlist, spotify_tracks)
 
     def add_tracks_to_spotify_playlist(self, playlist_name, track_uris):
+        """Add tracks to a Spotify playlist."""
         user_id = self.sp.current_user()["id"]
         playlists = self.sp.user_playlists(user_id)
         playlist_id = None
@@ -2114,7 +2138,7 @@ class PlexSync(BeetsPlugin):
                 f"Playlist {playlist_name} created with id " f"{playlist_id}"
             )
 
-        # Get current playlist tracks
+        # Get the playlist's current tracks
         playlist_tracks = self.get_playlist_tracks(playlist_id)
         current_track_ids = [
             track["track"]["id"] for track in playlist_tracks

@@ -111,6 +111,12 @@ You can use config filters to finetune any playlist. You can specify the `genre`
   ```sh
   beet plex2spotify -m "Sufiyana" plex_userrating:2..
   ```
+
+  Additional filtering examples:
+  - Only transfer highly-rated tracks: `beet plex2spotify -m "My Playlist" plex_userrating:8..`
+  - Transfer tracks by specific artist: `beet plex2spotify -m "Rock Hits" artist:"The Beatles"`
+  - Transfer tracks from a specific year range: `beet plex2spotify -m "2000s Hits" year:2000..2009`
+  - Combine multiple filters: `beet plex2spotify -m "Recent Favorites" plex_userrating:7.. year:2020..`
 - **Playlist to Collection**: `beet plexplaylist2collection [-m PLAYLIST]` converts a Plex playlist to a collection. Use the `-m` flag to specify the playlist name.
 - **Album Collage**: `beet plexcollage [-i INTERVAL] [-g GRID]` creates a collage of most played albums. Use the `-i` flag to specify the number of days and `-g` flag to specify the grid size.
 
@@ -305,6 +311,7 @@ plexsync:
         manual_search: no
         clear_playlist: no
 ```
+
 [collage]: collage.png
 [queries_]: https://beets.readthedocs.io/en/latest/reference/query.html?highlight=queries
 [plaxapi]: https://python-plexapi.readthedocs.io/en/latest/modules/audio.html
