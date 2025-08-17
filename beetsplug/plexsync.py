@@ -651,7 +651,7 @@ class PlexSync(BeetsPlugin):
         )
 
         def func_plex2spotify(lib, opts, args):
-            self._plex2spotify(lib, opts.playlist)
+            self._plex2spotify(lib, opts.playlist, ui.decargs(args))
 
         plex2spotify_cmd.func = func_plex2spotify
 
@@ -2042,8 +2042,8 @@ class PlexSync(BeetsPlugin):
         """Import Gaana playlist with caching."""
         return import_gaana_playlist(url, self.cache)
 
-    def _plex2spotify(self, lib, playlist):
-        """Transfer Plex playlist to Spotify using plex_lookup."""
+    def _plex2spotify(self, lib, playlist, query_args=None):
+        """Transfer Plex playlist to Spotify using plex_lookup with optional query filtering."""
         self.authenticate_spotify()
         plex_playlist = self.plex.playlist(playlist)
         plex_playlist_items = plex_playlist.items()
@@ -2054,6 +2054,16 @@ class PlexSync(BeetsPlugin):
 
         # Process tracks in order and maintain the original Plex playlist order
         spotify_tracks = []
+
+        # If query args are provided, filter the beets items first
+        if query_args:
+            # Get all beets items that match the query
+            query_items = lib.items(query_args)
+            query_rating_keys = {item.plex_ratingkey for item in query_items if hasattr(item, 'plex_ratingkey')}
+            self._log.info("Query matched {} beets items, filtering playlist accordingly", len(query_rating_keys))
+        else:
+            query_rating_keys = None
+
         for item in plex_playlist_items:
             self._log.debug("Processing {}", item.ratingKey)
 
@@ -2066,38 +2076,130 @@ class PlexSync(BeetsPlugin):
                 )
                 continue
 
+            # Apply query filter if provided
+            if query_rating_keys is not None and item.ratingKey not in query_rating_keys:
+                self._log.debug(
+                    "Item filtered out by query: {} - {} - {}",
+                    beets_item.artist,
+                    beets_item.album,
+                    beets_item.title
+                )
+                continue
+
             self._log.debug("Beets item: {}", beets_item)
 
+            spotify_track_id = None
+
+            # First try to get existing spotify track ID from beets
             try:
                 spotify_track_id = beets_item.spotify_track_id
                 self._log.debug("Spotify track id in beets: {}", spotify_track_id)
+
+                # Verify the track is available and playable on Spotify
+                if spotify_track_id:
+                    try:
+                        track_info = self.sp.track(spotify_track_id)
+                        # Strict availability check: must be playable and not restricted
+                        if (
+                            not track_info
+                            or not track_info.get('is_playable', True)
+                            or track_info.get('restrictions', {}).get('reason') == 'unavailable'
+                            or not track_info.get('available_markets')
+                        ):
+                            self._log.debug("Track {} is not playable or not available, searching for alternatives", spotify_track_id)
+                            spotify_track_id = None
+                    except Exception as e:
+                        self._log.debug("Error checking track availability {}: {}", spotify_track_id, e)
+                        spotify_track_id = None
+
             except Exception:
                 spotify_track_id = None
                 self._log.debug("Spotify track_id not found in beets")
 
+            # If no valid track ID, search for it
             if not spotify_track_id:
-                self._log.debug(
-                    "Searching for {} {} in Spotify",
-                    beets_item.title,
-                    beets_item.album
-                )
-                spotify_search_results = self.sp.search(
-                    q=f"track:{beets_item.title} album:{beets_item.album}",
-                    limit=1,
-                    type="track",
-                )
-                if not spotify_search_results["tracks"]["items"]:
-                    self._log.info("Spotify match not found for {}", beets_item)
-                    continue
-                spotify_track_id = spotify_search_results["tracks"]["items"][0]["id"]
+                spotify_track_id = self._search_spotify_track(beets_item)
 
-            spotify_tracks.append(spotify_track_id)
+            if spotify_track_id:
+                spotify_tracks.append(spotify_track_id)
+            else:
+                self._log.info("No playable Spotify match found for {}", beets_item)
 
-        self._log.debug("Found {} Spotify tracks in Plex playlist order", len(spotify_tracks))
+        if query_args:
+            self._log.info("Found {} Spotify tracks matching query in Plex playlist order", len(spotify_tracks))
+        else:
+            self._log.debug("Found {} Spotify tracks in Plex playlist order", len(spotify_tracks))
 
         self.add_tracks_to_spotify_playlist(playlist, spotify_tracks)
 
+    def _search_spotify_track(self, beets_item):
+        """Search for a track on Spotify with fallback strategies."""
+        search_strategies = [
+            # Strategy 1: Exact search with album
+            lambda: f"track:{beets_item.title} album:{beets_item.album} artist:{beets_item.artist}",
+            # Strategy 2: Title and artist with album
+            lambda: f"track:{beets_item.title} album:{beets_item.album}",
+            # Strategy 3: Just title and artist
+            lambda: f"track:{beets_item.title} artist:{beets_item.artist}",
+            # Strategy 4: Title and artist without track/artist prefixes
+            lambda: f'"{beets_item.title}" "{beets_item.artist}"',
+            # Strategy 5: Just title with artist name
+            lambda: f"{beets_item.title} {beets_item.artist}",
+        ]
+
+        for i, strategy in enumerate(search_strategies, 1):
+            try:
+                query = strategy()
+                self._log.debug("Spotify search strategy {}: {}", i, query)
+
+                spotify_search_results = self.sp.search(
+                    q=query,
+                    limit=10,  # Get more results to find playable ones
+                    type="track",
+                )
+
+                if spotify_search_results["tracks"]["items"]:
+                    # Look for the best playable match
+                    for track in spotify_search_results["tracks"]["items"]:
+                        if track.get('is_playable', True):
+                            # Basic matching to ensure it's reasonable
+                            track_title = track['name'].lower()
+                            original_title = beets_item.title.lower()
+                            track_artist = track['artists'][0]['name'].lower()
+                            original_artist = beets_item.artist.lower()
+
+                            # Simple similarity check - if title or artist matches reasonably well
+                            title_match = (original_title in track_title or
+                                         track_title in original_title or
+                                         self.get_fuzzy_score(original_title, track_title) > 0.6)
+                            artist_match = (original_artist in track_artist or
+                                          track_artist in original_artist or
+                                          self.get_fuzzy_score(original_artist, track_artist) > 0.6)
+
+                            if title_match and artist_match:
+                                self._log.debug("Found playable match: {} - {} (strategy {})",
+                                               track['name'], track['artists'][0]['name'], i)
+                                return track['id']
+                            elif i >= 5:  # For broader searches, be less strict
+                                if title_match or artist_match:
+                                    self._log.debug("Found loose match: {} - {} (strategy {})",
+                                                   track['name'], track['artists'][0]['name'], i)
+                                    return track['id']
+
+                    # If no good matches found but we have results, log it
+                    self._log.debug("Found {} results but no good matches for strategy {}",
+                                   len(spotify_search_results["tracks"]["items"]), i)
+                else:
+                    self._log.debug("No results for strategy {}", i)
+
+            except Exception as e:
+                self._log.debug("Error in search strategy {}: {}", i, e)
+                continue
+
+        return None
+
     def add_tracks_to_spotify_playlist(self, playlist_name, track_uris):
+        """Add tracks to a Spotify playlist."""
         user_id = self.sp.current_user()["id"]
         playlists = self.sp.user_playlists(user_id)
         playlist_id = None
@@ -2114,7 +2216,7 @@ class PlexSync(BeetsPlugin):
                 f"Playlist {playlist_name} created with id " f"{playlist_id}"
             )
 
-        # Get current playlist tracks
+        # Get the playlist's current tracks
         playlist_tracks = self.get_playlist_tracks(playlist_id)
         current_track_ids = [
             track["track"]["id"] for track in playlist_tracks
@@ -2936,7 +3038,7 @@ class PlexSync(BeetsPlugin):
             except Exception as e:
                 self._log.debug("Error converting track {}: {}", track.title, e)
 
-        self._log.debug("Converted {} tracks to beets items", len(final_tracks))
+        self._log.debug("Found {} tracks matching all criteria", len(final_tracks))
 
         # Split tracks into rated and unrated
         rated_tracks = []
