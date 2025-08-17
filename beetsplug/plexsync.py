@@ -1504,6 +1504,8 @@ class PlexSync(BeetsPlugin):
         # If we reach here and this is an LLM attempt that failed, don't proceed with regular search
         if llm_attempted:
             self._log.debug("LLM search attempt failed, not proceeding with regular search for: {}", song)
+            # Cache the LLM-cleaned query as negative result to avoid future LLM calls
+            self._cache_result(cache_key, None)
             return None
 
         # Try regular search
@@ -1545,7 +1547,11 @@ class PlexSync(BeetsPlugin):
 
             # Try manual search first if enabled and we have matches
             if manual_search and len(sorted_tracks) > 0:
-                return self._handle_manual_search(sorted_tracks, song, original_query=song)
+                result = self._handle_manual_search(sorted_tracks, song, original_query=song)
+                # Cache the result for the original query if manual search succeeded
+                if result is not None:
+                    self._cache_result(cache_key, result)
+                return result
 
             # Otherwise try automatic matching with improved threshold
             best_match = sorted_tracks[0]
@@ -1571,18 +1577,29 @@ class PlexSync(BeetsPlugin):
                     "album": cleaned_album if cleaned_album is not None else song.get("album"),
                     "artist": cleaned_artist if cleaned_artist is not None else song.get("artist")
                 }
-                self._log.debug("Using LLM cleaned metadata: {}", cleaned_song)                # Cache the original query with cleaned metadata
+                self._log.debug("Using LLM cleaned metadata: {}", cleaned_song)
+
+                # Cache the original query with cleaned metadata for future reference
                 self._cache_result(cache_key, None, cleaned_song)
 
                 # Try search with cleaned metadata
                 result = self.search_plex_song(cleaned_song, manual_search, llm_attempted=True)
 
-                # If we found a match using LLM-cleaned metadata, also cache it for the original query
+                # If we found a match using LLM-cleaned metadata, cache it for the original query
                 if result is not None:
-                    self._log.debug("LLM-cleaned search succeeded, also caching for original query: {}", song)
+                    self._log.debug("LLM-cleaned search succeeded, caching for original query: {}", song)
                     self._cache_result(cache_key, result)
+                    return result
+                else:
+                    # If LLM search also failed, ensure both queries are cached as negative
+                    self._log.debug("LLM-cleaned search also failed, caching negative result for original query: {}", song)
+                    # The LLM-cleaned query should already be cached as negative from the recursive call
+                    # But we need to update the original query cache to not include cleaned_metadata
+                    # since the cleaned search also failed
+                    self._cache_result(cache_key, None)
+                    return None
 
-                return result        # Final fallback: try manual search if enabled
+        # Final fallback: try manual search if enabled
         if manual_search:
             self._log.info(
                 "\nTrack {} - {} - {} not found in Plex".format(
@@ -1950,6 +1967,7 @@ class PlexSync(BeetsPlugin):
 
     def setup_llm(self):
         """Setup LLM client using OpenAI-compatible API."""
+
         try:
             client_args = {
                 "api_key": config["llm"]["api_key"].get(),
@@ -2815,6 +2833,11 @@ class PlexSync(BeetsPlugin):
                                 {'year<<': end_year}
                             ]
                         })
+                    # Add support for 'after' and 'before' in include section
+                    if 'after' in years_config:
+                        advanced_filters['and'].append({'year>>': years_config['after']})
+                    if 'before' in years_config:
+                        advanced_filters['and'].append({'year<<': years_config['before']})
 
                 if 'exclude' in config_filters and 'years' in config_filters['exclude']:
                     years_config = config_filters['exclude']['years']
@@ -2964,6 +2987,123 @@ class PlexSync(BeetsPlugin):
             self._log.info("Cleared existing Forgotten Gems playlist")
         except exceptions.NotFound:
             self._log.debug("No existing Forgotten Gems playlist found")
+
+        self._plex_add_playlist_item(selected_tracks, playlist_name)
+
+        self._log.info("Successfully updated {} playlist with {} tracks", playlist_name, len(selected_tracks))
+
+    def generate_recent_hits(self, lib, rh_config, plex_lookup, preferred_genres, similar_tracks):
+        """Generate a Recent Hits playlist featuring recent and popular tracks."""
+        playlist_name = rh_config.get("name", "Recent Hits")
+        self._log.info("Generating {} playlist", playlist_name)
+
+        # Get configuration
+        if "playlists" in config["plexsync"] and "defaults" in config["plexsync"]["playlists"]:
+            defaults_cfg = config["plexsync"]["playlists"]["defaults"].get({})
+        else:
+            defaults_cfg = {}
+
+        max_tracks = self.get_config_value(rh_config, defaults_cfg, "max_tracks", 20)
+        discovery_ratio = self.get_config_value(rh_config, defaults_cfg, "discovery_ratio", 20)  # Lower for more rated tracks
+        exclusion_days = self.get_config_value(rh_config, defaults_cfg, "exclusion_days", 0)  # Default to 0
+
+        # Get filters from config
+        filters = rh_config.get("filters", {})
+
+        # If no genres configured in filters, use preferred_genres
+        if not filters:
+            filters = {'include': {'genres': preferred_genres}}
+        elif 'include' not in filters or 'genres' not in filters['include']:
+            if 'include' not in filters:
+                filters['include'] = {}
+            filters['include']['genres'] = preferred_genres
+            self._log.debug("Using preferred genres as no genres configured: {}", preferred_genres)
+
+        # Modify filters to prioritize recent tracks
+        if 'include' not in filters:
+            filters['include'] = {}
+
+        # Add year filter for recent tracks (last 2 years by default)
+        current_year = datetime.now().year
+        if 'years' not in filters['include']:
+            filters['include']['years'] = {}
+        if 'after' not in filters['include']['years']:
+            filters['include']['years']['after'] = current_year - 2
+
+        # Use exclusion_days from config or default (0)
+        # For recent hits, we want to INCLUDE recently played tracks (opposite of exclusion)
+        # So we'll set exclusion_days to the configured value (default 0)
+        # (If user sets >0, recently played tracks will be excluded.)
+
+        # Get initial track pool using configured or preferred genres and filters
+        self._log.info("Searching library with filters for recent tracks...")
+        all_library_tracks = self.get_filtered_library_tracks(
+            [], # No need to pass preferred_genres since they're now in filters if needed
+            filters,
+            exclusion_days
+        )
+
+        # Convert to beets items
+        final_tracks = []
+        for track in all_library_tracks:
+            try:
+                beets_item = plex_lookup.get(track.ratingKey)
+                if beets_item:
+                    final_tracks.append(beets_item)
+            except Exception as e:
+                self._log.debug("Error converting track {}: {}", track.title, e)
+
+        self._log.debug("Converted {} tracks to beets items", len(final_tracks))
+
+        # Split tracks into rated and unrated for weighted randomness
+        rated_tracks = []
+        unrated_tracks = []
+        for track in final_tracks:
+            rating = float(getattr(track, 'plex_userrating', 0))
+            if rating > 0:
+                rated_tracks.append(track)
+            else:
+                unrated_tracks.append(track)
+
+        self._log.debug("Split into {} rated and {} unrated tracks", len(rated_tracks), len(unrated_tracks))
+
+        # Calculate proportions
+        unrated_tracks_count, rated_tracks_count = self.calculate_playlist_proportions(max_tracks, discovery_ratio)
+
+        # Select tracks using weighted probability
+        selected_rated = self.select_tracks_weighted(rated_tracks, rated_tracks_count)
+        selected_unrated = self.select_tracks_weighted(unrated_tracks, unrated_tracks_count)
+
+        # If we don't have enough unrated tracks, fill with rated ones
+        if len(selected_unrated) < unrated_tracks_count:
+            additional_count = min(
+                unrated_tracks_count - len(selected_unrated),
+                max_tracks - len(selected_rated) - len(selected_unrated)
+            )
+            remaining_rated = [t for t in rated_tracks if t not in selected_rated]
+            additional_rated = self.select_tracks_weighted(remaining_rated, additional_count)
+            selected_rated.extend(additional_rated)
+
+        # Combine and shuffle
+        selected_tracks = selected_rated + selected_unrated
+        if len(selected_tracks) > max_tracks:
+            selected_tracks = selected_tracks[:max_tracks]
+
+        import random
+        random.shuffle(selected_tracks)
+
+        self._log.info("Selected {} rated tracks and {} unrated tracks", len(selected_rated), len(selected_unrated))
+
+        if not selected_tracks:
+            self._log.warning("No tracks matched criteria for Recent Hits playlist")
+            return
+
+        # Create/update playlist
+        try:
+            self._plex_clear_playlist(playlist_name)
+            self._log.info("Cleared existing Recent Hits playlist")
+        except exceptions.NotFound:
+            self._log.debug("No existing Recent Hits playlist found")
 
         self._plex_add_playlist_item(selected_tracks, playlist_name)
 
@@ -3364,16 +3504,18 @@ class PlexSync(BeetsPlugin):
 
             if (playlist_type == "imported"):
                 self.generate_imported_playlist(lib, p, plex_lookup)  # Pass plex_lookup
-            elif playlist_id in ["daily_discovery", "forgotten_gems"]:
+            elif playlist_id in ["daily_discovery", "forgotten_gems", "recent_hits"]:
                 if playlist_id == "daily_discovery":
                     self.generate_daily_discovery(lib, p, plex_lookup, preferred_genres, similar_tracks)
-                else:  # forgotten_gems
+                elif playlist_id == "forgotten_gems":
                     self.generate_forgotten_gems(lib, p, plex_lookup, preferred_genres, similar_tracks)
+                else:  # recent_hits
+                    self.generate_recent_hits(lib, p, plex_lookup, preferred_genres, similar_tracks)
             else:
                 self._log.warning(
                     "Unrecognized playlist configuration '{}' - type: '{}', id: '{}'. "
                     "Valid types are 'imported' or 'smart'. "
-                    "Valid smart playlist IDs are 'daily_discovery' and 'forgotten_gems'.",
+                    "Valid smart playlist IDs are 'daily_discovery', 'forgotten_gems', and 'recent_hits'.",
                     playlist_name, playlist_type, playlist_id
                 )
 
