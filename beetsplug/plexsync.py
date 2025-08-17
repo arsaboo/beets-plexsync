@@ -2095,12 +2095,18 @@ class PlexSync(BeetsPlugin):
                 spotify_track_id = beets_item.spotify_track_id
                 self._log.debug("Spotify track id in beets: {}", spotify_track_id)
 
-                # Verify the track is available on Spotify
+                # Verify the track is available and playable on Spotify
                 if spotify_track_id:
                     try:
                         track_info = self.sp.track(spotify_track_id)
-                        if not track_info.get('is_playable', True):
-                            self._log.debug("Track {} is not playable, searching for alternatives", spotify_track_id)
+                        # Strict availability check: must be playable and not restricted
+                        if (
+                            not track_info
+                            or not track_info.get('is_playable', True)
+                            or track_info.get('restrictions', {}).get('reason') == 'unavailable'
+                            or not track_info.get('available_markets')
+                        ):
+                            self._log.debug("Track {} is not playable or not available, searching for alternatives", spotify_track_id)
                             spotify_track_id = None
                     except Exception as e:
                         self._log.debug("Error checking track availability {}: {}", spotify_track_id, e)
