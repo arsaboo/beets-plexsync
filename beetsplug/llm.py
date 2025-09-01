@@ -3,6 +3,7 @@
 import json
 import logging
 import textwrap
+import time
 from typing import Optional, Dict
 
 from beets import config
@@ -16,6 +17,7 @@ AGNO_AVAILABLE = False
 TAVILY_AVAILABLE = False
 SEARXNG_AVAILABLE = False
 EXA_AVAILABLE = False
+BRAVE_AVAILABLE = False
 
 try:
     from agno.agent import Agent
@@ -41,6 +43,12 @@ try:
     except ImportError:
         logger.debug("Exa tools not available")
 
+    try:
+        from agno.tools.bravesearch import BraveSearchTools
+        BRAVE_AVAILABLE = True
+    except ImportError:
+        logger.debug("Brave Search tools not available")
+
 except ImportError:
     logger.error("Agno package not available. Please install with: pip install agno")
 
@@ -53,6 +61,7 @@ config['llm'].add({
         'tavily_api_key': '',
         'searxng_host': '',
         'exa_api_key': '',
+        'brave_api_key': '',
     }
 })
 
@@ -73,8 +82,11 @@ class SongBasicInfo(BaseModel):
 
 class MusicSearchTools:
     """Standalone class for music metadata search using multiple search engines."""
+    
+    # Class variable to track last Brave Search request time
+    _last_brave_request_time = 0
 
-    def __init__(self, tavily_api_key=None, searxng_host=None, model_id=None, ollama_host=None, exa_api_key=None):
+    def __init__(self, tavily_api_key=None, searxng_host=None, model_id=None, ollama_host=None, exa_api_key=None, brave_api_key=None):
         """Initialize music search tools with available search providers.
 
         Args:
@@ -83,6 +95,7 @@ class MusicSearchTools:
             model_id: Ollama model ID to use
             ollama_host: Ollama API host URL
             exa_api_key: API key for Exa search
+            brave_api_key: API key for Brave Search
         """
         self.name = "music_search_tools"
         self.model_id = model_id or "qwen3:latest"
@@ -93,7 +106,7 @@ class MusicSearchTools:
         self._init_ollama_agent()
 
         # Initialize a single search agent with all available tools
-        self._init_search_agent(tavily_api_key, searxng_host, exa_api_key)
+        self._init_search_agent(tavily_api_key, searxng_host, exa_api_key, brave_api_key)
 
         # Log available search providers
         self._log_available_providers()
@@ -110,7 +123,18 @@ class MusicSearchTools:
             logger.error(f"Failed to initialize Ollama agent: {e}")
             self.ollama_agent = None
 
-    def _init_search_agent(self, tavily_api_key: Optional[str], searxng_host: Optional[str], exa_api_key: Optional[str]) -> None:
+    def _enforce_brave_rate_limit(self) -> None:
+        """Enforce rate limiting for Brave Search (1 request per second)."""
+        if BRAVE_AVAILABLE:
+            current_time = time.time()
+            time_since_last_request = current_time - self._last_brave_request_time
+            if time_since_last_request < 1.0:  # Less than 1 second since last request
+                sleep_time = 1.0 - time_since_last_request
+                logger.debug(f"Rate limiting Brave Search. Sleeping for {sleep_time:.2f} seconds.")
+                time.sleep(sleep_time)
+            self._last_brave_request_time = time.time()
+
+    def _init_search_agent(self, tavily_api_key: Optional[str], searxng_host: Optional[str], exa_api_key: Optional[str], brave_api_key: Optional[str]) -> None:
         """Initialize a single agent with all available search tools."""
         tools = []
 
@@ -127,6 +151,13 @@ class MusicSearchTools:
                 tools.append(ExaTools(api_key=exa_api_key, timeout=15))
             except Exception as e:
                 logger.warning(f"Failed to initialize Exa tool: {e}")
+
+        # Brave Search (with rate limiting)
+        if brave_api_key and BRAVE_AVAILABLE:
+            try:
+                tools.append(BraveSearchTools(api_key=brave_api_key, fixed_max_results=5))
+            except Exception as e:
+                logger.warning(f"Failed to initialize Brave Search tool: {e}")
 
         # Tavily (lowest priority)
         if tavily_api_key and TAVILY_AVAILABLE:
@@ -175,6 +206,10 @@ class MusicSearchTools:
         if not self.search_agent:
             logger.warning("Search agent not available.")
             return None
+
+        # Enforce rate limiting if using Brave Search
+        if self.search_agent.tools and any("brave" in tool.name.lower() for tool in self.search_agent.tools):
+            self._enforce_brave_rate_limit()
 
         query = f"{song_name} song album, title, and artist. Please respond in English only."
         logger.debug(f"Unified search querying: {query}")
@@ -316,8 +351,9 @@ def initialize_search_toolkit():
     model_id = config["llm"]["search"]["model"].get() or "qwen3:latest"
     ollama_host = config["llm"]["search"]["ollama_host"].get() or "http://localhost:11434"
     exa_api_key = config["llm"]["search"]["exa_api_key"].get()
+    brave_api_key = config["llm"]["search"]["brave_api_key"].get()
 
-    if not tavily_api_key and not searxng_host and not exa_api_key:
+    if not tavily_api_key and not searxng_host and not exa_api_key and not brave_api_key:
         logger.warning("No search providers configured. Search functionality limited.")
 
     try:
@@ -326,7 +362,8 @@ def initialize_search_toolkit():
             searxng_host=searxng_host,
             model_id=model_id,
             ollama_host=ollama_host,
-            exa_api_key=exa_api_key
+            exa_api_key=exa_api_key,
+            brave_api_key=brave_api_key
         )
     except Exception as e:
         logger.error(f"Failed to initialize search toolkit: {e}")

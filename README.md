@@ -188,6 +188,7 @@ spotify:
         searxng_host: "http://your-searxng-instance.com"  # Optional SearxNG instance.
         exa_api_key: "your-exa-api-key"                   # Optional Exa search API key
         tavily_api_key: "your-tavily-api-key"             # Optional Tavily API key
+        brave_api_key: "your-brave-api-key"               # Optional Brave Search API key
   ```
 
   Note: To enable LLM search, you must also set `use_llm_search: yes` in your `plexsync` configuration (see Advanced Usage section).
@@ -195,7 +196,8 @@ spotify:
   When multiple search providers are configured, they're used in the following priority order:
   1. SearxNG (tried first if configured)
   2. Exa (used if SearxNG fails or isn't configured)
-  3. Tavily (used if both SearxNG and Exa fail or aren't configured)
+  3. Brave Search (used if both SearxNG and Exa fail or aren't configured)
+  4. Tavily (used if all above fail or aren't configured)
 
   You can get started with `beet plexsonic -p "YOUR_PROMPT"` to create the playlist based on YOUR_PROMPT. The default playlist name is `SonicSage` (wink wink), you can modify it using `-m` flag. By default, it requests 10 tracks from the AI model. Use the `-n` flag to change the number of tracks requested. Finally, if you prefer to clear the playlist before adding the new songs, you can add `-c` flag. So, to create a new classical music playlist, you can use something like `beet plexsonic -c -n 10 -p "classical music, romanticism era, like Schubert, Chopin, Liszt"`.
 

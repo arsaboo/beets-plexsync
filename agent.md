@@ -50,7 +50,7 @@ The plugin is written in Python and leverages several libraries including `plexa
 - **Pydantic**: Used for data validation and settings management.
 - **Agno**: A framework for building LLM agents, used for AI features and metadata search.
 - **SQLite**: Used for local caching of API responses and search results.
-- **LLM Search Providers**: Integrates with SearxNG, Exa, and Tavily for enhanced metadata search capabilities (when configured).
+- **LLM Search Providers**: Integrates with SearxNG, Exa, Tavily, and Brave Search for enhanced metadata search capabilities (when configured).
 
 ## Project Structure
 
@@ -70,7 +70,7 @@ The plugin is written in Python and leverages several libraries including `plexa
 The plugin is configured via beets' `config.yaml` file. Key sections include:
 - `plex`: Plex server connection details (host, port, token, library name).
 - `spotify`: Spotify API credentials (if importing from Spotify).
-- `llm`: LLM API key and model settings, plus configuration for search providers (Ollama, SearxNG, Exa, Tavily).
+- `llm`: LLM API key and model settings, plus configuration for search providers (Ollama, SearxNG, Exa, Tavily, Brave Search).
 - `plexsync`: Plugin-specific settings like `manual_search`, `use_llm_search`, and playlist definitions.
 
 ## Key Classes and Concepts

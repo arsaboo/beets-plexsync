@@ -27,6 +27,7 @@ setup(
         'agno>=1.2.16',
         'tavily-python',
         'exa_py',
+        'brave-search',
         'scipy',
         'numpy',
         'pytz',
