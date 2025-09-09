@@ -864,11 +864,11 @@ class PlexSync(BeetsPlugin):
             }
         }
 
-        # Create a temporary beets Item for comparison
+        # Create a temporary beets Item for comparison with null safety
         temp_item = Item()
-        temp_item.title = song.get('title', '').strip()
-        temp_item.artist = song.get('artist', '').strip()
-        temp_item.album = song.get('album', '').strip() if song.get('album') else ''
+        temp_item.title = (song.get('title') or '').strip() if song.get('title') is not None else ''
+        temp_item.artist = (song.get('artist') or '').strip() if song.get('artist') is not None else ''
+        temp_item.album = (song.get('album') or '').strip() if song.get('album') is not None else ''
 
         for track in tracks:
             score, dist = plex_track_distance(temp_item, track, config)

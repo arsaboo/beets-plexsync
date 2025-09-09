@@ -76,10 +76,11 @@ You can use config filters to finetune any playlist. You can specify the `genre`
 - **Playlist Clear**: `beet plexplaylistclear [-m PLAYLIST]` clears a Plex playlist. Use the `-m` flag to specify the playlist name.
 
 ### Playlist Import
-- **Playlist Import**: `beet plexplaylistimport [-m PLAYLIST] [-u URL]` imports individual playlists from Spotify, Apple Music, Gaana.com, JioSaavn, Youtube, Tidal, M3U8 files, and custom APIs. Use the `-m` flag to specify the playlist name and:
+- **Playlist Import**: `beet plexplaylistimport [-m PLAYLIST] [-u URL] [-l]` imports individual playlists from Spotify, Apple Music, Gaana.com, JioSaavn, Youtube, Tidal, M3U8 files, custom APIs, and ListenBrainz. Use the `-m` flag to specify the playlist name and:
   - For online services: use the `-u` flag to supply the full playlist url
   - For M3U8 files: use the `-u` flag with the file path (relative to beets config directory or absolute path)
   - For custom APIs: configure POST requests in config.yaml (see Configuration section)
+  - For ListenBrainz: use the `-l` or `--listenbrainz` flag to import "Weekly Jams" and "Weekly Exploration" playlists
 
   You can define multiple sources per playlist in your config including custom POST endpoints:
   ```yaml
@@ -155,6 +156,12 @@ Add `plexsync` to your list of enabled plugins.
 
 ```yaml
 plugins: plexsync
+
+# If you want to use the ListenBrainz import feature, you'll need to configure
+# the ListenBrainz plugin. See https://github.com/arsaboo/beets-listenbrainz for setup.
+listenbrainz:
+  user_token: YOUR_USER_TOKEN
+  username: YOUR_USERNAME
 ```
 
 Next, you can configure your Plex server and library like following (see instructions to obtain Plex token [here][plex_token]).
@@ -188,6 +195,7 @@ spotify:
         searxng_host: "http://your-searxng-instance.com"  # Optional SearxNG instance.
         exa_api_key: "your-exa-api-key"                   # Optional Exa search API key
         tavily_api_key: "your-tavily-api-key"             # Optional Tavily API key
+        brave_api_key: "your-brave-api-key"               # Optional Brave Search API key
   ```
 
   Note: To enable LLM search, you must also set `use_llm_search: yes` in your `plexsync` configuration (see Advanced Usage section).
@@ -195,7 +203,8 @@ spotify:
   When multiple search providers are configured, they're used in the following priority order:
   1. SearxNG (tried first if configured)
   2. Exa (used if SearxNG fails or isn't configured)
-  3. Tavily (used if both SearxNG and Exa fail or aren't configured)
+  3. Brave Search (used if both SearxNG and Exa fail or aren't configured)
+  4. Tavily (used if all above fail or aren't configured)
 
   You can get started with `beet plexsonic -p "YOUR_PROMPT"` to create the playlist based on YOUR_PROMPT. The default playlist name is `SonicSage` (wink wink), you can modify it using `-m` flag. By default, it requests 10 tracks from the AI model. Use the `-n` flag to change the number of tracks requested. Finally, if you prefer to clear the playlist before adding the new songs, you can add `-c` flag. So, to create a new classical music playlist, you can use something like `beet plexsonic -c -n 10 -p "classical music, romanticism era, like Schubert, Chopin, Liszt"`.
 
