@@ -76,10 +76,11 @@ You can use config filters to finetune any playlist. You can specify the `genre`
 - **Playlist Clear**: `beet plexplaylistclear [-m PLAYLIST]` clears a Plex playlist. Use the `-m` flag to specify the playlist name.
 
 ### Playlist Import
-- **Playlist Import**: `beet plexplaylistimport [-m PLAYLIST] [-u URL]` imports individual playlists from Spotify, Apple Music, Gaana.com, JioSaavn, Youtube, Tidal, M3U8 files, and custom APIs. Use the `-m` flag to specify the playlist name and:
+- **Playlist Import**: `beet plexplaylistimport [-m PLAYLIST] [-u URL] [-l]` imports individual playlists from Spotify, Apple Music, Gaana.com, JioSaavn, Youtube, Tidal, M3U8 files, custom APIs, and ListenBrainz. Use the `-m` flag to specify the playlist name and:
   - For online services: use the `-u` flag to supply the full playlist url
   - For M3U8 files: use the `-u` flag with the file path (relative to beets config directory or absolute path)
   - For custom APIs: configure POST requests in config.yaml (see Configuration section)
+  - For ListenBrainz: use the `-l` or `--listenbrainz` flag to import "Weekly Jams" and "Weekly Exploration" playlists
 
   You can define multiple sources per playlist in your config including custom POST endpoints:
   ```yaml
@@ -155,6 +156,12 @@ Add `plexsync` to your list of enabled plugins.
 
 ```yaml
 plugins: plexsync
+
+# If you want to use the ListenBrainz import feature, you'll need to configure
+# the ListenBrainz plugin. See https://github.com/arsaboo/beets-listenbrainz for setup.
+listenbrainz:
+  user_token: YOUR_USER_TOKEN
+  username: YOUR_USERNAME
 ```
 
 Next, you can configure your Plex server and library like following (see instructions to obtain Plex token [here][plex_token]).
