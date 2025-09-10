@@ -5,7 +5,7 @@ and Plex/beets objects. Behavior preserved.
 """
 
 from datetime import datetime, timedelta
-from typing import List, Tuple
+from typing import Tuple
 import time
 
 from beets import config
@@ -155,12 +155,30 @@ def select_tracks_weighted(ps, tracks, num_tracks):
         len(tracks), size=min(num_tracks, len(tracks)), replace=False, p=probabilities
     )
     selected_tracks = [tracks[i] for i in selected_indices]
-    for i, track in enumerate(selected_tracks):
-        score = track_scores[selected_indices[i]][1]
+
+    # Avoid verbose per-track logging; summarize and sample a few examples
+    try:
+        sel_scores = [track_scores[i][1] for i in selected_indices]
+        mean_score = float(np.mean(sel_scores)) if sel_scores else 0.0
         ps._log.debug(
-            "Selected: {} - {} (Score: {:.2f}, Rating: {}, Plays: {})",
-            track.album, track.title, score, getattr(track, 'plex_userrating', 0), getattr(track, 'plex_viewcount', 0)
+            "Selected {} tracks (avg score {:.2f})",
+            len(selected_tracks), mean_score,
         )
+        sample_count = min(5, len(selected_tracks))
+        if sample_count:
+            ps._log.debug("Sample selections (up to {}):", sample_count)
+            for idx in range(sample_count):
+                tr = selected_tracks[idx]
+                sc = sel_scores[idx]
+                ps._log.debug(
+                    " • {} - {} (Score: {:.2f}, Rating: {}, Plays: {})",
+                    getattr(tr, 'album', ''), getattr(tr, 'title', ''), sc,
+                    getattr(tr, 'plex_userrating', 0), getattr(tr, 'plex_viewcount', 0),
+                )
+    except Exception:
+        # Never fail selection due to logging issues
+        pass
+
     return selected_tracks
 
 
@@ -206,22 +224,27 @@ def _apply_exclusion_filters(ps, tracks, exclude_config):
     import xml.etree.ElementTree as ET
     filtered_tracks = []
     original_count = len(tracks)
+
+    # Pre-build exclusion sets for faster membership tests
+    exclude_genres_set = set(g.lower() for g in exclude_config.get('genres', []) if isinstance(g, str))
+    years_config = exclude_config.get('years', {}) or {}
+    year_before = years_config.get('before')
+    year_after = years_config.get('after')
+
     for track in tracks:
         try:
-            if 'genres' in exclude_config:
-                exclude_genres = [g.lower() for g in exclude_config['genres']]
-                if hasattr(track, 'genres') and any(g.tag.lower() in exclude_genres for g in track.genres):
+            # Genre exclusion via set intersection
+            if exclude_genres_set and hasattr(track, 'genres'):
+                track_genres = {getattr(g, 'tag', '').lower() for g in (track.genres or []) if getattr(g, 'tag', None)}
+                if track_genres & exclude_genres_set:
                     continue
-            if 'years' in exclude_config:
-                years_config = exclude_config['years']
-                if 'before' in years_config:
-                    year_before = years_config['before']
-                    if hasattr(track, 'year') and track.year is not None and track.year < year_before:
-                        continue
-                if 'after' in years_config:
-                    year_after = years_config['after']
-                    if hasattr(track, 'year') and track.year is not None and track.year > year_after:
-                        continue
+
+            # Year bounds
+            if year_before is not None and hasattr(track, 'year') and track.year is not None and track.year < year_before:
+                continue
+            if year_after is not None and hasattr(track, 'year') and track.year is not None and track.year > year_after:
+                continue
+
             filtered_tracks.append(track)
         except (ET.ParseError, Exception) as e:
             ps._log.debug("Skipping track due to exception in exclusion filter: {}", e)
@@ -234,18 +257,29 @@ def _apply_inclusion_filters(ps, tracks, include_config):
     import xml.etree.ElementTree as ET
     filtered_tracks = []
     original_count = len(tracks)
+
+    # Pre-build inclusion sets for faster membership tests
+    include_genres_set = set(g.lower() for g in include_config.get('genres', []) if isinstance(g, str))
+    years_config = include_config.get('years', {}) or {}
+    between = years_config.get('between') if isinstance(years_config.get('between'), list) else None
+    start_year = between[0] if between and len(between) == 2 else None
+    end_year = between[1] if between and len(between) == 2 else None
+
     for track in tracks:
         try:
-            if 'genres' in include_config:
-                include_genres = [g.lower() for g in include_config['genres']]
-                if not (hasattr(track, 'genres') and any(g.tag.lower() in include_genres for g in track.genres)):
+            # Genre inclusion via set intersection (require at least one match if list provided)
+            if include_genres_set:
+                if not hasattr(track, 'genres'):
                     continue
-            if 'years' in include_config:
-                years_config = include_config['years']
-                if 'between' in years_config:
-                    start_year, end_year = years_config['between']
-                    if not (hasattr(track, 'year') and track.year is not None and start_year <= track.year <= end_year):
-                        continue
+                track_genres = {getattr(g, 'tag', '').lower() for g in (track.genres or []) if getattr(g, 'tag', None)}
+                if not (track_genres & include_genres_set):
+                    continue
+
+            # Year range inclusion
+            if start_year is not None and end_year is not None:
+                if not (hasattr(track, 'year') and track.year is not None and start_year <= track.year <= end_year):
+                    continue
+
             filtered_tracks.append(track)
         except (ET.ParseError, Exception) as e:
             ps._log.debug("Skipping track due to exception in inclusion filter: {}", e)
@@ -378,58 +412,62 @@ def generate_daily_discovery(ps, lib, dd_config, plex_lookup, preferred_genres, 
     ps._log.info("Successfully updated {} playlist with {} tracks", playlist_name, len(selected_tracks))
 
 
+def build_advanced_filters(filter_config, exclusion_days, preferred_genres=None):
+    adv = {'and': []}
+
+    if filter_config:
+        include = filter_config.get('include', {}) or {}
+        exclude = filter_config.get('exclude', {}) or {}
+
+        # Preferred genres
+        if preferred_genres:
+            adv['and'].append({'or': [{'genre': g} for g in preferred_genres]})
+
+        # Include genres
+        inc_genres = include.get('genres')
+        if inc_genres:
+            adv['and'].append({'or': [{'genre': g} for g in inc_genres]})
+
+        # Exclude genres
+        exc_genres = exclude.get('genres')
+        if exc_genres:
+            adv['and'].append({'genre!': list(exc_genres)})
+
+        # Include years
+        inc_years = include.get('years') or {}
+        if 'between' in inc_years and isinstance(inc_years['between'], list) and len(inc_years['between']) == 2:
+            start_year, end_year = inc_years['between']
+            adv['and'].append({'and': [{'year>>': start_year}, {'year<<': end_year}]})
+        if 'after' in inc_years:
+            adv['and'].append({'year>>': inc_years['after']})
+        if 'before' in inc_years:
+            adv['and'].append({'year<<': inc_years['before']})
+
+        # Exclude years (translate to constraints)
+        exc_years = exclude.get('years') or {}
+        if 'before' in exc_years:
+            # Exclude anything strictly before X => require year >= X
+            adv['and'].append({'year>>': exc_years['before']})
+        if 'after' in exc_years:
+            # Exclude anything strictly after Y => require year <= Y
+            adv['and'].append({'year<<': exc_years['after']})
+
+        # Rating filter at top-level of filter_config
+        if 'min_rating' in filter_config:
+            mr = filter_config['min_rating']
+            adv['and'].append({'or': [{'userRating': 0}, {'userRating>>': mr}]})
+
+    # Exclude recent plays
+    if exclusion_days and exclusion_days > 0:
+        adv['and'].append({'lastViewedAt<<': f'-{exclusion_days}d'})
+
+    # Clean up if empty
+    if not adv['and']:
+        return None
+    return adv
+
 def _get_library_tracks(ps, preferred_genres, filters, exclusion_days):
-    def build_advanced_filters(filter_config, exclusion_days):
-        adv = {'and': []}
-
-        if filter_config:
-            include = filter_config.get('include', {}) or {}
-            exclude = filter_config.get('exclude', {}) or {}
-
-            # Include genres
-            inc_genres = include.get('genres')
-            if inc_genres:
-                adv['and'].append({'or': [{'genre': g} for g in inc_genres]})
-
-            # Exclude genres
-            exc_genres = exclude.get('genres')
-            if exc_genres:
-                adv['and'].append({'genre!': list(exc_genres)})
-
-            # Include years
-            inc_years = include.get('years') or {}
-            if 'between' in inc_years and isinstance(inc_years['between'], list) and len(inc_years['between']) == 2:
-                start_year, end_year = inc_years['between']
-                adv['and'].append({'and': [{'year>>': start_year}, {'year<<': end_year}]})
-            if 'after' in inc_years:
-                adv['and'].append({'year>>': inc_years['after']})
-            if 'before' in inc_years:
-                adv['and'].append({'year<<': inc_years['before']})
-
-            # Exclude years (translate to constraints)
-            exc_years = exclude.get('years') or {}
-            if 'before' in exc_years:
-                # Exclude anything strictly before X => require year >= X
-                adv['and'].append({'year>>': exc_years['before']})
-            if 'after' in exc_years:
-                # Exclude anything strictly after Y => require year <= Y
-                adv['and'].append({'year<<': exc_years['after']})
-
-            # Rating filter at top-level of filter_config
-            if 'min_rating' in filter_config:
-                mr = filter_config['min_rating']
-                adv['and'].append({'or': [{'userRating': 0}, {'userRating>>': mr}]})
-
-        # Exclude recent plays
-        if exclusion_days and exclusion_days > 0:
-            adv['and'].append({'lastViewedAt<<': f'-{exclusion_days}d'})
-
-        # Clean up if empty
-        if not adv['and']:
-            return None
-        return adv
-
-    adv_filters = build_advanced_filters(filters, exclusion_days)
+    adv_filters = build_advanced_filters(filters, exclusion_days, preferred_genres)
     if adv_filters:
         try:
             ps._log.debug("Using server-side filters: {}", adv_filters)
@@ -484,8 +522,14 @@ def generate_forgotten_gems(ps, lib, ug_config, plex_lookup, preferred_genres, s
     filters = ug_config.get("filters", {})
     ps._log.debug("Collecting candidate tracks avoiding recent plays...")
     all_library_tracks = _get_library_tracks(ps, preferred_genres, filters, exclusion_days)
+    # Skip redundant client-side filtering when server-side filters fully covered them
     if filters:
-        all_library_tracks = apply_playlist_filters(ps, all_library_tracks, filters)
+        try:
+            adv = build_advanced_filters(filters, exclusion_days)
+        except Exception:
+            adv = None
+        if not adv:
+            all_library_tracks = apply_playlist_filters(ps, all_library_tracks, filters)
     final_tracks = []
     for track in all_library_tracks:
         try:
@@ -540,8 +584,14 @@ def generate_recent_hits(ps, lib, rh_config, plex_lookup, preferred_genres, simi
     filters = rh_config.get("filters", {})
     ps._log.debug("Collecting recent tracks...")
     all_library_tracks = _get_library_tracks(ps, preferred_genres, filters, exclusion_days)
+    # Skip redundant client-side filtering when server-side filters fully covered them
     if filters:
-        all_library_tracks = apply_playlist_filters(ps, all_library_tracks, filters)
+        try:
+            adv = build_advanced_filters(filters, exclusion_days)
+        except Exception:
+            adv = None
+        if not adv:
+            all_library_tracks = apply_playlist_filters(ps, all_library_tracks, filters)
     final_tracks = []
     for track in all_library_tracks:
         try:
