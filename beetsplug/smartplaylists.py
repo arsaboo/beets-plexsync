@@ -139,10 +139,6 @@ def calculate_track_score(ps, track, base_time=None, tracks_context=None):
     if not is_rated and final_score < 50:
         final_score = 50 + (final_score / 2)
 
-    ps._log.debug(
-        "Score components for {}: rating={:.2f} (z={:.2f}), days={:.0f} (z={:.2f}), popularity={:.2f} (z={:.2f}), age={:.0f} (z={:.2f}), final={:.2f}",
-        track.title, rating, z_rating, days_since_played, z_recency, popularity, z_popularity, age, z_age, final_score
-    )
     return max(0, min(100, final_score))
 
 
