@@ -6,6 +6,7 @@ and Plex/beets objects. Behavior preserved.
 
 from datetime import datetime, timedelta
 from typing import List, Tuple
+import time
 
 from beets import config
 from beetsplug.helpers import get_config_value
@@ -260,15 +261,29 @@ def apply_playlist_filters(ps, tracks, filter_config):
     if not is_valid:
         ps._log.error("Invalid filter configuration: {}", error)
         return tracks
+    total_start = time.time()
     ps._log.debug("Applying filters to {} tracks", len(tracks))
     filtered_tracks = tracks[:]
     if 'exclude' in filter_config:
+        exc_start = time.time()
         ps._log.debug("Applying exclusion filters...")
+        before = len(filtered_tracks)
         filtered_tracks = _apply_exclusion_filters(ps, filtered_tracks, filter_config['exclude'])
+        ps._log.debug(
+            "Exclusion filters removed {} tracks in {:.2f}s",
+            before - len(filtered_tracks), time.time() - exc_start,
+        )
     if 'include' in filter_config:
+        inc_start = time.time()
         ps._log.debug("Applying inclusion filters...")
+        before = len(filtered_tracks)
         filtered_tracks = _apply_inclusion_filters(ps, filtered_tracks, filter_config['include'])
+        ps._log.debug(
+            "Inclusion filters removed {} tracks in {:.2f}s",
+            before - len(filtered_tracks), time.time() - inc_start,
+        )
     if 'min_rating' in filter_config:
+        rt_start = time.time()
         min_rating = filter_config['min_rating']
         original_count = len(filtered_tracks)
         unrated_tracks = [
@@ -281,10 +296,14 @@ def apply_playlist_filters(ps, tracks, filter_config):
         ]
         filtered_tracks = rated_tracks + unrated_tracks
         ps._log.debug(
-            "Rating filter (>= {}): {} -> {} tracks ({} rated, {} unrated)",
-            min_rating, original_count, len(filtered_tracks), len(rated_tracks), len(unrated_tracks)
+            "Rating filter (>= {}): {} -> {} tracks ({} rated, {} unrated) in {:.2f}s",
+            min_rating, original_count, len(filtered_tracks), len(rated_tracks), len(unrated_tracks),
+            time.time() - rt_start,
         )
-    ps._log.debug("Filter application complete: {} -> {} tracks", len(tracks), len(filtered_tracks))
+    ps._log.debug(
+        "Filter application complete: {} -> {} tracks in {:.2f}s",
+        len(tracks), len(filtered_tracks), time.time() - total_start,
+    )
     return filtered_tracks
 
 
