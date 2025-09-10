@@ -433,13 +433,28 @@ def _get_library_tracks(ps, preferred_genres, filters, exclusion_days):
     if adv_filters:
         try:
             ps._log.debug("Using server-side filters: {}", adv_filters)
+            _t0 = time.time()
             tracks = ps.music.searchTracks(filters=adv_filters)
+            ps._log.debug(
+                "Server-side filter fetched {} tracks in {:.2f}s",
+                len(tracks), time.time() - _t0,
+            )
         except Exception as e:
             ps._log.debug("Server-side filter failed (falling back to client filter): {}", e)
+            _t0 = time.time()
             tracks = ps.music.search(libtype="track")
+            ps._log.debug(
+                "Client-side fetch (no server filters) returned {} tracks in {:.2f}s",
+                len(tracks), time.time() - _t0,
+            )
     else:
         # No filters specified; fetch all tracks (may be large)
+        _t0 = time.time()
         tracks = ps.music.search(libtype="track")
+        ps._log.debug(
+            "Fetched all tracks (no filters) -> {} in {:.2f}s",
+            len(tracks), time.time() - _t0,
+        )
 
     # Optional candidate pool cap to avoid huge post-filtering work
     try:
@@ -679,7 +694,12 @@ def generate_imported_playlist(ps, lib, playlist_config, plex_lookup=None):
     unique_tracks = []
     seen = set()
     for t in all_tracks:
-        key = (t.get('title', '').lower(), t.get('artist', '').lower(), t.get('album', '').lower())
+        # Some sources may set explicit None values; normalize to empty strings before lowercasing
+        key = (
+            (t.get('title') or '').lower(),
+            (t.get('artist') or '').lower(),
+            (t.get('album') or '').lower(),
+        )
         if key not in seen:
             seen.add(key)
             unique_tracks.append(t)
