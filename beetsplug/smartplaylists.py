@@ -364,28 +364,81 @@ def generate_daily_discovery(ps, lib, dd_config, plex_lookup, preferred_genres, 
 
 
 def _get_library_tracks(ps, preferred_genres, filters, exclusion_days):
-    recently_played = set(
-        track.ratingKey
-        for track in ps.music.search(filters={"track.lastViewedAt>>": f"{exclusion_days}d"}, libtype="track")
-    )
-    genre_filters = []
-    if filters and 'include' in filters and 'genres' in filters['include']:
-        genre_filters = [g.lower() for g in filters['include']['genres']]
-    tracks = ps.music.search(libtype="track")
-    filtered = []
-    for t in tracks:
+    def build_advanced_filters(filter_config, exclusion_days):
+        adv = {'and': []}
+
+        if filter_config:
+            include = filter_config.get('include', {}) or {}
+            exclude = filter_config.get('exclude', {}) or {}
+
+            # Include genres
+            inc_genres = include.get('genres')
+            if inc_genres:
+                adv['and'].append({'or': [{'genre': g} for g in inc_genres]})
+
+            # Exclude genres
+            exc_genres = exclude.get('genres')
+            if exc_genres:
+                adv['and'].append({'genre!': list(exc_genres)})
+
+            # Include years
+            inc_years = include.get('years') or {}
+            if 'between' in inc_years and isinstance(inc_years['between'], list) and len(inc_years['between']) == 2:
+                start_year, end_year = inc_years['between']
+                adv['and'].append({'and': [{'year>>': start_year}, {'year<<': end_year}]})
+            if 'after' in inc_years:
+                adv['and'].append({'year>>': inc_years['after']})
+            if 'before' in inc_years:
+                adv['and'].append({'year<<': inc_years['before']})
+
+            # Exclude years (translate to constraints)
+            exc_years = exclude.get('years') or {}
+            if 'before' in exc_years:
+                # Exclude anything strictly before X => require year >= X
+                adv['and'].append({'year>>': exc_years['before']})
+            if 'after' in exc_years:
+                # Exclude anything strictly after Y => require year <= Y
+                adv['and'].append({'year<<': exc_years['after']})
+
+            # Rating filter at top-level of filter_config
+            if 'min_rating' in filter_config:
+                mr = filter_config['min_rating']
+                adv['and'].append({'or': [{'userRating': 0}, {'userRating>>': mr}]})
+
+        # Exclude recent plays
+        if exclusion_days and exclusion_days > 0:
+            adv['and'].append({'lastViewedAt<<': f'-{exclusion_days}d'})
+
+        # Clean up if empty
+        if not adv['and']:
+            return None
+        return adv
+
+    adv_filters = build_advanced_filters(filters, exclusion_days)
+    if adv_filters:
         try:
-            if t.ratingKey in recently_played:
-                continue
-            if genre_filters:
-                t_genres = [g.tag.lower() for g in t.genres]
-                if not any(g in t_genres for g in genre_filters):
-                    continue
-            filtered.append(t)
+            ps._log.debug("Using server-side filters: {}", adv_filters)
+            tracks = ps.music.searchTracks(filters=adv_filters)
         except Exception as e:
-            ps._log.debug("Skipping track due to error in library pre-filter: {}", e)
-            continue
-    return filtered
+            ps._log.debug("Server-side filter failed (falling back to client filter): {}", e)
+            tracks = ps.music.search(libtype="track")
+    else:
+        # No filters specified; fetch all tracks (may be large)
+        tracks = ps.music.search(libtype="track")
+
+    # Optional candidate pool cap to avoid huge post-filtering work
+    try:
+        defaults_cfg = config["plexsync"]["playlists"]["defaults"].get({}) if "playlists" in config["plexsync"] else {}
+        max_pool = get_config_value(defaults_cfg, defaults_cfg, "max_candidate_pool", None)
+        if max_pool:
+            import random
+            if len(tracks) > int(max_pool):
+                tracks = random.sample(tracks, int(max_pool))
+                ps._log.debug("Capped candidate pool to {} tracks", max_pool)
+    except Exception:
+        pass
+
+    return tracks
 
 
 def generate_forgotten_gems(ps, lib, ug_config, plex_lookup, preferred_genres, similar_tracks):
@@ -606,4 +659,3 @@ def generate_imported_playlist(ps, lib, playlist_config, plex_lookup=None):
         ps._log.info("Successfully created playlist {} with {} tracks", playlist_name, len(unique_matched))
     else:
         ps._log.warning("No tracks remaining after filtering for {}", playlist_name)
-
