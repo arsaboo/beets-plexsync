@@ -584,39 +584,82 @@ def generate_imported_playlist(ps, lib, playlist_config, plex_lookup=None):
     all_tracks = []
     for source in sources:
         try:
-            source_type = source.get("type")
-            if source_type == "Apple Music":
-                ps._log.info("Importing from Apple Music: {}", source.get("name", ""))
-                tracks = ps.import_apple_playlist(source.get("url", ""))
-            elif source_type == "JioSaavn":
-                ps._log.info("Importing from JioSaavn: {}", source.get("name", ""))
-                tracks = ps.import_jiosaavn_playlist(source.get("url", ""))
-            elif source_type == "Gaana":
-                ps._log.info("Importing from Gaana: {}", source.get("name", ""))
-                tracks = ps.import_gaana_playlist(source.get("url", ""))
-            elif source_type == "Spotify":
-                ps._log.info("Importing from Spotify: {}", source.get("name", ""))
-                from beetsplug.spotify_provider import get_playlist_id as _get_pl_id
-                tracks = ps.import_spotify_playlist(_get_pl_id(source.get("url", "")))
-            elif source_type == "YouTube":
-                ps._log.info("Importing from YouTube: {}", source.get("name", ""))
-                tracks = ps.import_yt_playlist(source.get("url", ""))
-            elif source_type == "Tidal":
-                ps._log.info("Importing from Tidal: {}", source.get("name", ""))
-                tracks = ps.import_tidal_playlist(source.get("url", ""))
-            elif source_type == "M3U8":
-                ps._log.info("Importing from M3U8: {}", source.get("filepath", ""))
-                tracks = ps.import_m3u8_playlist(source.get("filepath", ""))
-            elif source_type == "POST":
-                ps._log.info("Importing from POST endpoint")
-                tracks = ps.import_post_playlist(source)
+            tracks = []
+            src_desc = None
+            # String source (URL or file)
+            if isinstance(source, str):
+                src_desc = source
+                low = source.lower()
+                if low.endswith('.m3u8'):
+                    # Resolve relative path under config dir
+                    if not os.path.isabs(source):
+                        source = os.path.join(ps.config_dir, source)
+                    ps._log.info("Importing from M3U8: {}", source)
+                    tracks = ps.import_m3u8_playlist(source)
+                elif 'spotify' in low:
+                    from beetsplug.spotify_provider import get_playlist_id as _get_pl_id
+                    ps._log.info("Importing from Spotify URL")
+                    tracks = ps.import_spotify_playlist(_get_pl_id(source))
+                elif 'jiosaavn' in low:
+                    ps._log.info("Importing from JioSaavn URL")
+                    tracks = ps.import_jiosaavn_playlist(source)
+                elif 'apple' in low:
+                    ps._log.info("Importing from Apple Music URL")
+                    tracks = ps.import_apple_playlist(source)
+                elif 'gaana' in low:
+                    ps._log.info("Importing from Gaana URL")
+                    tracks = ps.import_gaana_playlist(source)
+                elif 'youtube' in low:
+                    ps._log.info("Importing from YouTube URL")
+                    tracks = ps.import_yt_playlist(source)
+                elif 'tidal' in low:
+                    ps._log.info("Importing from Tidal URL")
+                    tracks = ps.import_tidal_playlist(source)
+                else:
+                    ps._log.warning("Unsupported string source: {}", source)
+            # Dict source (typed)
+            elif isinstance(source, dict):
+                source_type = source.get("type")
+                src_desc = source_type or "Unknown"
+                if source_type == "Apple Music":
+                    ps._log.info("Importing from Apple Music: {}", source.get("name", ""))
+                    tracks = ps.import_apple_playlist(source.get("url", ""))
+                elif source_type == "JioSaavn":
+                    ps._log.info("Importing from JioSaavn: {}", source.get("name", ""))
+                    tracks = ps.import_jiosaavn_playlist(source.get("url", ""))
+                elif source_type == "Gaana":
+                    ps._log.info("Importing from Gaana: {}", source.get("name", ""))
+                    tracks = ps.import_gaana_playlist(source.get("url", ""))
+                elif source_type == "Spotify":
+                    ps._log.info("Importing from Spotify: {}", source.get("name", ""))
+                    from beetsplug.spotify_provider import get_playlist_id as _get_pl_id
+                    tracks = ps.import_spotify_playlist(_get_pl_id(source.get("url", "")))
+                elif source_type == "YouTube":
+                    ps._log.info("Importing from YouTube: {}", source.get("name", ""))
+                    tracks = ps.import_yt_playlist(source.get("url", ""))
+                elif source_type == "Tidal":
+                    ps._log.info("Importing from Tidal: {}", source.get("name", ""))
+                    tracks = ps.import_tidal_playlist(source.get("url", ""))
+                elif source_type == "M3U8":
+                    fp = source.get("filepath", "")
+                    if fp and not os.path.isabs(fp):
+                        fp = os.path.join(ps.config_dir, fp)
+                    ps._log.info("Importing from M3U8: {}", fp)
+                    tracks = ps.import_m3u8_playlist(fp)
+                elif source_type == "POST":
+                    ps._log.info("Importing from POST endpoint")
+                    tracks = ps.import_post_playlist(source)
+                else:
+                    ps._log.warning("Unsupported source type: {}", source_type)
             else:
-                ps._log.warning("Unsupported source type: {}", source_type)
-                tracks = []
-            ps._log.info("Imported {} tracks from {}", len(tracks), source_type)
-            all_tracks.extend(tracks)
+                src_desc = str(type(source))
+                ps._log.warning("Invalid source format: {}", src_desc)
+
+            if tracks:
+                ps._log.info("Imported {} tracks from {}", len(tracks), src_desc)
+                all_tracks.extend(tracks)
         except Exception as e:
-            ps._log.error("Error importing from {}: {}", source.get("type", "Unknown"), e)
+            ps._log.error("Error importing from {}: {}", src_desc or "Unknown", e)
             continue
     unique_tracks = []
     seen = set()
