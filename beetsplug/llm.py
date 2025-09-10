@@ -80,6 +80,18 @@ class SongBasicInfo(BaseModel):
         return v.strip()
 
 
+# Pydantic models used by plexsync for LLM playlist parsing
+class Song(BaseModel):
+    title: str
+    artist: str
+    album: str
+    year: str = Field(description="Year of release")
+
+
+class SongRecommendations(BaseModel):
+    songs: list[Song]
+
+
 class MusicSearchTools:
     """Standalone class for music metadata search using multiple search engines."""
     
