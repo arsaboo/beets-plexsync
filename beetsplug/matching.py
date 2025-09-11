@@ -111,6 +111,21 @@ def plex_track_distance(
         # Use string_dist for album but normalize properly
         album_dist = hooks.string_dist(album1, album2)
 
+        # --- START OF NEW SOUNDTRACK-AWARE LOGIC ---
+        # Check for (From "...") pattern in the original album title
+        soundtrack_pattern = re.compile(r'\(from "([^"]+)"\)', re.IGNORECASE)
+        match = soundtrack_pattern.search(item.album)
+
+        if match:
+            # If pattern found, extract the movie title
+            extracted_album_title = match.group(1).lower().strip()
+            plex_album_title_cleaned = clean_string(plex_track.parentTitle).lower()
+
+            # If extracted title matches the Plex album, apply a large bonus
+            if extracted_album_title == plex_album_title_cleaned:
+                album_dist = album_dist * 0.1  # Reduce distance by 90%
+        # --- END OF NEW SOUNDTRACK-AWARE LOGIC ---
+
         # Check if album is contained within the other (for partial matches like "Andaz" in "Andaaz (1971)")
         if album1 in album2 or album2 in album1:
             # Apply a bonus for partial containment
