@@ -414,25 +414,20 @@ def generate_daily_discovery(ps, lib, dd_config, plex_lookup, preferred_genres, 
 
 def build_advanced_filters(filter_config, exclusion_days, preferred_genres=None):
     adv = {'and': []}
-
     if filter_config:
         include = filter_config.get('include', {}) or {}
         exclude = filter_config.get('exclude', {}) or {}
-
-        # Preferred genres
-        if preferred_genres:
-            adv['and'].append({'or': [{'genre': g} for g in preferred_genres]})
-
-        # Include genres
+        # Combine preferred and included genres for a single OR query
+        all_genres = set(g.lower() for g in (preferred_genres or []))
         inc_genres = include.get('genres')
         if inc_genres:
-            adv['and'].append({'or': [{'genre': g} for g in inc_genres]})
-
+            all_genres.update(g.lower() for g in inc_genres)
+        if all_genres:
+            adv['and'].append({'or': [{'genre': g} for g in all_genres]})
         # Exclude genres
         exc_genres = exclude.get('genres')
         if exc_genres:
             adv['and'].append({'genre!': list(exc_genres)})
-
         # Include years
         inc_years = include.get('years') or {}
         if 'between' in inc_years and isinstance(inc_years['between'], list) and len(inc_years['between']) == 2:
@@ -442,7 +437,6 @@ def build_advanced_filters(filter_config, exclusion_days, preferred_genres=None)
             adv['and'].append({'year>>': inc_years['after']})
         if 'before' in inc_years:
             adv['and'].append({'year<<': inc_years['before']})
-
         # Exclude years (translate to constraints)
         exc_years = exclude.get('years') or {}
         if 'before' in exc_years:
@@ -451,16 +445,13 @@ def build_advanced_filters(filter_config, exclusion_days, preferred_genres=None)
         if 'after' in exc_years:
             # Exclude anything strictly after Y => require year <= Y
             adv['and'].append({'year<<': exc_years['after']})
-
         # Rating filter at top-level of filter_config
         if 'min_rating' in filter_config:
             mr = filter_config['min_rating']
             adv['and'].append({'or': [{'userRating': 0}, {'userRating>>': mr}]})
-
     # Exclude recent plays
     if exclusion_days and exclusion_days > 0:
         adv['and'].append({'lastViewedAt<<': f'-{exclusion_days}d'})
-
     # Clean up if empty
     if not adv['and']:
         return None
