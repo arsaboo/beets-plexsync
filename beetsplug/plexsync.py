@@ -172,23 +172,15 @@ class PlexSync(BeetsPlugin):
             + str(config["plex"]["port"].get())
         )
         try:
-            # Enable connection pooling for better performance
-            from plexapi.config import CONFIG
-            CONFIG.set('plexapi.http_cache', True)
-            CONFIG.set('plexapi.http_cache_dir', os.path.join(self.config_dir, 'plex_cache'))
-            CONFIG.set('plexapi.timeout', 120)  # Increase timeout for large libraries
-            
             self.plex = PlexServer(baseurl, config["plex"]["token"].get())
-            
-            # Enable request session reuse
-            self.plex._session.verify = not config["plex"]["ignore_cert_errors"].get(False)
         except exceptions.Unauthorized:
             raise ui.UserError("Plex authorization failed")
         try:
             self.music = self.plex.library.section(config["plex"]["library_name"].get())
         except exceptions.NotFound:
             raise ui.UserError(
-                f"{config['plex']['library_name']}                 library not found"
+                f"{config['plex']['library_name']} \
+                library not found"
             )
         self.register_listener("database_change", self.listen_for_db_change)
 
@@ -1915,56 +1907,34 @@ class PlexSync(BeetsPlugin):
         # Get preferred attributes once if needed for smart playlists
         preferred_genres = None
         similar_tracks = None
-        smart_playlists = [p for p in playlists_config if p.get("type", "smart") == "smart" and p.get("id") in ["daily_discovery", "forgotten_gems", "recent_hits"]]
-        imported_playlists = [p for p in playlists_config if p.get("type", "smart") == "imported"]
-        
-        if smart_playlists:
-            # Prefetch commonly used data
-            try:
-                sp_mod.prefetch_common_data(self)
-                self._log.debug("Completed prefetching common data")
-            except Exception as e:
-                self._log.debug("Prefetching failed: {}", e)
-            
+        if any(p.get("id") in ["daily_discovery", "forgotten_gems"] for p in playlists_config):
             preferred_genres, similar_tracks = self.get_preferred_attributes()
             self._log.debug("Using preferred genres: {}", preferred_genres)
             self._log.debug("Processing {} pre-filtered similar tracks", len(similar_tracks))
-            
-            # Batch fetch library tracks for all smart playlists to reduce API calls
-            try:
-                sp_mod.batch_fetch_library_tracks(self, smart_playlists)
-                self._log.debug("Completed batch fetching for smart playlists")
-            except Exception as e:
-                self._log.debug("Batch fetching failed: {}", e)
 
-        # Process imported playlists first (they don't need shared resources)
-        for p in imported_playlists:
-            sp_mod.generate_imported_playlist(self, lib, p, plex_lookup)
+        # Process each playlist
+        for p in playlists_config:
+            playlist_type = p.get("type", "smart")
+            playlist_id = p.get("id")
+            playlist_name = p.get("name", "Unnamed playlist")
 
-        # Process smart playlists with optimized shared resources
-        if smart_playlists:
-            # Process all smart playlists with shared data
-            for p in smart_playlists:
-                playlist_id = p.get("id")
+            if (playlist_type == "imported"):
+                sp_mod.generate_imported_playlist(self, lib, p, plex_lookup)
+            elif playlist_id in ["daily_discovery", "forgotten_gems", "recent_hits"]:
                 if playlist_id == "daily_discovery":
                     sp_mod.generate_daily_discovery(self, lib, p, plex_lookup, preferred_genres, similar_tracks)
                 elif playlist_id == "forgotten_gems":
                     sp_mod.generate_forgotten_gems(self, lib, p, plex_lookup, preferred_genres, similar_tracks)
                 else:  # recent_hits
                     sp_mod.generate_recent_hits(self, lib, p, plex_lookup, preferred_genres, similar_tracks)
-        
-        # Clear caches to free memory
-        try:
-            sp_mod.clear_caches()
-            self._log.debug("Cleared optimization caches")
-        except Exception as e:
-            self._log.debug("Failed to clear caches: {}", e)
+            else:
+                self._log.warning(
+                    "Unrecognized playlist configuration '{}' - type: '{}', id: '{}'. "
+                    "Valid types are 'imported' or 'smart'. "
+                    "Valid smart playlist IDs are 'daily_discovery', 'forgotten_gems', and 'recent_hits'.",
+                    playlist_name, playlist_type, playlist_id
+                )
 
-    def clear_caches(self, lib):
-        """Clean up when plugin is disabled."""
-        if self.loop and not self.loop.is_closed():
-            self.close()
-            
     def shutdown(self, lib):
         """Clean up when plugin is disabled."""
         if self.loop and not self.loop.is_closed():
