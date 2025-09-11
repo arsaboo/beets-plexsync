@@ -37,6 +37,38 @@ def clean_string(s: str) -> str:
     return s.strip()
 
 
+def extract_soundtrack_info(s: str) -> tuple[str, str]:
+    """Extract soundtrack information from a string.
+    
+    Returns a tuple of (cleaned_string, soundtrack_title) where soundtrack_title
+    is the extracted movie/album name if pattern is found, otherwise empty string.
+    """
+    if not s:
+        return s, ""
+    
+    # Look for patterns like 'Sunn Mere Yaar Ve - From "Param Sundari"'
+    soundtrack_pattern = re.compile(r'(.*)\s*[-â€“]\s*from\s*"([^"]+)"', re.IGNORECASE)
+    match = soundtrack_pattern.search(s)
+    
+    if match:
+        # Extract the main title and soundtrack title
+        main_title = match.group(1).strip()
+        soundtrack_title = match.group(2).strip()
+        return main_title, soundtrack_title
+    
+    # Also handle the pattern like '(From "...")' or '[From "..."]'
+    paren_pattern = re.compile(r'(.*)\s*[([]from\s*"([^"]+)"[)\]]', re.IGNORECASE)
+    match = paren_pattern.search(s)
+    
+    if match:
+        main_title = match.group(1).strip()
+        soundtrack_title = match.group(2).strip()
+        return main_title, soundtrack_title
+    
+    # No pattern found, return original string with empty soundtrack title
+    return s, ""
+
+
 def artist_distance(str1: str, str2: str) -> float:
     """Calculate artist name distance with special handling for multiple artists."""
     if not str1 or not str2:
@@ -112,7 +144,7 @@ def plex_track_distance(
         album_dist = hooks.string_dist(album1, album2)
 
         # --- START OF NEW SOUNDTRACK-AWARE LOGIC ---
-        # Check for (From "...") pattern in the original album title
+        # Check for soundtrack patterns in the original album title
         soundtrack_pattern = re.compile(r'\(from "([^"]+)"\)', re.IGNORECASE)
         match = soundtrack_pattern.search(item.album)
 
@@ -142,18 +174,72 @@ def plex_track_distance(
         title1 = clean_string(item.title)
         title2 = clean_string(plex_track.title)
 
-        # Check if one title contains the other (for partial matches)
-        if (title1 and title2) and (title1 in title2 or title2 in title1):
-            # Calculate string distance
-            title_dist = hooks.string_dist(title1, title2)
-
-            # Apply a bonus for partial containment
-            title_dist = max(0.0, title_dist - 0.2)
-
-            dist.add_ratio('title', title_dist, 1.0)
+        # --- NEW SOUNDTRACK-AWARE LOGIC FOR TITLE ---
+        # Extract soundtrack info from titles
+        main_title1, soundtrack_title1 = extract_soundtrack_info(item.title)
+        main_title2, soundtrack_title2 = extract_soundtrack_info(plex_track.title)
+        
+        # Clean the extracted soundtrack titles
+        soundtrack_title1_cleaned = clean_string(soundtrack_title1)
+        soundtrack_title2_cleaned = clean_string(soundtrack_title2)
+        
+        # If both have soundtrack titles, compare those
+        if soundtrack_title1_cleaned and soundtrack_title2_cleaned:
+            # Compare the soundtrack titles
+            soundtrack_dist = hooks.string_dist(soundtrack_title1_cleaned, soundtrack_title2_cleaned)
+            
+            # Apply a bonus if they match
+            if soundtrack_dist < 0.3:  # If soundtrack titles are similar
+                # Use the main titles for comparison but with a bonus
+                main_title1_cleaned = clean_string(main_title1)
+                main_title2_cleaned = clean_string(main_title2)
+                title_dist = hooks.string_dist(main_title1_cleaned, main_title2_cleaned)
+                
+                # Apply a bonus for matching soundtrack context
+                title_dist = max(0.0, title_dist - 0.3)
+                dist.add_ratio('title', title_dist, 1.0)
+            else:
+                # Fallback to standard title comparison
+                dist.add_string('title', title1, title2)
+        # If only one has a soundtrack title, check if it matches the other's album
+        elif soundtrack_title1_cleaned and has_album:
+            album2_cleaned = clean_string(plex_track.parentTitle)
+            if soundtrack_title1_cleaned == album2_cleaned:
+                # Apply bonus for matching soundtrack context
+                main_title1_cleaned = clean_string(main_title1)
+                title2_cleaned = clean_string(plex_track.title)
+                title_dist = hooks.string_dist(main_title1_cleaned, title2_cleaned)
+                title_dist = max(0.0, title_dist - 0.4)
+                dist.add_ratio('title', title_dist, 1.0)
+            else:
+                # Fallback to standard title comparison
+                dist.add_string('title', title1, title2)
+        elif soundtrack_title2_cleaned and has_album:
+            album1_cleaned = clean_string(item.album)
+            if soundtrack_title2_cleaned == album1_cleaned:
+                # Apply bonus for matching soundtrack context
+                title1_cleaned = clean_string(item.title)
+                main_title2_cleaned = clean_string(main_title2)
+                title_dist = hooks.string_dist(title1_cleaned, main_title2_cleaned)
+                title_dist = max(0.0, title_dist - 0.4)
+                dist.add_ratio('title', title_dist, 1.0)
+            else:
+                # Fallback to standard title comparison
+                dist.add_string('title', title1, title2)
+        # --- END OF NEW SOUNDTRACK-AWARE LOGIC FOR TITLE ---
         else:
-            # Use standard string comparison
-            dist.add_string('title', title1, title2)
+            # Check if one title contains the other (for partial matches)
+            if (title1 and title2) and (title1 in title2 or title2 in title1):
+                # Calculate string distance
+                title_dist = hooks.string_dist(title1, title2)
+
+                # Apply a bonus for partial containment
+                title_dist = max(0.0, title_dist - 0.2)
+
+                dist.add_ratio('title', title_dist, 1.0)
+            else:
+                # Use standard string comparison
+                dist.add_string('title', title1, title2)
 
     # Artist comparison (if available)
     if has_artist:
