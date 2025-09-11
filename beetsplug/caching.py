@@ -500,14 +500,20 @@ class Cache:
                     )
                     rows = cursor.fetchall()
 
-                    logger.debug("Found {} new format cache matches:", len(rows))
-                    for i, (cached_query, rating_key) in enumerate(rows):
+                    total_matches = len(rows)
+                    logger.debug("Found {} new format cache matches (showing top 5):", total_matches)
+
+                    # Only iterate over the top 5
+                    for i, (cached_query, rating_key) in enumerate(rows[:5]):
                         logger.debug(
                             "  {}: key='{}' -> rating_key={}",
                             i + 1,
                             cached_query,
                             rating_key,
                         )
+
+                    if total_matches > 5:
+                        logger.debug("  ... and {} more.", total_matches - 5)
 
                     logger.debug("=== END CACHE DEBUG ===")
 
