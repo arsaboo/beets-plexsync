@@ -12,37 +12,111 @@ from beets import config
 from beetsplug.helpers import get_config_value
 
 
-def build_plex_lookup(ps, lib):
-    ps._log.debug("Building lookup dictionary for Plex rating keys")
-    plex_lookup = {}
-    for item in lib.items():
-        if hasattr(item, "plex_ratingkey"):
-            plex_lookup[item.plex_ratingkey] = item
-    return plex_lookup
+class LazyPlexLookup:
+    """Lazy loading wrapper for Plex lookup dictionary to improve memory efficiency."""
+    
+    def __init__(self, lib):
+        self.lib = lib
+        self._lookup = None
+        self._built = False
+    
+    def _build_lookup(self):
+        """Build the lookup dictionary on first access."""
+        if not self._built:
+            self._lookup = {}
+            for item in self.lib.items():
+                if hasattr(item, "plex_ratingkey"):
+                    self._lookup[item.plex_ratingkey] = item
+            self._built = True
+    
+    def get(self, rating_key, default=None):
+        """Get an item from the lookup dictionary, building it if needed."""
+        self._build_lookup()
+        return self._lookup.get(rating_key, default)
+    
+    def __getitem__(self, rating_key):
+        """Get an item from the lookup dictionary, building it if needed."""
+        self._build_lookup()
+        return self._lookup[rating_key]
+    
+    def __contains__(self, rating_key):
+        """Check if a rating key is in the lookup dictionary, building it if needed."""
+        self._build_lookup()
+        return rating_key in self._lookup
+    
+    def keys(self):
+        """Get all rating keys, building the lookup if needed."""
+        self._build_lookup()
+        return self._lookup.keys()
+    
+    def values(self):
+        """Get all items, building the lookup if needed."""
+        self._build_lookup()
+        return self._lookup.values()
+    
+    def items(self):
+        """Get all items, building the lookup if needed."""
+        self._build_lookup()
+        return self._lookup.items()
 
+def build_plex_lookup(ps, lib):
+    ps._log.debug("Building lazy lookup dictionary for Plex rating keys")
+    return LazyPlexLookup(lib)
+
+
+# Cache for expensive operations
+_preferred_attributes_cache = {}
+_similar_tracks_cache = {}
+
+# Prefetch cache for commonly used data
+_prefetch_cache = {}
 
 def get_preferred_attributes(ps) -> Tuple[list, list]:
-    # Defaults from config
-    if (
-        "playlists" in config["plexsync"]
-        and "defaults" in config["plexsync"]["playlists"]
-    ):
-        defaults_cfg = config["plexsync"]["playlists"]["defaults"].get({})
+    # Check cache first
+    cache_key = "preferred_attributes"
+    if cache_key in _preferred_attributes_cache:
+        cached_time, result = _preferred_attributes_cache[cache_key]
+        # Cache for 5 minutes
+        if time.time() - cached_time < 300:
+            ps._log.debug("Using cached preferred attributes")
+            return result
+    
+    # Use prefetched data if available
+    global _prefetch_cache
+    if "recent_tracks" in _prefetch_cache and "all_tracks" in _prefetch_cache:
+        ps._log.debug("Using prefetched data for preferred attributes")
+        tracks = _prefetch_cache["recent_tracks"]
+        all_tracks = _prefetch_cache["all_tracks"]
     else:
-        defaults_cfg = {}
+        # Defaults from config
+        if (
+            "playlists" in config["plexsync"]
+            and "defaults" in config["plexsync"]["playlists"]
+        ):
+            defaults_cfg = config["plexsync"]["playlists"]["defaults"].get({})
+        else:
+            defaults_cfg = {}
 
-    history_days = get_config_value(config["plexsync"], defaults_cfg, "history_days", 15)
-    exclusion_days = get_config_value(config["plexsync"], defaults_cfg, "exclusion_days", 30)
+        history_days = get_config_value(config["plexsync"], defaults_cfg, "history_days", 15)
+        exclusion_days = get_config_value(config["plexsync"], defaults_cfg, "exclusion_days", 30)
 
-    tracks = ps.music.search(filters={"track.lastViewedAt>>": f"{history_days}d"}, libtype="track")
+        tracks = ps.music.search(filters={"track.lastViewedAt>>": f"{history_days}d"}, libtype="track")
+        all_tracks = ps.music.search(libtype="track")
 
     genre_counts = {}
     similar_tracks = set()
 
-    recently_played = set(
-        track.ratingKey
-        for track in ps.music.search(filters={"track.lastViewedAt>>": f"{exclusion_days}d"}, libtype="track")
-    )
+    # Use prefetched recently played tracks if available
+    if "recent_tracks" in _prefetch_cache:
+        recently_played = set(track.ratingKey for track in _prefetch_cache["recent_tracks"])
+    else:
+        exclusion_days = get_config_value(config["plexsync"]["playlists"]["defaults"].get({}) if "playlists" in config["plexsync"] else {}, 
+                                          config["plexsync"]["playlists"]["defaults"].get({}) if "playlists" in config["plexsync"] else {}, 
+                                          "exclusion_days", 30)
+        recently_played = set(
+            track.ratingKey
+            for track in ps.music.search(filters={"track.lastViewedAt>>": f"{exclusion_days}d"}, libtype="track")
+        )
 
     for track in tracks:
         track_genres = set()
@@ -68,7 +142,12 @@ def get_preferred_attributes(ps) -> Tuple[list, list]:
     sorted_genres = sorted(genre_counts, key=genre_counts.get, reverse=True)[:5]
     ps._log.debug("Top genres: {}", sorted_genres)
     ps._log.debug("Found {} similar tracks after filtering", len(similar_tracks))
-    return sorted_genres, list(similar_tracks)
+    
+    # Cache the result
+    result = (sorted_genres, list(similar_tracks))
+    _preferred_attributes_cache[cache_key] = (time.time(), result)
+    
+    return result
 
 
 def calculate_track_score(ps, track, base_time=None, tracks_context=None):
@@ -288,9 +367,30 @@ def _apply_inclusion_filters(ps, tracks, include_config):
     return filtered_tracks
 
 
+# Cache for filtered tracks to avoid redundant processing
+_filtered_tracks_cache = {}
+
 def apply_playlist_filters(ps, tracks, filter_config):
     if not tracks:
         return tracks
+    
+    # Create a cache key based on the parameters
+    cache_key = (id(tracks), _make_hashable(filter_config))
+    
+    # Check if we have cached results that are still valid (cache for 1 minute)
+    if cache_key in _filtered_tracks_cache:
+        cached_time, filtered_tracks = _filtered_tracks_cache[cache_key]
+        if time.time() - cached_time < 60:
+            ps._log.debug("Using cached filtered tracks ({} tracks)", len(filtered_tracks))
+            return filtered_tracks[:]
+    
+    # Use prefetched filtered data if available
+    global _prefetch_cache
+    prefetch_key = f"filtered_{_make_hashable(filter_config)}"
+    if prefetch_key in _prefetch_cache:
+        ps._log.debug("Using prefetched filtered tracks")
+        return _prefetch_cache[prefetch_key][:]
+
     is_valid, error = validate_filter_config(ps, filter_config)
     if not is_valid:
         ps._log.error("Invalid filter configuration: {}", error)
@@ -338,6 +438,10 @@ def apply_playlist_filters(ps, tracks, filter_config):
         "Filter application complete: {} -> {} tracks in {:.2f}s",
         len(tracks), len(filtered_tracks), time.time() - total_start,
     )
+    
+    # Cache the result
+    _filtered_tracks_cache[cache_key] = (time.time(), filtered_tracks)
+    
     return filtered_tracks
 
 
@@ -412,7 +516,98 @@ def generate_daily_discovery(ps, lib, dd_config, plex_lookup, preferred_genres, 
     ps._log.info("Successfully updated {} playlist with {} tracks", playlist_name, len(selected_tracks))
 
 
+# Cache for advanced filters to avoid redundant computation
+_advanced_filters_cache = {}
+
+def prefetch_common_data(ps):
+    """Prefetch commonly used data to reduce latency during playlist generation."""
+    global _prefetch_cache
+    
+    try:
+        # Prefetch all tracks once
+        if "all_tracks" not in _prefetch_cache:
+            ps._log.debug("Prefetching all library tracks...")
+            all_tracks = ps.music.search(libtype="track")
+            _prefetch_cache["all_tracks"] = all_tracks
+            ps._log.debug("Prefetched {} tracks", len(all_tracks))
+        
+        # Prefetch recently played tracks
+        if "recent_tracks" not in _prefetch_cache:
+            defaults_cfg = config["plexsync"]["playlists"]["defaults"].get({}) if "playlists" in config["plexsync"] else {}
+            exclusion_days = get_config_value(config["plexsync"], defaults_cfg, "exclusion_days", 30)
+            ps._log.debug("Prefetching recently played tracks (last {} days)...", exclusion_days)
+            recent_tracks = ps.music.search(filters={"track.lastViewedAt>>": f"{exclusion_days}d"}, libtype="track")
+            _prefetch_cache["recent_tracks"] = recent_tracks
+            ps._log.debug("Prefetched {} recently played tracks", len(recent_tracks))
+            
+        # Prefetch tracks with user ratings
+        if "rated_tracks" not in _prefetch_cache:
+            ps._log.debug("Prefetching rated tracks...")
+            rated_tracks = ps.music.search(filters={"userRating>>": 0}, libtype="track")
+            _prefetch_cache["rated_tracks"] = rated_tracks
+            ps._log.debug("Prefetched {} rated tracks", len(rated_tracks))
+            
+        # Prefetch tracks with play counts
+        if "played_tracks" not in _prefetch_cache:
+            ps._log.debug("Prefetching played tracks...")
+            played_tracks = ps.music.search(filters={"viewCount>>": 0}, libtype="track")
+            _prefetch_cache["played_tracks"] = played_tracks
+            ps._log.debug("Prefetched {} played tracks", len(played_tracks))
+            
+        # Prefetch genre information
+        if "genres" not in _prefetch_cache:
+            ps._log.debug("Prefetching genre information...")
+            genres = ps.music.search(libtype="genre")
+            _prefetch_cache["genres"] = genres
+            ps._log.debug("Prefetched {} genres", len(genres))
+            
+        # Prefetch commonly used filtered tracks
+        if "high_rated_tracks" not in _prefetch_cache:
+            ps._log.debug("Prefetching high-rated tracks...")
+            high_rated_tracks = ps.music.search(filters={"userRating>>": 7}, libtype="track")
+            _prefetch_cache["high_rated_tracks"] = high_rated_tracks
+            ps._log.debug("Prefetched {} high-rated tracks", len(high_rated_tracks))
+            
+        if "popular_tracks" not in _prefetch_cache:
+            ps._log.debug("Prefetching popular tracks...")
+            popular_tracks = ps.music.search(filters={"viewCount>>": 10}, libtype="track")
+            _prefetch_cache["popular_tracks"] = popular_tracks
+            ps._log.debug("Prefetched {} popular tracks", len(popular_tracks))
+            
+    except Exception as e:
+        ps._log.debug("Prefetching failed: {}", e)
+
+def clear_caches():
+    """Clear all caches to free memory and ensure fresh data."""
+    global _advanced_filters_cache, _filtered_tracks_cache, _library_tracks_cache, _preferred_attributes_cache, _prefetch_cache, _batched_tracks_cache
+    _advanced_filters_cache.clear()
+    _filtered_tracks_cache.clear()
+    _library_tracks_cache.clear()
+    _preferred_attributes_cache.clear()
+    _prefetch_cache.clear()
+    _batched_tracks_cache.clear()
+
+def _make_hashable(obj):
+    """Convert an object to a hashable representation for caching."""
+    if isinstance(obj, dict):
+        return tuple(sorted((k, _make_hashable(v)) for k, v in obj.items()))
+    elif isinstance(obj, list):
+        return tuple(_make_hashable(item) for item in obj)
+    elif isinstance(obj, set):
+        return tuple(sorted(_make_hashable(item) for item in obj))
+    else:
+        return obj
+
 def build_advanced_filters(filter_config, exclusion_days, preferred_genres=None):
+    # Create a cache key based on the parameters
+    cache_key = (_make_hashable(filter_config), 
+                 exclusion_days, 
+                 _make_hashable(preferred_genres))
+    
+    # Check if we have cached results
+    if cache_key in _advanced_filters_cache:
+        return _advanced_filters_cache[cache_key]
+
     adv = {'and': []}
 
     if filter_config:
@@ -462,37 +657,74 @@ def build_advanced_filters(filter_config, exclusion_days, preferred_genres=None)
         adv['and'].append({'lastViewedAt<<': f'-{exclusion_days}d'})
 
     # Clean up if empty
-    if not adv['and']:
-        return None
-    return adv
+    result = adv if adv['and'] else None
+    
+    # Cache the result
+    _advanced_filters_cache[cache_key] = result
+    
+    return result
+
+# Cache for library tracks to avoid redundant fetching
+_library_tracks_cache = {}
+
+# Global cache for batched track fetching
+_batched_tracks_cache = {}
+_batch_request_queue = []
 
 def _get_library_tracks(ps, preferred_genres, filters, exclusion_days):
-    adv_filters = build_advanced_filters(filters, exclusion_days, preferred_genres)
-    if adv_filters:
-        try:
-            ps._log.debug("Using server-side filters: {}", adv_filters)
-            _t0 = time.time()
-            tracks = ps.music.searchTracks(filters=adv_filters)
-            ps._log.debug(
-                "Server-side filter fetched {} tracks in {:.2f}s",
-                len(tracks), time.time() - _t0,
-            )
-        except Exception as e:
-            ps._log.debug("Server-side filter failed (falling back to client filter): {}", e)
+    # Create a cache key based on the parameters
+    cache_key = (_make_hashable(preferred_genres), 
+                 _make_hashable(filters), 
+                 exclusion_days)
+    
+    # Check if we have cached results that are still valid (cache for 2 minutes)
+    if cache_key in _library_tracks_cache:
+        cached_time, tracks = _library_tracks_cache[cache_key]
+        if time.time() - cached_time < 120:
+            ps._log.debug("Using cached library tracks ({} tracks)", len(tracks))
+            return tracks[:]
+
+    # Check if we have batched results available
+    batch_key = _make_hashable(filters)
+    if batch_key in _batched_tracks_cache:
+        tracks = _batched_tracks_cache[batch_key]
+        ps._log.debug("Using batched library tracks ({} tracks)", len(tracks))
+        # Cache individual result
+        _library_tracks_cache[cache_key] = (time.time(), tracks)
+        return tracks[:]
+
+    # Use prefetched data if available and no filters are specified
+    global _prefetch_cache
+    if not filters and "all_tracks" in _prefetch_cache:
+        ps._log.debug("Using prefetched all tracks")
+        tracks = _prefetch_cache["all_tracks"]
+    else:
+        adv_filters = build_advanced_filters(filters, exclusion_days, preferred_genres)
+        if adv_filters:
+            try:
+                ps._log.debug("Using server-side filters: {}", adv_filters)
+                _t0 = time.time()
+                tracks = ps.music.searchTracks(filters=adv_filters)
+                ps._log.debug(
+                    "Server-side filter fetched {} tracks in {:.2f}s",
+                    len(tracks), time.time() - _t0,
+                )
+            except Exception as e:
+                ps._log.debug("Server-side filter failed (falling back to client filter): {}", e)
+                _t0 = time.time()
+                tracks = ps.music.search(libtype="track")
+                ps._log.debug(
+                    "Client-side fetch (no server filters) returned {} tracks in {:.2f}s",
+                    len(tracks), time.time() - _t0,
+                )
+        else:
+            # No filters specified; fetch all tracks (may be large)
             _t0 = time.time()
             tracks = ps.music.search(libtype="track")
             ps._log.debug(
-                "Client-side fetch (no server filters) returned {} tracks in {:.2f}s",
+                "Fetched all tracks (no filters) -> {} in {:.2f}s",
                 len(tracks), time.time() - _t0,
             )
-    else:
-        # No filters specified; fetch all tracks (may be large)
-        _t0 = time.time()
-        tracks = ps.music.search(libtype="track")
-        ps._log.debug(
-            "Fetched all tracks (no filters) -> {} in {:.2f}s",
-            len(tracks), time.time() - _t0,
-        )
 
     # Optional candidate pool cap to avoid huge post-filtering work
     try:
@@ -506,7 +738,37 @@ def _get_library_tracks(ps, preferred_genres, filters, exclusion_days):
     except Exception:
         pass
 
+    # Cache the results
+    _library_tracks_cache[cache_key] = (time.time(), tracks)
+    
     return tracks
+
+def batch_fetch_library_tracks(ps, playlist_configs):
+    """Batch fetch library tracks for multiple playlists to reduce API calls."""
+    global _batched_tracks_cache
+    
+    # Clear previous batch cache
+    _batched_tracks_cache.clear()
+    
+    # Collect all unique filters
+    unique_filters = {}
+    for config in playlist_configs:
+        filters = config.get("filters", {})
+        filter_key = _make_hashable(filters)
+        if filter_key not in unique_filters:
+            unique_filters[filter_key] = filters
+    
+    # Fetch tracks for each unique filter set
+    for filter_key, filters in unique_filters.items():
+        try:
+            adv_filters = build_advanced_filters(filters, 0, None)  # Base filters without exclusion days
+            if adv_filters:
+                ps._log.debug("Batch fetching tracks with filters: {}", adv_filters)
+                tracks = ps.music.searchTracks(filters=adv_filters)
+                _batched_tracks_cache[filter_key] = tracks
+                ps._log.debug("Batch fetch returned {} tracks", len(tracks))
+        except Exception as e:
+            ps._log.debug("Batch fetch failed for filters {}: {}", filter_key, e)
 
 
 def generate_forgotten_gems(ps, lib, ug_config, plex_lookup, preferred_genres, similar_tracks):
