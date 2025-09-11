@@ -1126,30 +1126,67 @@ class PlexSync(BeetsPlugin):
             self._cache_result(cache_key, None)
             return None
 
-        # Try regular search
+        # Try regular search with multiple strategies
         # Ensure song["artist"] is not None before splitting
+        tracks = []
+        search_strategies_tried = []
+        
         try:
             if song["artist"] is None:
                 song["artist"] = ""
-            if song["album"] is None:
-                tracks = self.music.searchTracks(**{"track.title": song["title"]}, limit=50)
-            else:
+                
+            # Strategy 1: Album + Title search (existing)
+            if song["album"] is not None and song["album"] != "":
+                search_strategies_tried.append("album_title")
                 tracks = self.music.searchTracks(
                     **{"album.title": song["album"], "track.title": song["title"]}, limit=50
                 )
-                if len(tracks) == 0:
-                    # Try with simplified title (no parentheses)
-                    song["title"] = clean_string(song["title"])
-                    tracks = self.music.searchTracks(**{"track.title": song["title"]}, limit=50)
-            if song["title"] is None or song["title"] == "" and song["album"] and song["artist"]:
+                self._log.debug("Strategy 1 (Album+Title): Found {} tracks", len(tracks))
+                
+            # Strategy 2: Title-only search if album search failed
+            if len(tracks) == 0:
+                search_strategies_tried.append("title_only")
+                tracks = self.music.searchTracks(**{"track.title": song["title"]}, limit=50)
+                self._log.debug("Strategy 2 (Title-only): Found {} tracks", len(tracks))
+                
+            # Strategy 3: Simplified title search if still no matches
+            if len(tracks) == 0:
+                search_strategies_tried.append("simplified_title")
+                simplified_title = clean_string(song["title"])
+                tracks = self.music.searchTracks(**{"track.title": simplified_title}, limit=50)
+                self._log.debug("Strategy 3 (Simplified title): Found {} tracks", len(tracks))
+                
+            # Strategy 4: Artist + Title search
+            if len(tracks) == 0 and song["artist"] and song["title"]:
+                search_strategies_tried.append("artist_title")
                 tracks = self.music.searchTracks(
-                    **{"album.title": song["album"], "artist.title": song["artist"]}, limit=50
+                    **{"artist.title": song["artist"], "track.title": song["title"]}, limit=50
                 )
+                self._log.debug("Strategy 4 (Artist+Title): Found {} tracks", len(tracks))
+                
+            # Strategy 5: Album-only search
+            if len(tracks) == 0 and song["album"]:
+                search_strategies_tried.append("album_only")
+                tracks = self.music.searchTracks(**{"album.title": song["album"]}, limit=100)
+                self._log.debug("Strategy 5 (Album-only): Found {} tracks", len(tracks))
+                
+            # Strategy 6: Soundtrack-aware search (if applicable)
+            if len(tracks) == 0 and song["album"] == "" and " - from " in song["title"].lower():
+                search_strategies_tried.append("soundtrack_aware")
+                # Extract movie name from "Song - From Movie" format
+                import re
+                soundtrack_pattern = re.compile(r'.*\s*-\s*from\s*"([^"]+)"', re.IGNORECASE)
+                match = soundtrack_pattern.search(song["title"])
+                if match:
+                    movie_name = match.group(1)
+                    tracks = self.music.searchTracks(**{"album.title": movie_name}, limit=50)
+                    self._log.debug("Strategy 6 (Soundtrack-aware): Found {} tracks for movie '{}'", len(tracks), movie_name)
+                    
         except Exception as e:
             self._log.debug(
-                "Error searching for {} - {}. Error: {}",
-                song["album"],
-                song["title"],
+                "Error during multi-strategy search for {} - {}. Error: {}",
+                song.get("album", ""),
+                song.get("title", ""),
                 e,
             )
             return None
@@ -1161,7 +1198,7 @@ class PlexSync(BeetsPlugin):
             return result
         elif len(tracks) > 1:
             sorted_tracks = self.find_closest_match(song, tracks)
-            self._log.debug("Found {} tracks for {}", len(sorted_tracks), song["title"])
+            self._log.debug("Found {} tracks for {} using strategies: {}", len(sorted_tracks), song["title"], ", ".join(search_strategies_tried))
 
             # Try manual search first if enabled and we have matches
             if manual_search and len(sorted_tracks) > 0:
@@ -1173,9 +1210,11 @@ class PlexSync(BeetsPlugin):
 
             # Otherwise try automatic matching with improved threshold
             best_match = sorted_tracks[0]
-            if best_match[1] >= 0.8:  # Require 80% match score for automatic matching
+            if best_match[1] >= 0.7:  # Lower threshold since we have more strategies
                 self._cache_result(cache_key, best_match[0])
                 return best_match[0]
+            else:
+                self._log.debug("Best match score {} below threshold for: {}", best_match[1], song["title"])
 
         # Try LLM cleaning if enabled and not already attempted
         if not llm_attempted and self.search_llm and config["plexsync"]["use_llm_search"].get(bool):
@@ -1183,6 +1222,7 @@ class PlexSync(BeetsPlugin):
             if song.get('album'):
                 search_query += f" from {song['album']}"
 
+            self._log.debug("Attempting LLM cleanup for: {} using strategies: {}", search_query, ", ".join(search_strategies_tried))
             cleaned_metadata = search_track_info(search_query)
             if cleaned_metadata:
                 # Use original value if LLM returns None for a field
@@ -1220,10 +1260,11 @@ class PlexSync(BeetsPlugin):
         # Final fallback: try manual search if enabled
         if manual_search:
             self._log.info(
-                "\nTrack {} - {} - {} not found in Plex".format(
+                "\nTrack {} - {} - {} not found in Plex (tried strategies: {})",
                 song.get("album", "Unknown"),
                 song.get("artist", "Unknown"),
-                song["title"])
+                song["title"],
+                ", ".join(search_strategies_tried) if search_strategies_tried else "none"
             )
             if ui.input_yn(ui.colorize('text_highlight', "\nSearch manually?") + " (Y/n)"):
                 result = self.manual_track_search(song)
@@ -1234,6 +1275,7 @@ class PlexSync(BeetsPlugin):
                 return result
 
         # Store negative result if nothing found
+        self._log.debug("All search strategies failed for: {} (tried: {})", song, ", ".join(search_strategies_tried) if search_strategies_tried else "none")
         self._cache_result(cache_key, None)
         return None
 
