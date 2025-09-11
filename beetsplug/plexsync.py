@@ -636,17 +636,8 @@ class PlexSync(BeetsPlugin):
         return float(value)
 
     def find_closest_match(self, song, tracks):
-        """Find best matching tracks using string similarity with dynamic weights."""
+        """Find best matching tracks using enhanced string similarity with context-aware weights."""
         matches = []
-
-        # Default config with only title, artist, and album weights
-        config = {
-            'weights': {
-                'title': 0.45,      # Title most important
-                'artist': 0.35,     # Artist next
-                'album': 0.20,      # Album title
-            }
-        }
 
         # Create a temporary beets Item for comparison with null safety
         temp_item = Item()
@@ -655,7 +646,7 @@ class PlexSync(BeetsPlugin):
         temp_item.album = (song.get('album') or '').strip() if song.get('album') is not None else ''
 
         for track in tracks:
-            score, dist = plex_track_distance(temp_item, track, config)
+            score, dist = plex_track_distance(temp_item, track)
             matches.append((track, score))
 
             # Debug logging - simpler format with positional args
