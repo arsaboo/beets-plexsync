@@ -95,7 +95,7 @@ def calculate_field_weight(field_value: str, field_type: str) -> float:
     # Adjust for distinguishing features
     if re.search(r'\b\d{4}\b', field_value):  # Contains year as whole word
         weight *= 1.1
-    if re.search(r'[[(](feat|ft|with)[.)]| featuring', field_value, re.IGNORECASE):
+    if re.search(r'[([]+(?:feat|ft|with)[.)]| featuring', field_value, re.IGNORECASE):
         weight *= 1.05  # Slight boost for detailed artist info
     
     # Ensure weight doesn't exceed reasonable bounds
@@ -240,7 +240,7 @@ def plex_track_distance(
 
     dist._weights.update(weights)
 
-    # Album comparison first (if available)
+    # Album comparison (if available in search query)
     if has_album:
         album1 = clean_string(item.album)
         album2 = clean_string(plex_track.parentTitle)
@@ -294,6 +294,20 @@ def plex_track_distance(
         # If we only have album and it's a perfect match, return high score
         if len(available_fields) == 1 and album_dist < 0.1:
             return 0.95, dist
+    # Enhanced logic: Handle case where search query has no album but title contains soundtrack info
+    elif has_title and not has_album:
+        # Extract soundtrack info from the title
+        main_title1, soundtrack_title1 = extract_soundtrack_info(item.title)
+        soundtrack_title1_cleaned = clean_string(soundtrack_title1)
+        
+        # If we extracted soundtrack info from the title, check if it matches the Plex album
+        if soundtrack_title1_cleaned:
+            album2_cleaned = clean_string(plex_track.parentTitle)
+            if soundtrack_title1_cleaned == album2_cleaned:
+                # Provide a bonus for album validation (even though search has no album field)
+                # This helps validate that this is a good match by confirming soundtrack context
+                album_bonus_dist = 0.2  # Low distance to represent album validation
+                dist.add_ratio('album', album_bonus_dist, 1.0)
 
     # Title comparison (if available)
     if has_title:
@@ -351,6 +365,25 @@ def plex_track_distance(
                 title_dist = hooks.string_dist(title1_cleaned, main_title2_cleaned)
                 title_dist = max(0.0, title_dist - 0.4)
                 dist.add_ratio('title', title_dist, 1.0)
+            else:
+                # Fallback to standard title comparison
+                dist.add_string('title', title1, title2)
+        # Enhanced logic: Handle case where soundtrack info is in title but no album field in search query
+        elif soundtrack_title1_cleaned and not has_album:
+            # Check if the extracted soundtrack title matches the Plex track's album
+            album2_cleaned = clean_string(plex_track.parentTitle)
+            if soundtrack_title1_cleaned == album2_cleaned:
+                # Apply bonus for matching soundtrack context
+                main_title1_cleaned = clean_string(main_title1)
+                title2_cleaned = clean_string(plex_track.title)
+                title_dist = hooks.string_dist(main_title1_cleaned, title2_cleaned)
+                title_dist = max(0.0, title_dist - 0.4)
+                dist.add_ratio('title', title_dist, 1.0)
+                
+                # ALSO provide a bonus for the album comparison (even though search has no album)
+                # This helps validate that this is a good match by confirming soundtrack context
+                album_bonus_dist = 0.3  # Artificial low distance to represent album validation
+                dist.add_ratio('album', album_bonus_dist, 1.0)
             else:
                 # Fallback to standard title comparison
                 dist.add_string('title', title1, title2)
