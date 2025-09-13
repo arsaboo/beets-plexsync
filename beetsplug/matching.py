@@ -432,4 +432,10 @@ def plex_track_distance(
     else:
         score = raw_score
 
+    # Ensure exact/near-exact matches surface with high confidence in UI.
+    # When all fields align and raw_score is ~1.0, the quality-based multiplier
+    # can cap scores around 0.75 for short metadata. Bump such cases.
+    if raw_score >= 0.99:
+        score = max(score, 0.95)
+
     return score, dist
