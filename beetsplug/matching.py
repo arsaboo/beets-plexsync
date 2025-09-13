@@ -13,55 +13,97 @@ from plexapi.audio import Track
 
 
 def clean_string(s: str) -> str:
-    """Clean a string for comparison by removing common variations."""
+    """Clean a string for comparison by removing common variations.
+
+    Normalization pipeline:
+    - lowercase and trim
+    - strip surrounding quotes and normalize apostrophes
+    - drop leading article "the"
+    - remove parenthetical/bracketed segments anywhere
+    - remove trailing featuring clauses (feat./ft./featuring/with ...)
+    - drop common edition/suffix markers (remaster, radio edit, deluxe, etc.)
+    - normalize separators (&, /, \) to spaces and collapse whitespace
+    - remove a trailing year token
+    """
     if not s:
         return ""
 
-    s = s.lower()
+    s = s.strip().lower()
 
-    # Remove common prefixes/suffixes
-    s = re.sub(r"^the\s+", "", s)
-    s = re.sub(r"\s*$[^)]*$", "", s)  # Remove parentheses and contents
-    s = re.sub(r"\s*$[^]]*$", "", s)  # Remove brackets and contents
-    s = re.sub(r"\s*feat\.?\s.*$", "", s, flags=re.IGNORECASE)  # Remove featuring
-    s = re.sub(r"\s*ft\.?\s.*$", "", s, flags=re.IGNORECASE)  # Remove ft.
-    s = re.sub(r"\s*with\s.*$", "", s, flags=re.IGNORECASE)  # Remove with...
+    # Strip quotes/apostrophes that are often cosmetic
+    s = s.replace("“", '"').replace("”", '"').replace("’", "'")
+    s = s.replace('"', "").replace("'", "")
+
+    # Remove leading article
+    s = re.sub(r"^\s*the\s+", "", s)
+
+    # Remove parenthetical/bracketed segments (e.g., (Remastered 2011), [Live])
+    s = re.sub(r"\s*[\(\[][^\)\]]*[\)\]]", "", s)
+
+    # Remove featuring clauses at the end (feat./ft./featuring/with ...)
+    s = re.sub(r"\s*(?:feat\.?|ft\.?|featuring|with)\s+.*$", "", s, flags=re.IGNORECASE)
+
+    # Drop common edition/suffix markers if present after a dash
+    s = re.sub(
+        r"\s*-\s*(?:remaster(?:ed)?(?:\s+\d{4})?|radio edit|single version|album version|deluxe edition|expanded edition|clean version|explicit version)\b.*$",
+        "",
+        s,
+        flags=re.IGNORECASE,
+    )
 
     # Normalize separators
-    s = re.sub(r"[&,/\\]", " and ", s)
+    s = re.sub(r"[&,/\\]", " ", s)
     s = re.sub(r"\s+", " ", s)  # Normalize whitespace
 
-    # Add handling for year variations
-    s = re.sub(r"\s*\d{4}\s*$", "", s)  # Remove year at end
+    # Remove trailing year token
+    s = re.sub(r"\s*\b\d{4}\b\s*$", "", s)
 
     return s.strip()
 
 
 def extract_soundtrack_info(s: str) -> tuple[str, str]:
     """Extract soundtrack information from a string with enhanced pattern detection.
-    
-    Returns a tuple of (cleaned_string, soundtrack_title) where soundtrack_title
-    is the extracted movie/album name if pattern is found, otherwise empty string.
+
+    Returns a tuple of (main_title, soundtrack_title) where soundtrack_title
+    is the extracted movie/album name if a pattern is found; otherwise empty.
+    Patterns handled:
+      - Song - From "Movie" / Song – From "Movie"
+      - Song (From "Movie") / [From "Movie"] (quotes optional)
+      - Song (Soundtrack from "Movie") / Song (Music from "Movie")
+      - Song (From the movie "Movie")
+      - Also supports the above without quotes around Movie
     """
     if not s:
         return s, ""
-    
+
+    # Use raw string for detection (don't pre-clean away quotes)
+    text = s.strip()
+
     # Enhanced patterns for soundtrack detection
     patterns = [
-        r'(.*?)\s*[-–]\s*from\s*[""«»](.*?)[""»«]',  # "Song - From "Movie""
-        r'(.*?)\s*[([]\s*from\s*[""«»](.*?)[""»«]\s*[)\]]',  # "Song (From "Movie")"
-        r'(.*?)\s*$\s*soundtrack\s+from\s*[""«»](.*?)[""»«]\s*$',  # "Song (Soundtrack from "Movie")"
-        r'(.*?)\s*$\s*music\s+from\s*[""«»](.*?)[""»«]\s*$',  # "Song (Music from "Movie")"
-        r'(.*?)\s*$\s*from\s+the\s+movie\s+[""«»](.*?)[""»«]\s*$',  # "Song (From the movie "Movie")"
+        # Song - From "Movie" (quotes optional)
+        r"^(.*?)\s*[-–]\s*from\s+[\"\“\”]?(.+?)[\"\”\“]?$",
+        # Song (From "Movie") or [From "Movie"] (quotes optional)
+        r"^(.*?)\s*[\(\[]\s*from\s+[\"\“\”]?(.+?)[\"\”\“]?\s*[\)\]]",
+        # Song (Soundtrack from "Movie")
+        r"^(.*?)\s*[\(\[]\s*soundtrack\s+from\s+[\"\“\”]?(.+?)[\"\”\“]?\s*[\)\]]",
+        # Song (Music from "Movie")
+        r"^(.*?)\s*[\(\[]\s*music\s+from\s+[\"\“\”]?(.+?)[\"\”\“]?\s*[\)\]]",
+        # Song (From the movie "Movie")
+        r"^(.*?)\s*[\(\[]\s*from\s+the\s+movie\s+[\"\“\”]?(.+?)[\"\”\“]?\s*[\)\]]",
+        # Song - From Movie (no quotes)
+        r"^(.*?)\s*[-–]\s*from\s+(.+)$",
+        # Song (From Movie) (no quotes)
+        r"^(.*?)\s*[\(\[]\s*from\s+(.+?)\s*[\)\]]",
     ]
-    
+
     for pattern in patterns:
-        match = re.search(pattern, s, re.IGNORECASE)
+        match = re.search(pattern, text, re.IGNORECASE)
         if match:
             main_title = match.group(1).strip()
-            soundtrack_title = match.group(2).strip()
+            soundtrack_title = match.group(2).strip().strip('"\"').strip()
             return main_title, soundtrack_title
-    
+
     # No pattern found, return original string with empty soundtrack title
     return s, ""
 
