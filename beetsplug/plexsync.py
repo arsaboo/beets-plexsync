@@ -1071,7 +1071,8 @@ class PlexSync(BeetsPlugin):
                     # If we have cleaned metadata from LLM and this is the first attempt, try that
                     if cleaned_metadata and not llm_attempted:
                         self._log.debug("Using cached cleaned metadata: {}", cleaned_metadata)
-                        result = self.search_plex_song(cleaned_metadata, manual_search, llm_attempted=True)
+                        # Retry with cleaned metadata, but avoid nested prompts here
+                        result = self.search_plex_song(cleaned_metadata, False, llm_attempted=True)
 
                         # If LLM search succeeds, update the original cache
                         if result is not None:
@@ -1110,12 +1111,9 @@ class PlexSync(BeetsPlugin):
                     # If cached item not found in Plex, remove it from cache and continue
                     self.cache.set(cache_key, None)
 
-        # If we reach here and this is an LLM attempt that failed, don't proceed with regular search
-        if llm_attempted:
-            self._log.debug("LLM search attempt failed, not proceeding with regular search for: {}", song)
-            # Cache the LLM-cleaned query as negative result to avoid future LLM calls
-            self._cache_result(cache_key, None)
-            return None
+        # Note: when llm_attempted is True (searching cleaned metadata), we still
+        # run the regular search strategies below. The LLM branch will not repeat
+        # because it is guarded by `not llm_attempted`.
 
         # Try regular search with multiple strategies
         # Ensure song["artist"] is not None before splitting
@@ -1208,6 +1206,7 @@ class PlexSync(BeetsPlugin):
                 self._log.debug("Best match score {} below threshold for: {}", best_match[1], song["title"])
 
         # Try LLM cleaning if enabled and not already attempted
+        cleaned_metadata_for_negative = None
         if not llm_attempted and self.search_llm and config["plexsync"]["use_llm_search"].get(bool):
             search_query = f"{song['title']} by {song['artist']}"
             if song.get('album'):
@@ -1228,11 +1227,8 @@ class PlexSync(BeetsPlugin):
                 }
                 self._log.debug("Using LLM cleaned metadata: {}", cleaned_song)
 
-                # Cache the original query with cleaned metadata for future reference
-                self._cache_result(cache_key, None, cleaned_song)
-
-                # Try search with cleaned metadata
-                result = self.search_plex_song(cleaned_song, manual_search, llm_attempted=True)
+                # Try search with cleaned metadata (avoid nested prompt here)
+                result = self.search_plex_song(cleaned_song, False, llm_attempted=True)
 
                 # If we found a match using LLM-cleaned metadata, cache it for the original query
                 if result is not None:
@@ -1240,13 +1236,9 @@ class PlexSync(BeetsPlugin):
                     self._cache_result(cache_key, result)
                     return result
                 else:
-                    # If LLM search also failed, ensure both queries are cached as negative
-                    self._log.debug("LLM-cleaned search also failed, caching negative result for original query: {}", song)
-                    # The LLM-cleaned query should already be cached as negative from the recursive call
-                    # But we need to update the original query cache to not include cleaned_metadata
-                    # since the cleaned search also failed
-                    self._cache_result(cache_key, None)
-                    return None
+                    # Preserve cleaned metadata for a final negative cache if needed,
+                    # but do not return yet so we can offer manual search below.
+                    cleaned_metadata_for_negative = cleaned_song
 
         # Final fallback: try manual search if enabled
         if manual_search:
@@ -1263,11 +1255,15 @@ class PlexSync(BeetsPlugin):
                 if result is not None:
                     self._log.debug("Manual search succeeded, caching for original query: {}", song)
                     self._cache_result(cache_key, result)
-                return result
+                    return result
 
         # Store negative result if nothing found
         self._log.debug("All search strategies failed for: {} (tried: {})", song, ", ".join(search_strategies_tried) if search_strategies_tried else "none")
-        self._cache_result(cache_key, None)
+        # If LLM provided cleaned metadata earlier, include it with negative cache
+        if cleaned_metadata_for_negative is not None:
+            self._cache_result(cache_key, None, cleaned_metadata_for_negative)
+        else:
+            self._cache_result(cache_key, None)
         return None
 
     def _process_matches(self, tracks, song, manual_search):
