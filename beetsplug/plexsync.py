@@ -29,7 +29,8 @@ import requests
 from beets import config, ui
 from beets.dbcore import types
 from beets.dbcore.query import MatchQuery
-from beets.library import DateType, Item  # Added Item to import
+from beets.dbcore.types import DateType
+from beets.library import Item  # Added Item to import
 from beets.plugins import BeetsPlugin
 from beets.ui import input_, print_
 from beets.autotag.distance import Distance
@@ -241,7 +242,7 @@ class PlexSync(BeetsPlugin):
         )
 
         def func_sync(lib, opts, args):
-            items = lib.items(ui.decargs(args))
+            items = lib.items(args)
             self._fetch_plex_info(items, ui.should_write(), opts.force_refetch)
 
         sync_cmd.func = func_sync
@@ -436,7 +437,7 @@ class PlexSync(BeetsPlugin):
         )
 
         def func_plex2spotify(lib, opts, args):
-            self._plex2spotify(lib, opts.playlist, ui.decargs(args))
+            self._plex2spotify(lib, opts.playlist, args)
 
         plex2spotify_cmd.func = func_plex2spotify
 

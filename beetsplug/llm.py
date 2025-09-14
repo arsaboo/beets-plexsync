@@ -69,7 +69,7 @@ config['llm'].add({
 class SongBasicInfo(BaseModel):
     """Pydantic model for structured song information."""
     title: str = Field(..., description="The title of the song")
-    artist: str = Field(..., description="The name of the artist or band")
+    artist: str = Field("", description="The name of the artist or band")
     album: Optional[str] = Field(None, description="The album the song appears on")
 
     @field_validator('title', 'artist', 'album', mode='before')
@@ -128,7 +128,6 @@ class MusicSearchTools:
         try:
             self.ollama_agent = Agent(
                 model=Ollama(id=self.model_id, host=self.ollama_host),
-                response_model=SongBasicInfo,
                 structured_outputs=True
             )
         except Exception as e:
@@ -319,7 +318,7 @@ class MusicSearchTools:
         logger.debug("First chars of content: {0}...", content_preview)
 
         try:
-            response = self.ollama_agent.run(prompt)
+            response = self.ollama_agent.run(prompt, response_model=SongBasicInfo)
 
             # Log the raw response for debugging
             logger.debug("Raw Ollama response: {}", response.content)
@@ -327,7 +326,7 @@ class MusicSearchTools:
             return response.content
         except Exception as e:
             logger.error("Ollama extraction failed: {0}", str(e))
-            # Return empty strings for artist and album on failure to avoid validation errors
+            # Return a default SongBasicInfo object on failure to avoid validation errors
             return SongBasicInfo(title=song_name, artist="", album=None)
 
     def search_song_info(self, song_name: str) -> Dict:
@@ -342,7 +341,9 @@ class MusicSearchTools:
                 "search_source": "error"
             }
 
-        song_details = self._extract_song_details(search_results["content"], song_name).model_dump()
+        song_details = self._extract_song_details(search_results["content"], song_name)
+        if isinstance(song_details, SongBasicInfo):
+            song_details = song_details.model_dump()
         song_details["search_source"] = search_results["source"]
         return song_details
 
