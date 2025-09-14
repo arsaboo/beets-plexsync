@@ -126,13 +126,25 @@ class MusicSearchTools:
     def _init_ollama_agent(self) -> None:
         """Initialize the Ollama agent for text extraction."""
         try:
-            self.ollama_agent = Agent(
-                model=Ollama(id=self.model_id, host=self.ollama_host),
-                structured_outputs=True
-            )
+            # Try to initialize with response_model in Agent initialization (older versions)
+            try:
+                self.ollama_agent = Agent(
+                    model=Ollama(id=self.model_id, host=self.ollama_host),
+                    response_model=SongBasicInfo,
+                    structured_outputs=True
+                )
+                self.response_model_in_init = True
+            except TypeError:
+                # If that fails, try without response_model in Agent initialization (newer versions)
+                self.ollama_agent = Agent(
+                    model=Ollama(id=self.model_id, host=self.ollama_host),
+                    structured_outputs=True
+                )
+                self.response_model_in_init = False
         except Exception as e:
             logger.error(f"Failed to initialize Ollama agent: {e}")
             self.ollama_agent = None
+            self.response_model_in_init = False
 
     def _enforce_brave_rate_limit(self) -> None:
         """Enforce rate limiting for Brave Search (1 request per second)."""
@@ -263,7 +275,12 @@ class MusicSearchTools:
 
     def _extract_song_details(self, content: str, song_name: str) -> SongBasicInfo:
         """Extract structured song details from search results."""
-        prompt = textwrap.dedent(f"""
+        # Check if agent is available
+        if not self.ollama_agent:
+            logger.error("Ollama agent not initialized")
+            return SongBasicInfo(title=song_name, artist="", album=None)
+            
+        prompt = textwrap.dedent(f"""\n
         <instruction>
         IMPORTANT: Analyze ONLY the search results data below to extract accurate information about a song.
         The query "{song_name}" may contain incorrect or incomplete information - DO NOT rely on the query itself for extracting details.
@@ -318,12 +335,46 @@ class MusicSearchTools:
         logger.debug("First chars of content: {0}...", content_preview)
 
         try:
-            response = self.ollama_agent.run(prompt, response_model=SongBasicInfo)
+            # Use response_model in run() method if it wasn't supported in Agent initialization
+            if hasattr(self, 'response_model_in_init') and not self.response_model_in_init:
+                response = self.ollama_agent.run(prompt, response_model=SongBasicInfo)
+            else:
+                response = self.ollama_agent.run(prompt)
 
             # Log the raw response for debugging
-            logger.debug("Raw Ollama response: {}", response.content)
+            logger.debug("Raw Ollama response: {}", response)
 
-            return response.content
+            # Handle both string and object responses
+            if isinstance(response, str):
+                # If response is a string, try to parse it as JSON
+                try:
+                    import json
+                    data = json.loads(response)
+                    return SongBasicInfo(**data)
+                except:
+                    # If parsing fails, return the response as content
+                    return SongBasicInfo(title=song_name, artist="", album=None)
+            elif hasattr(response, 'content'):
+                # If response has a content attribute, use it
+                content = response.content
+                if isinstance(content, str):
+                    # If content is a string, try to parse it as JSON
+                    try:
+                        import json
+                        data = json.loads(content)
+                        return SongBasicInfo(**data)
+                    except:
+                        # If parsing fails, create a SongBasicInfo with the content as title
+                        return SongBasicInfo(title=content or song_name, artist="", album=None)
+                else:
+                    # If content is already a SongBasicInfo object, return it
+                    return content
+            else:
+                # For other response types, try to convert to SongBasicInfo
+                if isinstance(response, dict):
+                    return SongBasicInfo(**response)
+                else:
+                    return SongBasicInfo(title=str(response) or song_name, artist="", album=None)
         except Exception as e:
             logger.error("Ollama extraction failed: {0}", str(e))
             # Return a default SongBasicInfo object on failure to avoid validation errors
@@ -331,12 +382,22 @@ class MusicSearchTools:
 
     def search_song_info(self, song_name: str) -> Dict:
         """Search for song information using available search engines."""
+        # Check if agent is available
+        if not self.ollama_agent:
+            logger.error("Ollama agent not initialized")
+            return {
+                "title": song_name,
+                "artist": "",
+                "album": None,
+                "search_source": "error"
+            }
+            
         search_results = self._get_search_results(song_name)
 
         if (search_results["source"] == "error"):
             return {
                 "title": song_name,
-                "artist": None,
+                "artist": "",
                 "album": None,
                 "search_source": "error"
             }
