@@ -1119,11 +1119,11 @@ class PlexSync(BeetsPlugin):
         # Ensure song["artist"] is not None before splitting
         tracks = []
         search_strategies_tried = []
-        
+
         try:
             if song["artist"] is None:
                 song["artist"] = ""
-                
+
             # Strategy 1: Album + Title search (existing)
             if song["album"] is not None and song["album"] != "":
                 search_strategies_tried.append("album_title")
@@ -1131,20 +1131,20 @@ class PlexSync(BeetsPlugin):
                     **{"album.title": song["album"], "track.title": song["title"]}, limit=50
                 )
                 self._log.debug("Strategy 1 (Album+Title): Found {} tracks", len(tracks))
-                
+
             # Strategy 2: Title-only search if album search failed
             if len(tracks) == 0:
                 search_strategies_tried.append("title_only")
                 tracks = self.music.searchTracks(**{"track.title": song["title"]}, limit=50)
                 self._log.debug("Strategy 2 (Title-only): Found {} tracks", len(tracks))
-                
+
             # Strategy 3: Simplified title search if still no matches
             if len(tracks) == 0:
                 search_strategies_tried.append("simplified_title")
                 simplified_title = clean_string(song["title"])
                 tracks = self.music.searchTracks(**{"track.title": simplified_title}, limit=50)
                 self._log.debug("Strategy 3 (Simplified title): Found {} tracks", len(tracks))
-                
+
             # Strategy 4: Artist + Title search
             if len(tracks) == 0 and song["artist"] and song["title"]:
                 search_strategies_tried.append("artist_title")
@@ -1152,13 +1152,13 @@ class PlexSync(BeetsPlugin):
                     **{"artist.title": song["artist"], "track.title": song["title"]}, limit=50
                 )
                 self._log.debug("Strategy 4 (Artist+Title): Found {} tracks", len(tracks))
-                
+
             # Strategy 5: Album-only search
             if len(tracks) == 0 and song["album"]:
                 search_strategies_tried.append("album_only")
                 tracks = self.music.searchTracks(**{"album.title": song["album"]}, limit=100)
                 self._log.debug("Strategy 5 (Album-only): Found {} tracks", len(tracks))
-                
+
             # Strategy 6: Soundtrack-aware search (if applicable)
             if len(tracks) == 0 and song["album"] == "" and " - from " in song["title"].lower():
                 search_strategies_tried.append("soundtrack_aware")
@@ -1170,7 +1170,7 @@ class PlexSync(BeetsPlugin):
                     movie_name = match.group(1)
                     tracks = self.music.searchTracks(**{"album.title": movie_name}, limit=50)
                     self._log.debug("Strategy 6 (Soundtrack-aware): Found {} tracks for movie '{}'", len(tracks), movie_name)
-                    
+
         except Exception as e:
             self._log.debug(
                 "Error during multi-strategy search for {} - {}. Error: {}",
@@ -1679,7 +1679,7 @@ class PlexSync(BeetsPlugin):
     def add_tracks_to_spotify_playlist(self, playlist_name, track_uris):
         return spotify_provider.add_tracks_to_spotify_playlist(self, playlist_name, track_uris)
 
-    
+
 
     def get_preferred_attributes(self):
         return sp_mod.get_preferred_attributes(self)
@@ -1968,3 +1968,7 @@ class PlexSync(BeetsPlugin):
         """Clean up when plugin is disabled."""
         if self.loop and not self.loop.is_closed():
             self.close()
+
+    def album_for_id(self, album_id):
+        """Metadata plugin interface method - PlexSync doesn't provide album metadata."""
+        return None
