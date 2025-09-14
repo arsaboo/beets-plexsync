@@ -32,6 +32,7 @@ from beets.dbcore.query import MatchQuery
 from beets.library import DateType, Item  # Added Item to import
 from beets.plugins import BeetsPlugin
 from beets.ui import input_, print_
+from beets.autotag.distance import Distance
 from bs4 import BeautifulSoup
 from jiosaavn import JioSaavn
 from openai import OpenAI
@@ -1975,4 +1976,4 @@ class PlexSync(BeetsPlugin):
 
     def track_distance(self, item, info):
         """Metadata plugin interface method - PlexSync doesn't provide track distance."""
-        return {}
+        return Distance()
