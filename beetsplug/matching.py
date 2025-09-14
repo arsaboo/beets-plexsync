@@ -3,7 +3,6 @@
 import re
 from typing import Optional, Tuple
 
-from beets.autotag import hooks
 from beets.autotag.distance import Distance, string_dist
 from beets.library import Item
 from plexapi.audio import Track
@@ -211,7 +210,7 @@ def enhanced_artist_distance(str1: str, str2: str) -> float:
     # Calculate matches with different weights for main vs featured artists
     matches = []
     for artist1 in all_artists1:
-        best_match = min(hooks.string_dist(artist1, artist2) for artist2 in all_artists2)
+        best_match = min(string_dist(artist1, artist2) for artist2 in all_artists2)
         matches.append(best_match)
 
     # Return average distance with a slight bonus for having more matching main artists
@@ -299,14 +298,14 @@ def plex_track_distance(
         # If both have soundtrack titles, compare those
         if soundtrack_album1_cleaned and soundtrack_album2_cleaned:
             # Compare the soundtrack titles
-            soundtrack_dist = hooks.string_dist(soundtrack_album1_cleaned, soundtrack_album2_cleaned)
+            soundtrack_dist = string_dist(soundtrack_album1_cleaned, soundtrack_album2_cleaned)
 
             # Apply a bonus if they match
             if soundtrack_dist < 0.3:  # If soundtrack titles are similar
                 # Use the main titles for comparison but with a bonus
                 main_album1_cleaned = clean_string(main_album1)
                 main_album2_cleaned = clean_string(main_album2)
-                album_dist = hooks.string_dist(main_album1_cleaned, main_album2_cleaned)
+                album_dist = string_dist(main_album1_cleaned, main_album2_cleaned)
 
                 # Apply a bonus for matching soundtrack context
                 album_dist = max(0.0, album_dist - 0.4)
@@ -365,21 +364,20 @@ def plex_track_distance(
         # If both have soundtrack titles, compare those
         if soundtrack_title1_cleaned and soundtrack_title2_cleaned:
             # Compare the soundtrack titles
-            soundtrack_dist = hooks.string_dist(soundtrack_title1_cleaned, soundtrack_title2_cleaned)
+            soundtrack_dist = string_dist(soundtrack_title1_cleaned, soundtrack_title2_cleaned)
 
             # Apply a bonus if they match
             if soundtrack_dist < 0.3:  # If soundtrack titles are similar
-                # Use the main titles for comparison but with a bonus
                 main_title1_cleaned = clean_string(main_title1)
                 main_title2_cleaned = clean_string(main_title2)
-                title_dist = hooks.string_dist(main_title1_cleaned, main_title2_cleaned)
+                title_dist = string_dist(main_title1_cleaned, main_title2_cleaned)
 
                 # Apply a bonus for matching soundtrack context
                 title_dist = max(0.0, title_dist - 0.4)
                 dist.add_ratio('title', title_dist, 1.0)
             else:
                 # Apply a small penalty for mismatched soundtracks
-                title_dist = hooks.string_dist(title1, title2)
+                title_dist = string_dist(title1, title2)
                 title_dist = min(1.0, title_dist + 0.2)
                 dist.add_ratio('title', title_dist, 1.0)
         # If only one has a soundtrack title, check if it matches related fields
@@ -389,7 +387,7 @@ def plex_track_distance(
                 # Apply bonus for matching soundtrack context
                 main_title1_cleaned = clean_string(main_title1)
                 title2_cleaned = clean_string(plex_track.title)
-                title_dist = hooks.string_dist(main_title1_cleaned, title2_cleaned)
+                title_dist = string_dist(main_title1_cleaned, title2_cleaned)
                 title_dist = max(0.0, title_dist - 0.4)
                 dist.add_ratio('title', title_dist, 1.0)
             else:
@@ -401,7 +399,7 @@ def plex_track_distance(
                 # Apply bonus for matching soundtrack context
                 title1_cleaned = clean_string(item.title)
                 main_title2_cleaned = clean_string(main_title2)
-                title_dist = hooks.string_dist(title1_cleaned, main_title2_cleaned)
+                title_dist = string_dist(title1_cleaned, main_title2_cleaned)
                 title_dist = max(0.0, title_dist - 0.4)
                 dist.add_ratio('title', title_dist, 1.0)
             else:
@@ -415,7 +413,7 @@ def plex_track_distance(
                 # Apply bonus for matching soundtrack context
                 main_title1_cleaned = clean_string(main_title1)
                 title2_cleaned = clean_string(plex_track.title)
-                title_dist = hooks.string_dist(main_title1_cleaned, title2_cleaned)
+                title_dist = string_dist(main_title1_cleaned, title2_cleaned)
                 title_dist = max(0.0, title_dist - 0.4)
                 dist.add_ratio('title', title_dist, 1.0)
 
@@ -430,7 +428,7 @@ def plex_track_distance(
             # Check if one title contains the other (for partial matches)
             if (title1 and title2) and (title1 in title2 or title2 in title1):
                 # Calculate string distance
-                title_dist = hooks.string_dist(title1, title2)
+                title_dist = string_dist(title1, title2)
 
                 # Apply a bonus for partial containment
                 title_dist = max(0.0, title_dist - 0.2)
