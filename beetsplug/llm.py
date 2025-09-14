@@ -75,9 +75,12 @@ class SongBasicInfo(BaseModel):
     @field_validator('title', 'artist', 'album', mode='before')
     @classmethod
     def default_unknown(cls, v):
-        if not v or not isinstance(v, str) or not v.strip():
-            return None  # Return None instead of "Unknown"
-        return v.strip()
+        # Handle None values and empty strings
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return ""  # Return empty string for all fields to avoid validation issues
+        if isinstance(v, str):
+            return v.strip()
+        return str(v)  # Convert any other type to string
 
 
 # Pydantic models used by plexsync for LLM playlist parsing
@@ -126,25 +129,13 @@ class MusicSearchTools:
     def _init_ollama_agent(self) -> None:
         """Initialize the Ollama agent for text extraction."""
         try:
-            # Try to initialize with response_model in Agent initialization (older versions)
-            try:
-                self.ollama_agent = Agent(
-                    model=Ollama(id=self.model_id, host=self.ollama_host),
-                    response_model=SongBasicInfo,
-                    structured_outputs=True
-                )
-                self.response_model_in_init = True
-            except TypeError:
-                # If that fails, try without response_model in Agent initialization (newer versions)
-                self.ollama_agent = Agent(
-                    model=Ollama(id=self.model_id, host=self.ollama_host),
-                    structured_outputs=True
-                )
-                self.response_model_in_init = False
+            self.ollama_agent = Agent(
+                model=Ollama(id=self.model_id, host=self.ollama_host),
+                structured_outputs=True
+            )
         except Exception as e:
             logger.error(f"Failed to initialize Ollama agent: {e}")
             self.ollama_agent = None
-            self.response_model_in_init = False
 
     def _enforce_brave_rate_limit(self) -> None:
         """Enforce rate limiting for Brave Search (1 request per second)."""
@@ -335,11 +326,7 @@ class MusicSearchTools:
         logger.debug("First chars of content: {0}...", content_preview)
 
         try:
-            # Use response_model in run() method if it wasn't supported in Agent initialization
-            if hasattr(self, 'response_model_in_init') and not self.response_model_in_init:
-                response = self.ollama_agent.run(prompt, response_model=SongBasicInfo)
-            else:
-                response = self.ollama_agent.run(prompt)
+            response = self.ollama_agent.run(prompt, response_model=SongBasicInfo)
 
             # Log the raw response for debugging
             logger.debug("Raw Ollama response: {}", response)
