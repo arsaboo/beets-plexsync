@@ -333,35 +333,84 @@ class MusicSearchTools:
 
             # Handle both string and object responses
             if isinstance(response, str):
+                # Clean up the string response by removing extra characters
+                cleaned_response = response.strip()
+                # Remove any leading/trailing quotes or special characters
+                cleaned_response = cleaned_response.strip('"\'')
+                # Remove any JSON markdown wrappers
+                if cleaned_response.startswith('```json'):
+                    cleaned_response = cleaned_response[7:]
+                if cleaned_response.endswith('```'):
+                    cleaned_response = cleaned_response[:-3]
+                cleaned_response = cleaned_response.strip()
+                
                 # If response is a string, try to parse it as JSON
                 try:
                     import json
-                    data = json.loads(response)
-                    return SongBasicInfo(**data)
-                except:
-                    # If parsing fails, return the response as content
+                    data = json.loads(cleaned_response)
+                    # Ensure we have the required fields with proper defaults
+                    return SongBasicInfo(
+                        title=data.get("title", song_name) or song_name,
+                        artist=data.get("artist", "") or "",
+                        album=data.get("album")
+                    )
+                except json.JSONDecodeError:
+                    # If parsing fails, create SongBasicInfo with available data
                     return SongBasicInfo(title=song_name, artist="", album=None)
             elif hasattr(response, 'content'):
                 # If response has a content attribute, use it
                 content = response.content
                 if isinstance(content, str):
+                    # Clean up the string content
+                    cleaned_content = content.strip()
+                    # Remove any leading/trailing quotes or special characters
+                    cleaned_content = cleaned_content.strip('"\'')
+                    # Remove any JSON markdown wrappers
+                    if cleaned_content.startswith('```json'):
+                        cleaned_content = cleaned_content[7:]
+                    if cleaned_content.endswith('```'):
+                        cleaned_content = cleaned_content[:-3]
+                    cleaned_content = cleaned_content.strip()
+                    
                     # If content is a string, try to parse it as JSON
                     try:
                         import json
-                        data = json.loads(content)
-                        return SongBasicInfo(**data)
-                    except:
-                        # If parsing fails, create a SongBasicInfo with the content as title
-                        return SongBasicInfo(title=content or song_name, artist="", album=None)
-                else:
+                        data = json.loads(cleaned_content)
+                        # Ensure we have the required fields with proper defaults
+                        return SongBasicInfo(
+                            title=data.get("title", song_name) or song_name,
+                            artist=data.get("artist", "") or "",
+                            album=data.get("album")
+                        )
+                    except json.JSONDecodeError:
+                        # If parsing fails, create SongBasicInfo with the content as title
+                        return SongBasicInfo(title=cleaned_content or song_name, artist="", album=None)
+                elif isinstance(content, SongBasicInfo):
                     # If content is already a SongBasicInfo object, return it
                     return content
+                elif isinstance(content, dict):
+                    # If content is a dict, convert to SongBasicInfo
+                    return SongBasicInfo(
+                        title=content.get("title", song_name) or song_name,
+                        artist=content.get("artist", "") or "",
+                        album=content.get("album")
+                    )
+                else:
+                    # For other content types, convert to string
+                    return SongBasicInfo(title=str(content) or song_name, artist="", album=None)
+            elif isinstance(response, SongBasicInfo):
+                # If response is already a SongBasicInfo object, return it
+                return response
+            elif isinstance(response, dict):
+                # If response is a dict, convert to SongBasicInfo
+                return SongBasicInfo(
+                    title=response.get("title", song_name) or song_name,
+                    artist=response.get("artist", "") or "",
+                    album=response.get("album")
+                )
             else:
                 # For other response types, try to convert to SongBasicInfo
-                if isinstance(response, dict):
-                    return SongBasicInfo(**response)
-                else:
-                    return SongBasicInfo(title=str(response) or song_name, artist="", album=None)
+                return SongBasicInfo(title=str(response) or song_name, artist="", album=None)
         except Exception as e:
             logger.error("Ollama extraction failed: {0}", str(e))
             # Return a default SongBasicInfo object on failure to avoid validation errors
