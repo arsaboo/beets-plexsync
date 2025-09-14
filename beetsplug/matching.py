@@ -4,10 +4,7 @@ import re
 from typing import Optional, Tuple
 
 from beets.autotag import hooks
-try:
-    from beets.autotag.hooks import Distance
-except ImportError:
-    from beets.autotag.distance import Distance
+from beets.autotag.distance import Distance, string_dist
 from beets.library import Item
 from plexapi.audio import Track
 
@@ -110,57 +107,57 @@ def extract_soundtrack_info(s: str) -> tuple[str, str]:
 
 def calculate_field_weight(field_value: str, field_type: str) -> float:
     """Calculate dynamic weight for a field based on its quality and content.
-    
+
     Args:
         field_value: The value of the field
         field_type: Type of field ('title', 'artist', 'album')
-        
+
     Returns:
         Weight value between 0.0 and 1.0
     """
     if not field_value or not field_value.strip():
         return 0.0
-    
+
     field_value = field_value.strip()
-    
+
     # Base weights by field type
     base_weights = {'title': 0.45, 'artist': 0.35, 'album': 0.20}
     weight = base_weights.get(field_type, 0.33)
-    
+
     # Adjust based on text length (more words = more information)
     word_count = len(field_value.split())
     if word_count > 5:
         weight *= 1.2  # Boost for longer, more descriptive fields
     elif word_count < 2:
         weight *= 0.8  # Reduce for very short fields
-    
+
     # Adjust for distinguishing features
     if re.search(r'\b\d{4}\b', field_value):  # Contains year as whole word
         weight *= 1.1
     if re.search(r'[([]+(?:feat|ft|with)[.)]| featuring', field_value, re.IGNORECASE):
         weight *= 1.05  # Slight boost for detailed artist info
-    
+
     # Ensure weight doesn't exceed reasonable bounds
     return min(weight, 0.9)
 
 
 def assess_field_quality(field_value: str) -> float:
     """Assess the quality of a field value for confidence calculation.
-    
+
     Args:
         field_value: The value of the field
-        
+
     Returns:
         Quality score between 0.0 (poor) and 1.0 (excellent)
     """
     if not field_value or not field_value.strip():
         return 0.0
-    
+
     field_value = field_value.strip()
-    
+
     # Start with a base quality score
     quality = 0.5
-    
+
     # Increase quality for longer content (more information)
     word_count = len(field_value.split())
     if word_count > 10:
@@ -169,18 +166,18 @@ def assess_field_quality(field_value: str) -> float:
         quality += 0.2
     elif word_count > 2:
         quality += 0.1
-    
+
     # Increase quality for presence of distinguishing features
     if re.search(r'\b\d{4}\b', field_value):  # Contains year
         quality += 0.1
     if '"' in field_value or "'" in field_value:  # Contains quoted text
         quality += 0.1
-    
+
     # Decrease quality for generic terms
     generic_terms = ['unknown', 'track', 'song', 'untitled']
     if any(term in field_value.lower() for term in generic_terms):
         quality -= 0.2
-    
+
     # Clamp to 0.0-1.0 range
     return max(0.0, min(1.0, quality))
 
@@ -195,16 +192,16 @@ def enhanced_artist_distance(str1: str, str2: str) -> float:
         # Handle featured artists separately
         main_artist = re.sub(r'\s*(feat\.?|ft\.?|with)\s.*$', '', s, flags=re.IGNORECASE)
         featured_artists = re.findall(r'(?:feat\.?|ft\.?|with)\s+([^,;&/]+)', s, re.IGNORECASE)
-        
+
         # Split main artist and add featured artists
         main_artists = {clean_string(a) for a in re.split(r'[,;&/]|\s+and\s+|\s+&\s+', main_artist) if a}
         featured_artists_cleaned = {clean_string(a) for a in featured_artists if a}
-        
+
         return main_artists, featured_artists_cleaned
 
     main_artists1, feat_artists1 = split_artists(str1)
     main_artists2, feat_artists2 = split_artists(str2)
-    
+
     all_artists1 = main_artists1.union(feat_artists1)
     all_artists2 = main_artists2.union(feat_artists2)
 
@@ -219,12 +216,12 @@ def enhanced_artist_distance(str1: str, str2: str) -> float:
 
     # Return average distance with a slight bonus for having more matching main artists
     avg_distance = sum(matches) / len(matches)
-    
+
     # Bonus for matching main artists (more important than featured)
     main_matches = len(main_artists1.intersection(main_artists2))
     if main_matches > 0:
         avg_distance *= 0.9  # 10% bonus for main artist matches
-    
+
     return avg_distance
 
 
@@ -262,7 +259,7 @@ def plex_track_distance(
 
     # Available fields
     available_fields = list(dynamic_weights.keys())
-    
+
     if not available_fields:
         return 0.0, dist  # No fields to compare
 
@@ -288,29 +285,29 @@ def plex_track_distance(
         album2 = clean_string(plex_track.parentTitle)
 
         # Use string_dist for album but normalize properly
-        album_dist = hooks.string_dist(album1, album2)
+        album_dist = string_dist(album1, album2)
 
         # Enhanced soundtrack-aware logic
         # Extract soundtrack info from albums
         main_album1, soundtrack_album1 = extract_soundtrack_info(item.album)
         main_album2, soundtrack_album2 = extract_soundtrack_info(plex_track.parentTitle)
-        
+
         # Clean the extracted soundtrack titles
         soundtrack_album1_cleaned = clean_string(soundtrack_album1)
         soundtrack_album2_cleaned = clean_string(soundtrack_album2)
-        
+
         # If both have soundtrack titles, compare those
         if soundtrack_album1_cleaned and soundtrack_album2_cleaned:
             # Compare the soundtrack titles
             soundtrack_dist = hooks.string_dist(soundtrack_album1_cleaned, soundtrack_album2_cleaned)
-            
+
             # Apply a bonus if they match
             if soundtrack_dist < 0.3:  # If soundtrack titles are similar
                 # Use the main titles for comparison but with a bonus
                 main_album1_cleaned = clean_string(main_album1)
                 main_album2_cleaned = clean_string(main_album2)
                 album_dist = hooks.string_dist(main_album1_cleaned, main_album2_cleaned)
-                
+
                 # Apply a bonus for matching soundtrack context
                 album_dist = max(0.0, album_dist - 0.4)
             else:
@@ -341,7 +338,7 @@ def plex_track_distance(
         # Extract soundtrack info from the title
         main_title1, soundtrack_title1 = extract_soundtrack_info(item.title)
         soundtrack_title1_cleaned = clean_string(soundtrack_title1)
-        
+
         # If we extracted soundtrack info from the title, check if it matches the Plex album
         if soundtrack_title1_cleaned:
             album2_cleaned = clean_string(plex_track.parentTitle)
@@ -360,23 +357,23 @@ def plex_track_distance(
         # Extract soundtrack info from titles
         main_title1, soundtrack_title1 = extract_soundtrack_info(item.title)
         main_title2, soundtrack_title2 = extract_soundtrack_info(plex_track.title)
-        
+
         # Clean the extracted soundtrack titles
         soundtrack_title1_cleaned = clean_string(soundtrack_title1)
         soundtrack_title2_cleaned = clean_string(soundtrack_title2)
-        
+
         # If both have soundtrack titles, compare those
         if soundtrack_title1_cleaned and soundtrack_title2_cleaned:
             # Compare the soundtrack titles
             soundtrack_dist = hooks.string_dist(soundtrack_title1_cleaned, soundtrack_title2_cleaned)
-            
+
             # Apply a bonus if they match
             if soundtrack_dist < 0.3:  # If soundtrack titles are similar
                 # Use the main titles for comparison but with a bonus
                 main_title1_cleaned = clean_string(main_title1)
                 main_title2_cleaned = clean_string(main_title2)
                 title_dist = hooks.string_dist(main_title1_cleaned, main_title2_cleaned)
-                
+
                 # Apply a bonus for matching soundtrack context
                 title_dist = max(0.0, title_dist - 0.4)
                 dist.add_ratio('title', title_dist, 1.0)
@@ -421,7 +418,7 @@ def plex_track_distance(
                 title_dist = hooks.string_dist(main_title1_cleaned, title2_cleaned)
                 title_dist = max(0.0, title_dist - 0.4)
                 dist.add_ratio('title', title_dist, 1.0)
-                
+
                 # ALSO provide a bonus for the album comparison (even though search has no album)
                 # This helps validate that this is a good match by confirming soundtrack context
                 album_bonus_dist = 0.3  # Artificial low distance to represent album validation
@@ -459,16 +456,16 @@ def plex_track_distance(
     if available_fields:
         # Base confidence based on number of fields
         base_confidence = len(available_fields) / 3.0  # Max 3 fields (title, artist, album)
-        
+
         # Adjust based on field qualities (0.0 to 1.0 for each field)
         if field_qualities:
             avg_quality = sum(field_qualities[field] for field in available_fields) / len(available_fields)
         else:
             avg_quality = 0.5
-        
+
         # Combine base confidence with quality adjustment
         confidence = base_confidence * (0.5 + 0.5 * avg_quality)  # Range from 0.5 to 1.0 of base
-        
+
         # Apply confidence multiplier, but ensure we don't overly penalize
         score = max(raw_score * confidence, raw_score * 0.5)
     else:
