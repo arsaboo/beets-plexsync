@@ -1453,7 +1453,7 @@ class PlexSync(BeetsPlugin):
                 album.count = count
                 album.last_played_date = last_played
                 result.append(album)
-                self._log.info(
+                self._log.debug(
                     "{} played {} times, last played on {}",
                     album.title,
                     count,
