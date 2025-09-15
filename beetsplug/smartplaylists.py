@@ -9,7 +9,7 @@ from typing import Tuple
 import time
 
 from beets import config
-from beetsplug.helpers import get_config_value
+from beetsplug.helpers import get_config_value, get_plexsync_config
 
 
 def build_plex_lookup(ps, lib):
@@ -23,13 +23,7 @@ def build_plex_lookup(ps, lib):
 
 def get_preferred_attributes(ps) -> Tuple[list, list]:
     # Defaults from config
-    if (
-        "playlists" in config["plexsync"]
-        and "defaults" in config["plexsync"]["playlists"]
-    ):
-        defaults_cfg = config["plexsync"]["playlists"]["defaults"].get({})
-    else:
-        defaults_cfg = {}
+    defaults_cfg = get_plexsync_config(["playlists", "defaults"], dict, {})
 
     history_days = get_config_value(config["plexsync"], defaults_cfg, "history_days", 15)
     exclusion_days = get_config_value(config["plexsync"], defaults_cfg, "exclusion_days", 30)
@@ -344,10 +338,7 @@ def apply_playlist_filters(ps, tracks, filter_config):
 def generate_daily_discovery(ps, lib, dd_config, plex_lookup, preferred_genres, similar_tracks):
     playlist_name = dd_config.get("name", "Daily Discovery")
     ps._log.info("Generating {} playlist", playlist_name)
-    if "playlists" in config["plexsync"] and "defaults" in config["plexsync"]["playlists"]:
-        defaults_cfg = config["plexsync"]["playlists"]["defaults"].get({})
-    else:
-        defaults_cfg = {}
+    defaults_cfg = get_plexsync_config(["playlists", "defaults"], dict, {})
     max_tracks = get_config_value(dd_config, defaults_cfg, "max_tracks", 20)
     discovery_ratio = get_config_value(dd_config, defaults_cfg, "discovery_ratio", 30)
     matched_tracks = []
@@ -487,7 +478,7 @@ def _get_library_tracks(ps, preferred_genres, filters, exclusion_days):
 
     # Optional candidate pool cap to avoid huge post-filtering work
     try:
-        defaults_cfg = config["plexsync"]["playlists"]["defaults"].get({}) if "playlists" in config["plexsync"] else {}
+        defaults_cfg = get_plexsync_config(["playlists", "defaults"], dict, {})
         max_pool = get_config_value(defaults_cfg, defaults_cfg, "max_candidate_pool", None)
         if max_pool:
             import random
@@ -503,10 +494,7 @@ def _get_library_tracks(ps, preferred_genres, filters, exclusion_days):
 def generate_forgotten_gems(ps, lib, ug_config, plex_lookup, preferred_genres, similar_tracks):
     playlist_name = ug_config.get("name", "Forgotten Gems")
     ps._log.info("Generating {} playlist", playlist_name)
-    if "playlists" in config["plexsync"] and "defaults" in config["plexsync"]["playlists"]:
-        defaults_cfg = config["plexsync"]["playlists"]["defaults"].get({})
-    else:
-        defaults_cfg = {}
+    defaults_cfg = get_plexsync_config(["playlists", "defaults"], dict, {})
     max_tracks = get_config_value(ug_config, defaults_cfg, "max_tracks", 20)
     discovery_ratio = get_config_value(ug_config, defaults_cfg, "discovery_ratio", 30)
     exclusion_days = get_config_value(ug_config, defaults_cfg, "exclusion_days", 30)
@@ -565,10 +553,7 @@ def generate_forgotten_gems(ps, lib, ug_config, plex_lookup, preferred_genres, s
 def generate_recent_hits(ps, lib, rh_config, plex_lookup, preferred_genres, similar_tracks):
     playlist_name = rh_config.get("name", "Recent Hits")
     ps._log.info("Generating {} playlist", playlist_name)
-    if "playlists" in config["plexsync"] and "defaults" in config["plexsync"]["playlists"]:
-        defaults_cfg = config["plexsync"]["playlists"]["defaults"].get({})
-    else:
-        defaults_cfg = {}
+    defaults_cfg = get_plexsync_config(["playlists", "defaults"], dict, {})
     max_tracks = get_config_value(rh_config, defaults_cfg, "max_tracks", 20)
     discovery_ratio = get_config_value(rh_config, defaults_cfg, "discovery_ratio", 20)
     exclusion_days = get_config_value(rh_config, defaults_cfg, "exclusion_days", 0)
@@ -635,15 +620,9 @@ def generate_imported_playlist(ps, lib, playlist_config, plex_lookup=None):
         f.write(f"Import log for playlist: {playlist_name}\n")
         f.write(f"Import started at: {_dt.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
         f.write("-" * 80 + "\n\n")
-    if (
-        "playlists" in config["plexsync"]
-        and "defaults" in config["plexsync"]["playlists"]
-    ):
-        defaults_cfg = config["plexsync"]["playlists"]["defaults"].get({})
-    else:
-        defaults_cfg = {}
+    defaults_cfg = get_plexsync_config(["playlists", "defaults"], dict, {})
     manual_search = get_config_value(
-        playlist_config, defaults_cfg, "manual_search", config["plexsync"]["manual_search"].get(bool)
+        playlist_config, defaults_cfg, "manual_search", get_plexsync_config("manual_search", bool, False)
     )
     clear_playlist = get_config_value(
         playlist_config, defaults_cfg, "clear_playlist", False

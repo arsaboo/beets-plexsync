@@ -1,7 +1,8 @@
 import re
-from typing import Any
+from typing import Any, Sequence
 
-from beets import ui
+import confuse
+from beets import config, ui
 
 
 def parse_title(title_orig):
@@ -61,6 +62,23 @@ def get_config_value(item_cfg: Any, defaults_cfg: Any, key: str, code_default: A
     else:
         return code_default
 
+
+def get_plexsync_config(path: str | Sequence[str], cast=None, default=None):
+    """Safely fetch a plexsync config value with consistent defaults."""
+    segments = (path,) if isinstance(path, str) else tuple(path)
+    node = config['plexsync']
+    try:
+        for segment in segments:
+            node = node[segment]
+    except (confuse.NotFoundError, KeyError, TypeError):
+        return default
+
+    try:
+        if cast is None:
+            return node.get()
+        return node.get(cast)
+    except (confuse.NotFoundError, confuse.ConfigValueError, TypeError):
+        return default
 
 def highlight_matches(source: str | None, target: str | None) -> str:
     """Highlight exact matching parts between source and target strings.

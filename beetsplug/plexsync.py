@@ -52,7 +52,13 @@ from beetsplug.provider_apple import import_apple_playlist
 from beetsplug.provider_jiosaavn import import_jiosaavn_playlist
 from beetsplug.provider_m3u8 import import_m3u8_playlist
 from beetsplug.provider_post import import_post_playlist
-from beetsplug.helpers import parse_title, clean_album_name, get_config_value, highlight_matches
+from beetsplug.helpers import (
+    parse_title,
+    clean_album_name,
+    get_config_value,
+    highlight_matches,
+    get_plexsync_config,
+)
 from beetsplug import plex_ops
 from beetsplug import spotify_provider
 from beetsplug import collage as collage_mod
@@ -113,7 +119,7 @@ class PlexSync(BeetsPlugin):
         # Call the setup methods
         try:
             self.setup_llm()
-            if config["plexsync"]["use_llm_search"].get(bool):
+            if get_plexsync_config("use_llm_search", bool, False):
                 self.search_llm = self.llm_client  # Use llm_client directly
         except Exception as e:
             self._log.error("Failed to set up LLM client: {}", e)
@@ -479,7 +485,7 @@ class PlexSync(BeetsPlugin):
                 return
 
             # Retrieve playlists from config
-            playlists_config = config["plexsync"]["playlists"]["items"].get(list)
+            playlists_config = get_plexsync_config(["playlists", "items"], list, [])
             if not playlists_config:
                 self._log.warning(
                     "No playlists defined in config['plexsync']['playlists']['items']. Skipping."
@@ -926,7 +932,7 @@ class PlexSync(BeetsPlugin):
     def search_plex_song(self, song, manual_search=None, llm_attempted=False):
         """Fetch the Plex track key with fallback options."""
         if manual_search is None:
-            manual_search = config["plexsync"]["manual_search"].get(bool)
+            manual_search = get_plexsync_config("manual_search", bool, False)
 
         # Debug the cache key generation
         cache_key = self.cache._make_cache_key(song)
@@ -1087,7 +1093,7 @@ class PlexSync(BeetsPlugin):
 
         # Try LLM cleaning if enabled and not already attempted
         cleaned_metadata_for_negative = None
-        if not llm_attempted and self.search_llm and config["plexsync"]["use_llm_search"].get(bool):
+        if not llm_attempted and self.search_llm and get_plexsync_config("use_llm_search", bool, False):
             search_query = f"{song['title']} by {song['artist']}"
             if song.get('album'):
                 search_query += f" from {song['album']}"
@@ -1190,14 +1196,14 @@ class PlexSync(BeetsPlugin):
             self._log.info("Importing weekly jams playlist")
             weekly_jams = lb.get_weekly_jams()
             self._log.info("Importing {} songs from Weekly Jams", len(weekly_jams))
-            self.add_songs_to_plex("Weekly Jams", weekly_jams, config["plexsync"]["manual_search"].get(bool))
+            self.add_songs_to_plex("Weekly Jams", weekly_jams, get_plexsync_config("manual_search", bool, False))
 
             self._log.info("Importing weekly exploration playlist")
             weekly_exploration = lb.get_weekly_exploration()
             self._log.info(
                 "Importing {} songs from Weekly Exploration", len(weekly_exploration)
             )
-            self.add_songs_to_plex("Weekly Exploration", weekly_exploration, config["plexsync"]["manual_search"].get(bool))
+            self.add_songs_to_plex("Weekly Exploration", weekly_exploration, get_plexsync_config("manual_search", bool, False))
         else:
             if playlist_url is None or (
                 "http://" not in playlist_url and "https://" not in playlist_url
@@ -1219,7 +1225,7 @@ class PlexSync(BeetsPlugin):
                 songs = []
                 self._log.error("Playlist URL not supported")
             self._log.info("Importing {} songs from {}", len(songs), playlist_url)
-            self.add_songs_to_plex(playlist, songs, config["plexsync"]["manual_search"].get(bool))
+            self.add_songs_to_plex(playlist, songs, get_plexsync_config("manual_search", bool, False))
 
     def add_songs_to_plex(self, playlist, songs, manual_search):
         """Add songs to a Plex playlist.
