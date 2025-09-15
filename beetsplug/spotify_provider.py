@@ -7,6 +7,7 @@ They do not change cache key formats or returned structures.
 import re
 import json
 from typing import Any, Dict, List, Optional
+from collections import Counter
 
 import dateutil.parser
 import requests
@@ -277,11 +278,12 @@ def search_spotify_track(plugin, beets_item) -> Optional[str]:
 
 
 def add_tracks_to_spotify_playlist(plugin, playlist_name: str, track_uris: List[str]) -> None:
-    """Synchronize a Spotify playlist to exactly match target order.
+    """Sync new tracks to top, keep existing order below.
 
-    - Preserves duplicates and order from `track_uris`.
-    - Eliminates existing duplicates by replacing playlist content.
-    - Avoids overlapping chunk inserts that caused exponential duplication.
+    - Adds only the tracks missing from the current playlist at position 0
+      while preserving their relative order.
+    - Removes tracks that are no longer present in the target (optional cleanup).
+    - Uses non-overlapping 100-size chunks to avoid duplication.
     """
     user_id = plugin.sp.current_user()["id"]
     playlists = plugin.sp.user_playlists(user_id)
@@ -306,32 +308,57 @@ def add_tracks_to_spotify_playlist(plugin, playlist_name: str, track_uris: List[
         if uri
     ]
 
-    # Fetch current playlist in order for quick idempotency check
+    # Fetch current playlist (ordered)
     playlist_tracks = get_playlist_tracks(plugin, playlist_id)
     current_track_ids: List[str] = [
         t["track"]["id"] for t in playlist_tracks if t.get("track") and t["track"].get("id")
     ]
 
+    # Fast path: exact match (order and counts)
     if current_track_ids == target_track_ids:
         plugin._log.debug("Playlist is already in sync - no changes needed")
         return
 
+    # Remove tracks that are not in target at all
+    current_counts = Counter(current_track_ids)
+    target_counts = Counter(target_track_ids)
+    obsolete_ids = [tid for tid in current_counts.keys() if tid not in target_counts]
+    if obsolete_ids:
+        for i in range(0, len(obsolete_ids), 100):
+            chunk = obsolete_ids[i:i+100]
+            plugin.sp.user_playlist_remove_all_occurrences_of_tracks(
+                user_id, playlist_id, chunk
+            )
+        plugin._log.debug(f"Removed {len(obsolete_ids)} obsolete tracks from playlist {playlist_id}")
+
+    # Compute which tracks are missing (multiset difference), preserving order
+    remaining_counts = Counter(
+        {tid: min(current_counts.get(tid, 0), target_counts.get(tid, 0)) for tid in set(current_counts) | set(target_counts)}
+    )
+    new_track_ids: List[str] = []
+    temp_counts = Counter(remaining_counts)
+    for tid in target_track_ids:
+        if temp_counts.get(tid, 0) > 0:
+            temp_counts[tid] -= 1
+        else:
+            new_track_ids.append(tid)
+
     plugin._log.debug(
-        f"Rebuilding playlist to exact order: current={len(current_track_ids)} target={len(target_track_ids)}"
+        f"Current={len(current_track_ids)} Target={len(target_track_ids)} New={len(new_track_ids)} Removed={len(obsolete_ids)}"
     )
 
-    # Replace entire playlist content with the first 100 items
-    first_chunk = target_track_ids[:100]
-    # Use the legacy user_* method for backward compatibility with existing usage
-    plugin.sp.user_playlist_replace_tracks(user_id, playlist_id, first_chunk)
+    # Add new tracks at top, preserving their order via reverse chunking
+    if new_track_ids:
+        n = len(new_track_ids)
+        idx = n
+        while idx > 0:
+            start = max(0, idx - 100)
+            chunk = new_track_ids[start:idx]
+            plugin.sp.user_playlist_add_tracks(user_id, playlist_id, chunk, position=0)
+            idx -= 100
+        plugin._log.debug(
+            f"Added {len(new_track_ids)} new tracks to top of playlist {playlist_id}"
+        )
 
-    # Append remaining items in order in non-overlapping chunks of 100
-    idx = 100
-    while idx < len(target_track_ids):
-        chunk = target_track_ids[idx: idx + 100]
-        plugin.sp.user_playlist_add_tracks(user_id, playlist_id, chunk)
-        idx += 100
-
-    plugin._log.debug(
-        f"Playlist {playlist_name} synchronized: total tracks now {len(target_track_ids)}"
-    )
+    # Note: We are intentionally not reordering existing tracks to keep their
+    # relative order and "Date added" intact, per requirement.
