@@ -1663,7 +1663,7 @@ class PlexSync(BeetsPlugin):
             beets_item = plex_lookup.get(item.ratingKey)
             if not beets_item:
                 self._log.debug(
-                    "Item not found in Beets: {} - {}",
+                    "Library not synced. Item not found in Beets: {} - {}",
                     item.parentTitle,
                     item.title
                 )
