@@ -43,10 +43,13 @@ def plex_collage(plugin, interval, grid):
     grid = int(grid)
     plugin._log.info("Creating collage of most played albums in the last {} days", interval)
 
+    # Fetch all tracks played within interval days. Avoid sorting by
+    # lifetime viewCount to prevent bias; prefer recency or no sort.
     tracks = plugin.music.search(
         filters={"track.lastViewedAt>>": f"{interval}d"},
-        sort="viewCount:desc",
+        sort="lastViewedAt:desc",
         libtype="track",
+        maxresults=None,
     )
 
     max_albums = grid * grid
@@ -77,4 +80,3 @@ def plex_collage(plugin, interval, grid):
         plugin._log.info("Collage saved to: {}", output_path)
     except Exception as e:
         plugin._log.error("Failed to create collage: {}", e)
-

@@ -1415,19 +1415,23 @@ class PlexSync(BeetsPlugin):
                 else:
                     last_played = track_last_played
 
-                if track.parentTitle not in album_data:
-                    album_data[track.parentTitle] = {
-                        "album": track.album(),
+                # Group by album key to avoid merging albums with the same title
+                album_obj = track.album()
+                album_key = getattr(track, "parentRatingKey", None) or getattr(album_obj, "ratingKey", None) or album_obj.title
+
+                if album_key not in album_data:
+                    album_data[album_key] = {
+                        "album": album_obj,
                         "count": count,
                         "last_played": last_played,
                     }
                 else:
-                    album_data[track.parentTitle]["count"] += count
+                    album_data[album_key]["count"] += count
                     if last_played and (
-                        not album_data[track.parentTitle]["last_played"]
-                        or last_played > album_data[track.parentTitle]["last_played"]
+                        not album_data[album_key]["last_played"]
+                        or last_played > album_data[album_key]["last_played"]
                     ):
-                        album_data[track.parentTitle]["last_played"] = last_played
+                        album_data[album_key]["last_played"] = last_played
 
             except Exception as e:
                 self._log.debug(
