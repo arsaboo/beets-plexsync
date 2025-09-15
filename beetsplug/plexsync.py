@@ -1391,82 +1391,100 @@ class PlexSync(BeetsPlugin):
 
         now = datetime.now()
         frm_dt = now - timedelta(days=interval)
-        album_data = {}
 
-        for track in tracks:
+        # Build a map of album ratingKey -> album object from the provided tracks
+        album_map = {}
+        for t in tracks:
             try:
-                history = track.history(mindate=frm_dt)
-                count = len(history)
-
-                # Get last played date from track directly if available
-                track_last_played = track.lastViewedAt
-
-                # If track has history entries, get the most recent one
-                if history:
-                    history_last_played = max(
-                        (h.viewedAt for h in history if h.viewedAt is not None),
-                        default=None,
-                    )
-                    # Use the more recent of track.lastViewedAt and history
-                    last_played = max(
-                        filter(None, [track_last_played, history_last_played]),
-                        default=None,
-                    )
-                else:
-                    last_played = track_last_played
-
-                # Group by album key to avoid merging albums with the same title
-                album_obj = track.album()
-                album_key = getattr(track, "parentRatingKey", None) or getattr(album_obj, "ratingKey", None) or album_obj.title
-
-                if album_key not in album_data:
-                    album_data[album_key] = {
-                        "album": album_obj,
-                        "count": count,
-                        "last_played": last_played,
-                    }
-                else:
-                    album_data[album_key]["count"] += count
-                    if last_played and (
-                        not album_data[album_key]["last_played"]
-                        or last_played > album_data[album_key]["last_played"]
-                    ):
-                        album_data[album_key]["last_played"] = last_played
-
-            except Exception as e:
-                self._log.debug(
-                    "Error processing track history for {}: {}", track.title, e
-                )
+                alb = t.album()
+                alb_key = getattr(t, "parentRatingKey", None) or getattr(alb, "ratingKey", None)
+                if alb_key and alb_key not in album_map:
+                    album_map[str(alb_key)] = alb
+            except Exception:
                 continue
 
-        # Convert to sortable list and sort
-        albums_list = [
-            (data["album"], data["count"], data["last_played"])
-            for data in album_data.values()
-        ]
+        # Preferred method: use server-level history filtered by date & section
+        album_data = {}
+        used_server_history = False
+        try:
+            section_id = int(getattr(self.music, "key", 0)) or None
+            history_entries = self.plex.history(
+                mindate=frm_dt,
+                librarySectionID=section_id,
+                maxresults=None,
+            )
+            used_server_history = True
+            self._log.debug("Using server history for section {} since {} ({} entries)", section_id, frm_dt.strftime('%Y-%m-%d'), len(history_entries))
 
-        # Sort by count (descending) and last played (most recent first)
-        sorted_albums = sorted(
-            albums_list, key=lambda x: (-x[1], -(x[2].timestamp() if x[2] else 0))
-        )
+            for h in history_entries:
+                # For tracks, parentRatingKey corresponds to album; viewedAt is the timestamp
+                album_key = getattr(h, "parentRatingKey", None)
+                viewed_at = getattr(h, "viewedAt", None)
+                if not album_key:
+                    continue
+                album_key = str(album_key)
 
-        # Extract just the album objects and add attributes
+                # Ensure we have an album object; fall back to fetch if missing
+                album_obj = album_map.get(album_key)
+                if album_obj is None:
+                    try:
+                        album_obj = self.plex.fetchItem(int(album_key))
+                        album_map[album_key] = album_obj
+                    except Exception:
+                        # If we can't fetch, skip counting for collage purposes
+                        continue
+
+                data = album_data.setdefault(album_key, {"album": album_obj, "count": 0, "last_played": None})
+                data["count"] += 1
+                if viewed_at and (data["last_played"] is None or viewed_at > data["last_played"]):
+                    data["last_played"] = viewed_at
+        except Exception as e:
+            # Fallback: per-track history (older approach). Some Plex setups or plexapi versions
+            # may not support the server.history call with these filters.
+            self._log.debug("Falling back to per-track history due to error: {}", e)
+            for track in tracks:
+                try:
+                    history = track.history(mindate=frm_dt)
+                    count = len(history)
+
+                    track_last_played = track.lastViewedAt
+                    history_last_played = max((h.viewedAt for h in history if getattr(h, "viewedAt", None) is not None), default=None)
+                    last_played = max(filter(None, [track_last_played, history_last_played]), default=None)
+
+                    album_obj = track.album()
+                    album_key = getattr(track, "parentRatingKey", None) or getattr(album_obj, "ratingKey", None) or album_obj.title
+                    key = str(album_key)
+
+                    if key not in album_data:
+                        album_data[key] = {"album": album_obj, "count": count, "last_played": last_played}
+                    else:
+                        album_data[key]["count"] += count
+                        if last_played and (album_data[key]["last_played"] is None or last_played > album_data[key]["last_played"]):
+                            album_data[key]["last_played"] = last_played
+                except Exception as ex:
+                    self._log.debug("Error processing track history for {}: {}", getattr(track, 'title', 'unknown'), ex)
+                    continue
+
+        # Sort and build result
+        albums_list = [(data["album"], data["count"], data["last_played"]) for data in album_data.values()]
+        sorted_albums = sorted(albums_list, key=lambda x: (-x[1], -(x[2].timestamp() if x[2] else 0)))
+
         result = []
         for album, count, last_played in sorted_albums:
-            if count > 0:  # Only include albums that have been played
-                album.count = count
-                album.last_played_date = last_played
-                result.append(album)
-                self._log.debug(
-                    "{} played {} times, last played on {}",
-                    album.title,
-                    count,
-                    (
-                        last_played.strftime("%Y-%m-%d %H:%M:%S")
-                        if last_played
-                        else "Never"
-                    ),
-                )
+            if count > 0:
+                try:
+                    album.count = count
+                    album.last_played_date = last_played
+                    result.append(album)
+                    self._log.debug(
+                        "{} played {} times, last played on {}",
+                        getattr(album, 'title', 'Unknown Album'),
+                        count,
+                        (last_played.strftime("%Y-%m-%d %H:%M:%S") if last_played else "Never"),
+                    )
+                except Exception:
+                    # In case album is a lightweight object missing attributes
+                    continue
 
         return result
 
