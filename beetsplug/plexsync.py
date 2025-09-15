@@ -31,7 +31,6 @@ from beets.dbcore.query import MatchQuery
 from beets.dbcore.types import DateType
 from beets.library import Item  # Added Item to import
 from beets.plugins import BeetsPlugin
-from beets.ui import input_, print_
 from beets.autotag.distance import Distance
 from bs4 import BeautifulSoup
 from jiosaavn import JioSaavn
@@ -56,13 +55,14 @@ from beetsplug.helpers import (
     parse_title,
     clean_album_name,
     get_config_value,
-    highlight_matches,
     get_plexsync_config,
 )
 from beetsplug import plex_ops
 from beetsplug import spotify_provider
 from beetsplug import plex_search
 from beetsplug import playlist_import
+from beetsplug import manual_search
+from beetsplug import spotify_transfer
 from beetsplug import collage as collage_mod
 from beetsplug import smartplaylists as sp_mod
 
@@ -663,273 +663,13 @@ class PlexSync(BeetsPlugin):
 
     def _handle_manual_search(self, sorted_tracks, song, original_query=None):
         """Helper function to handle manual search."""
-        source_title = song.get("title", "")
-        source_album = song.get("album", "Unknown")  # Changed from None to "Unknown"
-        source_artist = song.get("artist", "")
+        return manual_search.handle_manual_search(self, sorted_tracks, song, original_query)
 
-        # Use beets UI formatting for the query header
-        print_(ui.colorize('text_highlight', '\nChoose candidates for: ') +
-               ui.colorize('text_highlight_minor', f"{source_album} - {source_title} - {source_artist}"))
-
-        # Format and display the matches
-        for i, (track, score) in enumerate(sorted_tracks, start=1):
-            track_artist = getattr(track, 'originalTitle', None) or track.artist().title
-
-            # Highlight matching parts
-            highlighted_title = highlight_matches(source_title, track.title)
-            highlighted_album = highlight_matches(source_album, track.parentTitle)
-            highlighted_artist = highlight_matches(source_artist, track_artist)
-
-            # Color code the score
-            if score >= 0.8:
-                score_color = 'text_success'    # High match
-            elif score >= 0.5:
-                score_color = 'text_warning'    # Medium match
-            else:
-                score_color = 'text_error'      # Low match
-
-            # Format the line with matching and index colors
-            print_(
-                f"{i}. {highlighted_album} - {highlighted_title} - "
-                f"{highlighted_artist} (Match: {ui.colorize(score_color, f'{score:.2f}')})"
-            )        # Show options footer
-        print_(ui.colorize('text_highlight', '\nActions:'))
-        print_(ui.colorize('text', '  #: Select match by number'))
-        print_(
-            f"  {ui.colorize('action', 'a')}{ui.colorize('text', ': Abort')}   "
-            f"{ui.colorize('action', 's')}{ui.colorize('text', ': Skip')}   "
-            f"{ui.colorize('action', 'e')}{ui.colorize('text', ': Enter manual search')}\n"
-        )
-
-        sel = ui.input_options(
-            ("aBort", "Skip", "Enter"),
-            numrange=(1, len(sorted_tracks)),
-            default=1
-        )
-
-        if sel in ("b", "B"):
-            return None
-        elif sel in ("s", "S"):
-            self._log.debug("User skipped, storing negative cache result.")
-            query_to_neg_cache = None
-            if original_query is not None and original_query.get('title') and original_query.get('title').strip():
-                query_to_neg_cache = original_query
-            elif song.get('title') and song.get('title').strip(): # 'song' is the current search terms
-                query_to_neg_cache = song
-
-            if query_to_neg_cache:
-                self._cache_result(query_to_neg_cache, None)
-            else:
-                self._log.debug("No suitable query to store negative cache against for skip.")
-            return None
-        elif sel in ("e", "E"):
-            return self.manual_track_search(original_query if original_query is not None else song)
-
-        selected_track = sorted_tracks[sel - 1][0] if sel > 0 else None
-        if selected_track:
-            # Cache the result for the current song query using proper cache key
-            current_cache_key = self.cache._make_cache_key(song)
-            self._cache_result(current_cache_key, selected_track)
-            self._log.debug("Cached result for current song query: {}", song)
-
-            # ALWAYS cache for the original query that led to this manual search
-            if original_query is not None and original_query != song:
-                original_cache_key = self.cache._make_cache_key(original_query)
-                self._log.debug("Also caching result for original query key: {}", original_query)
-                self._cache_result(original_cache_key, selected_track)
-
-            return selected_track
 
     def manual_track_search(self, original_query=None):
         """Manually search for a track in the Plex library."""
-        print_(ui.colorize('text_highlight', '\nManual Search'))
-        print_(ui.colorize('text', 'Enter search criteria (empty to skip):'))
+        return manual_search.manual_track_search(self, original_query)
 
-        title = input_(ui.colorize('text_highlight_minor', 'Title: ')).strip()
-        album = input_(ui.colorize('text_highlight_minor', 'Album: ')).strip()
-        artist = input_(ui.colorize('text_highlight_minor', 'Artist: ')).strip()
-
-        # Log the search parameters for debugging
-        self._log.debug("Searching with title='{}', album='{}', artist='{}'", title, album, artist)
-
-        try:
-            # Try different search strategies in order
-            tracks = []
-
-            # Strategy 1: If we have an album name from a movie soundtrack, search by album first
-            if album and any(x in album.lower() for x in ['movie', 'soundtrack', 'original']):
-                tracks = self.music.searchTracks(**{"album.title": album}, limit=100)
-                self._log.debug("Album-first search found {} tracks", len(tracks))
-
-            # Strategy 2: If first strategy didn't work or wasn't applicable, try combined search
-            if not tracks and album and title:
-                tracks = self.music.searchTracks(
-                    **{"album.title": album, "track.title": title},
-                    limit=100
-                )
-                self._log.debug("Combined album-title search found {} tracks", len(tracks))
-
-            # Strategy 3: Try album-only search if no tracks found yet
-            if not tracks and album:
-                tracks = self.music.searchTracks(**{"album.title": album}, limit=100)
-                self._log.debug("Album-only search found {} tracks", len(tracks))
-
-            # Strategy 4: Try title-only search if still no tracks
-            if not tracks and title:
-                tracks = self.music.searchTracks(**{"track.title": title}, limit=100)
-                self._log.debug("Title-only search found {} tracks", len(tracks))
-
-            if not tracks and artist:
-                # Strategy 5: Try artist-only search as last resort
-                tracks = self.music.searchTracks(**{"artist.title": artist}, limit=100)
-                self._log.debug("Artist-only search found {} tracks", len(tracks))
-
-            if not tracks:
-                self._log.info("No matching tracks found")
-                return None
-
-            # Filter results with more sophisticated matching
-            filtered_tracks = []
-            for track in tracks:
-                track_artist = getattr(track, 'originalTitle', None) or track.artist().title
-                track_album = track.parentTitle
-                track_title = track.title
-
-                # Debug log each track being considered
-                self._log.debug("Considering track: {} - {} - {}", track_album, track_title, track_artist)
-
-                # More sophisticated matching thresholds
-                title_match = not title or get_fuzzy_score(title.lower(), track_title.lower()) > 0.4
-                album_match = not album or get_fuzzy_score(album.lower(), track_album.lower()) > 0.4
-
-                # Handle multiple artists better
-                artist_match = True
-                if artist:
-                    track_artists = set(a.strip().lower() for a in track_artist.split(','))
-                    search_artists = set(a.strip().lower() for a in artist.split(','))
-
-                    # Calculate artist match score using intersection
-                    common_artists = track_artists.intersection(search_artists)
-                    total_artists = track_artists.union(search_artists)
-                    artist_score = len(common_artists) / len(total_artists) if total_artists else 0
-
-                    # Consider it a match if we have at least 30% artist overlap
-                    artist_match = artist_score >= 0.3
-
-                # Enhanced matching criteria:
-                # 1. Perfect album match (for soundtracks)
-                perfect_album = album and track_album and album.lower() == track_album.lower()
-                # 2. Strong title match
-                strong_title = title and get_fuzzy_score(title.lower(), track_title.lower()) > 0.8
-                # 3. Standard criteria
-                standard_match = (title_match and album_match and artist_match)
-
-                if perfect_album or strong_title or standard_match:
-                    filtered_tracks.append(track)
-                    self._log.debug(
-                        "Matched: {} - {} - {} (Perfect album: {}, Strong title: {}, Standard: {})",
-                        track_album, track_title, track_artist,
-                        perfect_album, strong_title, standard_match
-                    )
-
-            if not filtered_tracks:
-                self._log.info("No matching tracks found after filtering")
-                return None
-
-            # Create song_dict for match scoring
-            song_dict = {
-                "title": title if title else "",
-                "album": album if album else "",
-                "artist": artist if artist else "",
-            }
-
-            # Sort matches by relevance (removed is_soundtrack parameter)
-            sorted_tracks = self.find_closest_match(song_dict, filtered_tracks)
-
-            # Use beets UI formatting for the query header
-            print_(ui.colorize('text_highlight', '\nChoose candidates for: ') +
-                   ui.colorize('text_highlight_minor', f"{album} - {title} - {artist}"))
-
-            # Format and display the matches
-            for i, (track, score) in enumerate(sorted_tracks, start=1):
-                track_artist = getattr(track, 'originalTitle', None) or track.artist().title
-
-                # Highlight matching parts
-                highlighted_title = highlight_matches(title, track.title)
-                highlighted_album = highlight_matches(album, track.parentTitle)
-                highlighted_artist = highlight_matches(artist, track_artist)
-
-                # Color code the score
-                if score >= 0.8:
-                    score_color = 'text_success'    # High match
-                elif score >= 0.5:
-                    score_color = 'text_warning'    # Medium match
-                else:
-                    score_color = 'text_error'      # Low match
-
-                # Format the line with matching and index colors
-                print_(
-                    f"{ui.colorize('action', str(i))}. {highlighted_album} - {highlighted_title} - "
-                    f"{highlighted_artist} (Match: {ui.colorize(score_color, f'{score:.2f}')})"
-                )
-
-            # Show options footer
-            print_(ui.colorize('text_highlight', '\nActions:'))
-            print_(ui.colorize('text', '  #: Select match by number'))
-            print_(
-                f"  {ui.colorize('action', 'a')}{ui.colorize('text', ': Abort')}   "
-                f"{ui.colorize('action', 's')}{ui.colorize('text', ': Skip')}   "
-                f"{ui.colorize('action', 'e')}{ui.colorize('text', ': Enter manual search')}\n"
-            )
-
-            sel = ui.input_options(
-                ("aBort", "Skip", "Enter"),
-                numrange=(1, len(sorted_tracks)),
-                default=1
-            )
-
-            if sel in ("b", "B"):
-                return None
-            elif sel in ("s", "S"):
-                self._log.debug("User skipped in manual_track_search, storing negative cache result.")
-                query_to_neg_cache = None
-                if original_query is not None and original_query.get('title') and original_query.get('title').strip():
-                    query_to_neg_cache = original_query
-                elif song_dict.get('title') and song_dict.get('title').strip(): # song_dict is from the manual text input
-                    query_to_neg_cache = song_dict
-
-                if query_to_neg_cache:
-                    self._cache_result(query_to_neg_cache, None)
-                else:
-                    self._log.debug("No suitable query to store negative cache against for skip in manual_track_search.")
-                return None
-            elif sel in ("e", "E"):
-                return self.manual_track_search(original_query)
-
-            selected_track = sorted_tracks[sel - 1][0] if sel > 0 else None
-            if selected_track:
-                # Determine the primary query to cache against
-                query_to_cache = None
-                if original_query is not None and original_query.get('title') and original_query.get('title').strip():
-                    query_to_cache = original_query
-                    self._log.debug("Using original_query for caching: {}", original_query)
-                elif song_dict.get('title') and song_dict.get('title').strip(): # song_dict is from the manual text input
-                    query_to_cache = song_dict
-                    self._log.debug("Using current song_dict for caching (original_query was not suitable): {}", song_dict)
-
-                if query_to_cache:
-                    self._cache_result(query_to_cache, selected_track)
-                else:
-                    self._log.debug("No suitable query to cache the selected track against.")
-
-                # Always update the original key if it differs from the manual/LLM-cleaned query
-                if original_query is not None and song_dict != original_query:
-                    self._log.debug("Also caching result for original query key: {}", original_query)
-                    self._cache_result(original_query, selected_track)
-            return selected_track
-        except Exception as e:
-            self._log.error("Error during manual search: {}", e)
-            return None
 
     def search_plex_song(self, song, manual_search=None, llm_attempted=False):
         return plex_search.search_plex_song(self, song, manual_search, llm_attempted)
@@ -1231,93 +971,7 @@ class PlexSync(BeetsPlugin):
 
     def _plex2spotify(self, lib, playlist, query_args=None):
         """Transfer Plex playlist to Spotify using plex_lookup with optional query filtering."""
-        self.authenticate_spotify()
-        plex_playlist = self.plex.playlist(playlist)
-        plex_playlist_items = plex_playlist.items()
-        self._log.debug("Total items in Plex playlist: {}", len(plex_playlist_items))
-
-        # Build lookup once for all tracks
-        plex_lookup = self.build_plex_lookup(lib)
-
-        # Process tracks in order and maintain the original Plex playlist order
-        spotify_tracks = []
-
-        # If query args are provided, filter the beets items first
-        if query_args:
-            # Get all beets items that match the query
-            query_items = lib.items(query_args)
-            query_rating_keys = {item.plex_ratingkey for item in query_items if hasattr(item, 'plex_ratingkey')}
-            self._log.info("Query matched {} beets items, filtering playlist accordingly", len(query_rating_keys))
-        else:
-            query_rating_keys = None
-
-        for item in plex_playlist_items:
-            self._log.debug("Processing {}", item.ratingKey)
-
-            beets_item = plex_lookup.get(item.ratingKey)
-            if not beets_item:
-                self._log.debug(
-                    "Library not synced. Item not found in Beets: {} - {}",
-                    item.parentTitle,
-                    item.title
-                )
-                continue
-
-            # Apply query filter if provided
-            if query_rating_keys is not None and item.ratingKey not in query_rating_keys:
-                self._log.debug(
-                    "Item filtered out by query: {} - {} - {}",
-                    beets_item.artist,
-                    beets_item.album,
-                    beets_item.title
-                )
-                continue
-
-            self._log.debug("Beets item: {}", beets_item)
-
-            spotify_track_id = None
-
-            # First try to get existing spotify track ID from beets
-            try:
-                spotify_track_id = beets_item.spotify_track_id
-                self._log.debug("Spotify track id in beets: {}", spotify_track_id)
-
-                # Verify the track is available and playable on Spotify
-                if spotify_track_id:
-                    try:
-                        track_info = self.sp.track(spotify_track_id)
-                        # Strict availability check: must be playable and not restricted
-                        if (
-                            not track_info
-                            or not track_info.get('is_playable', True)
-                            or track_info.get('restrictions', {}).get('reason') == 'unavailable'
-                            or not track_info.get('available_markets')
-                        ):
-                            self._log.debug("Track {} is not playable or not available, searching for alternatives", spotify_track_id)
-                            spotify_track_id = None
-                    except Exception as e:
-                        self._log.debug("Error checking track availability {}: {}", spotify_track_id, e)
-                        spotify_track_id = None
-
-            except Exception:
-                spotify_track_id = None
-                self._log.debug("Spotify track_id not found in beets")
-
-            # If no valid track ID, search for it
-            if not spotify_track_id:
-                spotify_track_id = self._search_spotify_track(beets_item)
-
-            if spotify_track_id:
-                spotify_tracks.append(spotify_track_id)
-            else:
-                self._log.info("No playable Spotify match found for {}", beets_item)
-
-        if query_args:
-            self._log.info("Found {} Spotify tracks matching query in Plex playlist order", len(spotify_tracks))
-        else:
-            self._log.debug("Found {} Spotify tracks in Plex playlist order", len(spotify_tracks))
-
-        self.add_tracks_to_spotify_playlist(playlist, spotify_tracks)
+        spotify_transfer.plex_to_spotify(self, lib, playlist, query_args)
 
     def _search_spotify_track(self, beets_item):
         return spotify_provider.search_spotify_track(self, beets_item)
