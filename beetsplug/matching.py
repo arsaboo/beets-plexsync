@@ -1,7 +1,8 @@
 """Custom matching utilities for PlexSync plugin."""
 
 import re
-from typing import Optional, Tuple
+import difflib
+from typing import Optional, Tuple, Iterable
 
 from beets.autotag.distance import Distance, string_dist
 from beets.library import Item
@@ -103,6 +104,89 @@ def extract_soundtrack_info(s: str) -> tuple[str, str]:
     # No pattern found, return original string with empty soundtrack title
     return s, ""
 
+
+def get_fuzzy_score(str1: str | None, str2: str | None) -> float:
+    """Return a basic fuzzy match score between two strings."""
+    if not str1 or not str2:
+        return 0.0
+    return difflib.SequenceMatcher(None, str1.lower(), str2.lower()).ratio()
+
+
+def clean_text_for_matching(text: str | None) -> str:
+    """Normalize text to improve fuzzy matching consistency."""
+    if not text:
+        return ""
+
+    text = text.lower()
+    text = re.sub(r'\([^)]*\)', '', text)
+    text = re.sub(r'\[[^\]]*\]', '', text)
+    text = re.sub(r'(?i)original\s+(?:motion\s+picture\s+)?soundtrack', '', text)
+    text = re.sub(r'[^\w\s]', ' ', text)
+    return ' '.join(text.split())
+
+
+def calculate_string_similarity(source: str | None, target: str | None) -> float:
+    """Compute similarity between two normalized strings."""
+    if not source or not target:
+        return 0.0
+
+    source = source.lower().strip()
+    target = target.lower().strip()
+    if source == target:
+        return 1.0
+    if source in target or target in source:
+        shorter = min(len(source), len(target))
+        longer = max(len(source), len(target))
+        return 0.9 * (shorter / longer)
+    return difflib.SequenceMatcher(None, source, target).ratio()
+
+
+def calculate_artist_similarity(
+    source_artists: Iterable[str], target_artists: Iterable[str]
+) -> float:
+    """Compare two artist lists allowing for partial matches."""
+    source = [a for a in (source_artists or []) if a]
+    target = [a for a in (target_artists or []) if a]
+    if not source or not target:
+        return 0.0
+
+    def normalize_artist(artist: str) -> str:
+        artist = artist.lower()
+        artist = re.sub(r'\s*[&,]\s*', ' and ', artist)
+        artist = re.sub(r'\s*(?:feat\.?|ft\.?|featuring)\s*.*$', '', artist)
+        artist = re.sub(r'[^\w\s]', '', artist)
+        return artist.strip()
+
+    def split_parts(artist: str) -> set[str]:
+        return set(normalize_artist(artist).split())
+
+    source_norm = []
+    for artist in source:
+        normalized = normalize_artist(artist)
+        if normalized:
+            source_norm.append(normalized)
+
+    target_norm = []
+    for artist in target:
+        normalized = normalize_artist(artist)
+        if normalized:
+            target_norm.append(normalized)
+
+    if not source_norm or not target_norm:
+        return 0.0
+
+    exact_matches = len(set(source_norm).intersection(target_norm))
+    if exact_matches:
+        return exact_matches / max(len(source_norm), len(target_norm))
+
+    source_parts = set().union(*(split_parts(a) for a in source_norm))
+    target_parts = set().union(*(split_parts(a) for a in target_norm))
+    if not source_parts or not target_parts:
+        return 0.0
+
+    intersection = len(source_parts & target_parts)
+    union = len(source_parts | target_parts)
+    return 0.8 * (intersection / union if union else 0.0)
 
 def calculate_field_weight(field_value: str, field_type: str) -> float:
     """Calculate dynamic weight for a field based on its quality and content.

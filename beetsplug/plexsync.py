@@ -13,7 +13,6 @@ import asyncio
 import random
 import re
 import time
-import difflib
 import json
 import spotipy
 import numpy as np
@@ -45,7 +44,7 @@ from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
 
 from beetsplug.caching import Cache
 from beetsplug.llm import search_track_info, Song, SongRecommendations
-from beetsplug.matching import clean_string, plex_track_distance
+from beetsplug.matching import clean_string, plex_track_distance, get_fuzzy_score
 from beetsplug.provider_gaana import import_gaana_playlist
 from beetsplug.provider_tidal import import_tidal_playlist
 from beetsplug.provider_youtube import import_yt_playlist, import_yt_search
@@ -516,127 +515,6 @@ class PlexSync(BeetsPlugin):
         ]    # Using helper functions from helpers.py instead of class methods
 
 
-    def get_fuzzy_score(self, str1, str2):
-        """Calculate fuzzy match score between two strings."""
-        if not str1 or not str2:
-            return 0
-        return difflib.SequenceMatcher(None, str1.lower(), str2.lower()).ratio()
-
-    def clean_text_for_matching(self, text):
-        """Clean text for better fuzzy matching.
-
-        Args:
-            text: Text to clean
-
-        Returns:
-            str: Cleaned text
-        """
-        if not text:
-            return ""
-        # Convert to lowercase
-        text = text.lower()
-        # Remove parentheses and contents
-        text = re.sub(r'\([^)]*\)', '', text)
-        # Remove brackets and contents
-        text = re.sub(r'\[[^\]]*\]', '', text)
-        # Remove soundtrack mentions
-        text = re.sub(r'(?i)original\s+(?:motion\s+picture\s+)?soundtrack', '', text)
-        # Remove special chars and extra spaces
-        text = re.sub(r'[^\w\s]', ' ', text)
-        # Normalize whitespace
-        text = ' '.join(text.split())
-        return text
-
-    def calculate_string_similarity(self, source, target):
-        """Calculate similarity score between two strings.
-
-        Args:
-            source: Source string to match
-            target: Target string to match against
-
-        Returns:
-            float: Similarity score between 0-1
-        """
-        if not source or not target:
-            return 0.0
-
-        source = source.lower().strip()
-        target = target.lower().strip()
-
-        # Exact match
-        if source == target:
-            return 1.0
-
-        # Source is substring of target or vice versa
-        if source in target or target in source:
-            shorter = min(len(source), len(target))
-            longer = max(len(source), len(target))
-            return 0.9 * (shorter / longer)
-
-        # Calculate Levenshtein distance
-        distance = difflib.SequenceMatcher(None, source, target).ratio()
-        return distance
-
-    def calculate_artist_similarity(self, source_artists, target_artists):
-        """Calculate similarity between artist sets with partial matching.
-
-        Args:
-            source_artists: List/set of source artist names
-            target_artists: List/set of target artist names
-
-        Returns:
-            float: Similarity score between 0-1
-        """
-        def normalize_artist(artist):
-            """Normalize artist name for comparison."""
-            if not artist:
-                return ""
-            artist = artist.lower()
-            # Replace common separators
-            artist = re.sub(r'\s*[&,]\s*', ' and ', artist)
-            # Remove featuring
-            artist = re.sub(r'\s*(?:feat\.?|ft\.?|featuring)\s*.*$', '', artist)
-            # Remove special chars
-            artist = re.sub(r'[^\w\s]', '', artist)
-            return artist.strip()
-
-        def get_artist_parts(artist):
-            """Split artist name into words for partial matching."""
-            return set(normalize_artist(artist).split())
-
-        # Normalize and filter out empty/None artists
-        source = [normalize_artist(a) for a in source_artists if a and a.lower() != "unknown"]
-        target = [normalize_artist(a) for a in target_artists if a and a.lower() != "unknown"]
-
-        if not source or not target:
-            return 0.0
-
-        # Calculate exact matches first
-        exact_matches = len(set(source).intersection(target))
-        if exact_matches:
-            # Weight by proportion of exact matches
-            return exact_matches / max(len(source), len(target))
-
-        # If no exact matches, try partial word matching
-        source_parts = set().union(*(get_artist_parts(a) for a in source))
-        target_parts = set().union(*(get_artist_parts(a) for a in target))
-
-        if not source_parts or not target_parts:
-            return 0.0
-
-        # Calculate Jaccard similarity of word parts
-        intersection = len(source_parts.intersection(target_parts))
-        union = len(source_parts.union(target_parts))
-
-        # Reduce score for partial matches
-        return 0.8 * (intersection / union if union > 0 else 0)
-
-    def ensure_float(value):
-        """Safely convert a numeric or list of numerics to a float."""
-        if isinstance(value, list):
-            return float(sum(value) / len(value)) if value else 0.0
-        return float(value)
-
     def find_closest_match(self, song, tracks):
         """Find best matching tracks using enhanced string similarity with context-aware weights."""
         matches = []
@@ -913,8 +791,8 @@ class PlexSync(BeetsPlugin):
                 self._log.debug("Considering track: {} - {} - {}", track_album, track_title, track_artist)
 
                 # More sophisticated matching thresholds
-                title_match = not title or self.get_fuzzy_score(title.lower(), track_title.lower()) > 0.4
-                album_match = not album or self.get_fuzzy_score(album.lower(), track_album.lower()) > 0.4
+                title_match = not title or get_fuzzy_score(title.lower(), track_title.lower()) > 0.4
+                album_match = not album or get_fuzzy_score(album.lower(), track_album.lower()) > 0.4
 
                 # Handle multiple artists better
                 artist_match = True
@@ -934,7 +812,7 @@ class PlexSync(BeetsPlugin):
                 # 1. Perfect album match (for soundtracks)
                 perfect_album = album and track_album and album.lower() == track_album.lower()
                 # 2. Strong title match
-                strong_title = title and self.get_fuzzy_score(title.lower(), track_title.lower()) > 0.8
+                strong_title = title and get_fuzzy_score(title.lower(), track_title.lower()) > 0.8
                 # 3. Standard criteria
                 standard_match = (title_match and album_match and artist_match)
 
