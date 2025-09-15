@@ -1640,7 +1640,7 @@ class PlexSync(BeetsPlugin):
         self.authenticate_spotify()
         plex_playlist = self.plex.playlist(playlist)
         plex_playlist_items = plex_playlist.items()
-        self._log.debug("Plex playlist items: {}", plex_playlist_items)
+        self._log.debug("Total items in Plex playlist: {}", len(plex_playlist_items))
 
         # Build lookup once for all tracks
         plex_lookup = self.build_plex_lookup(lib)
