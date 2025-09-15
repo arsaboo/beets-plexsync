@@ -277,7 +277,12 @@ def search_spotify_track(plugin, beets_item) -> Optional[str]:
 
 
 def add_tracks_to_spotify_playlist(plugin, playlist_name: str, track_uris: List[str]) -> None:
-    """Add tracks to a Spotify playlist in top-insertion order."""
+    """Synchronize a Spotify playlist to exactly match target order.
+
+    - Preserves duplicates and order from `track_uris`.
+    - Eliminates existing duplicates by replacing playlist content.
+    - Avoids overlapping chunk inserts that caused exponential duplication.
+    """
     user_id = plugin.sp.current_user()["id"]
     playlists = plugin.sp.user_playlists(user_id)
     playlist_id = None
@@ -294,44 +299,39 @@ def add_tracks_to_spotify_playlist(plugin, playlist_name: str, track_uris: List[
             f"Playlist {playlist_name} created with id {playlist_id}"
         )
 
-    playlist_tracks = get_playlist_tracks(plugin, playlist_id)
-    current_track_ids = [
-        track["track"]["id"] for track in playlist_tracks
-        if track["track"]
-    ]
-
-    target_track_ids = [
-        uri.replace("spotify:track:", "") if uri.startswith("spotify:track:") else uri
+    # Normalize target IDs preserving order and duplicates
+    target_track_ids: List[str] = [
+        uri.replace("spotify:track:", "") if isinstance(uri, str) and uri.startswith("spotify:track:") else uri
         for uri in track_uris
+        if uri
     ]
 
-    current_set = set(current_track_ids)
-    target_set = set(target_track_ids)
+    # Fetch current playlist in order for quick idempotency check
+    playlist_tracks = get_playlist_tracks(plugin, playlist_id)
+    current_track_ids: List[str] = [
+        t["track"]["id"] for t in playlist_tracks if t.get("track") and t["track"].get("id")
+    ]
 
-    tracks_to_add = [track_id for track_id in target_track_ids if track_id not in current_set]
-    tracks_to_remove = list(current_set - target_set)
-
-    plugin._log.debug(f"Current playlist has {len(current_track_ids)} tracks")
-    plugin._log.debug(f"Target playlist should have {len(target_track_ids)} tracks")
-    plugin._log.debug(f"Tracks to add: {len(tracks_to_add)}")
-    plugin._log.debug(f"Tracks to remove: {len(tracks_to_remove)}")
-
-    if tracks_to_remove:
-        for i in range(0, len(tracks_to_remove), 100):
-            chunk = tracks_to_remove[i: i + 100]
-            plugin.sp.user_playlist_remove_all_occurrences_of_tracks(
-                user_id, playlist_id, chunk
-            )
-        plugin._log.debug(f"Removed {len(tracks_to_remove)} tracks from playlist {playlist_id}")
-
-    if tracks_to_add:
-        for i in range(len(tracks_to_add) - 1, -1, -1):
-            start_idx = max(0, i - 99)
-            chunk = tracks_to_add[start_idx:i + 1]
-            plugin.sp.user_playlist_add_tracks(
-                user_id, playlist_id, chunk, position=0
-            )
-        plugin._log.debug(f"Added {len(tracks_to_add)} new tracks to top of playlist {playlist_id}")
-
-    if not tracks_to_add and not tracks_to_remove:
+    if current_track_ids == target_track_ids:
         plugin._log.debug("Playlist is already in sync - no changes needed")
+        return
+
+    plugin._log.debug(
+        f"Rebuilding playlist to exact order: current={len(current_track_ids)} target={len(target_track_ids)}"
+    )
+
+    # Replace entire playlist content with the first 100 items
+    first_chunk = target_track_ids[:100]
+    # Use the legacy user_* method for backward compatibility with existing usage
+    plugin.sp.user_playlist_replace_tracks(user_id, playlist_id, first_chunk)
+
+    # Append remaining items in order in non-overlapping chunks of 100
+    idx = 100
+    while idx < len(target_track_ids):
+        chunk = target_track_ids[idx: idx + 100]
+        plugin.sp.user_playlist_add_tracks(user_id, playlist_id, chunk)
+        idx += 100
+
+    plugin._log.debug(
+        f"Playlist {playlist_name} synchronized: total tracks now {len(target_track_ids)}"
+    )
