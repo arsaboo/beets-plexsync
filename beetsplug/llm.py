@@ -69,15 +69,30 @@ config['llm'].add({
 class SongBasicInfo(BaseModel):
     """Pydantic model for structured song information."""
     title: str = Field(..., description="The title of the song")
-    artist: str = Field(..., description="The name of the artist or band")
+    artist: str = Field("", description="The name of the artist or band")
     album: Optional[str] = Field(None, description="The album the song appears on")
 
     @field_validator('title', 'artist', 'album', mode='before')
     @classmethod
     def default_unknown(cls, v):
-        if not v or not isinstance(v, str) or not v.strip():
-            return None  # Return None instead of "Unknown"
-        return v.strip()
+        # Handle None values and empty strings
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return ""  # Return empty string for all fields to avoid validation issues
+        if isinstance(v, str):
+            return v.strip()
+        return str(v)  # Convert any other type to string
+
+
+# Pydantic models used by plexsync for LLM playlist parsing
+class Song(BaseModel):
+    title: str
+    artist: str
+    album: str
+    year: str = Field(description="Year of release")
+
+
+class SongRecommendations(BaseModel):
+    songs: list[Song]
 
 
 class MusicSearchTools:
@@ -116,7 +131,6 @@ class MusicSearchTools:
         try:
             self.ollama_agent = Agent(
                 model=Ollama(id=self.model_id, host=self.ollama_host),
-                response_model=SongBasicInfo,
                 structured_outputs=True
             )
         except Exception as e:
@@ -252,7 +266,12 @@ class MusicSearchTools:
 
     def _extract_song_details(self, content: str, song_name: str) -> SongBasicInfo:
         """Extract structured song details from search results."""
-        prompt = textwrap.dedent(f"""
+        # Check if agent is available
+        if not self.ollama_agent:
+            logger.error("Ollama agent not initialized")
+            return SongBasicInfo(title=song_name, artist="", album=None)
+            
+        prompt = textwrap.dedent(f"""\n
         <instruction>
         IMPORTANT: Analyze ONLY the search results data below to extract accurate information about a song.
         The query "{song_name}" may contain incorrect or incomplete information - DO NOT rely on the query itself for extracting details.
@@ -307,30 +326,121 @@ class MusicSearchTools:
         logger.debug("First chars of content: {0}...", content_preview)
 
         try:
-            response = self.ollama_agent.run(prompt)
+            response = self.ollama_agent.run(prompt, response_model=SongBasicInfo)
 
             # Log the raw response for debugging
-            logger.debug("Raw Ollama response: {}", response.content)
+            logger.debug("Raw Ollama response: {}", response)
 
-            return response.content
+            # Handle both string and object responses
+            if isinstance(response, str):
+                # Clean up the string response by removing extra characters
+                cleaned_response = response.strip()
+                # Remove any leading/trailing quotes or special characters
+                cleaned_response = cleaned_response.strip('"\'')
+                # Remove any JSON markdown wrappers
+                if cleaned_response.startswith('```json'):
+                    cleaned_response = cleaned_response[7:]
+                if cleaned_response.endswith('```'):
+                    cleaned_response = cleaned_response[:-3]
+                cleaned_response = cleaned_response.strip()
+                
+                # If response is a string, try to parse it as JSON
+                try:
+                    import json
+                    data = json.loads(cleaned_response)
+                    # Ensure we have the required fields with proper defaults
+                    return SongBasicInfo(
+                        title=data.get("title", song_name) or song_name,
+                        artist=data.get("artist", "") or "",
+                        album=data.get("album")
+                    )
+                except json.JSONDecodeError:
+                    # If parsing fails, create SongBasicInfo with available data
+                    return SongBasicInfo(title=song_name, artist="", album=None)
+            elif hasattr(response, 'content'):
+                # If response has a content attribute, use it
+                content = response.content
+                if isinstance(content, str):
+                    # Clean up the string content
+                    cleaned_content = content.strip()
+                    # Remove any leading/trailing quotes or special characters
+                    cleaned_content = cleaned_content.strip('"\'')
+                    # Remove any JSON markdown wrappers
+                    if cleaned_content.startswith('```json'):
+                        cleaned_content = cleaned_content[7:]
+                    if cleaned_content.endswith('```'):
+                        cleaned_content = cleaned_content[:-3]
+                    cleaned_content = cleaned_content.strip()
+                    
+                    # If content is a string, try to parse it as JSON
+                    try:
+                        import json
+                        data = json.loads(cleaned_content)
+                        # Ensure we have the required fields with proper defaults
+                        return SongBasicInfo(
+                            title=data.get("title", song_name) or song_name,
+                            artist=data.get("artist", "") or "",
+                            album=data.get("album")
+                        )
+                    except json.JSONDecodeError:
+                        # If parsing fails, create SongBasicInfo with the content as title
+                        return SongBasicInfo(title=cleaned_content or song_name, artist="", album=None)
+                elif isinstance(content, SongBasicInfo):
+                    # If content is already a SongBasicInfo object, return it
+                    return content
+                elif isinstance(content, dict):
+                    # If content is a dict, convert to SongBasicInfo
+                    return SongBasicInfo(
+                        title=content.get("title", song_name) or song_name,
+                        artist=content.get("artist", "") or "",
+                        album=content.get("album")
+                    )
+                else:
+                    # For other content types, convert to string
+                    return SongBasicInfo(title=str(content) or song_name, artist="", album=None)
+            elif isinstance(response, SongBasicInfo):
+                # If response is already a SongBasicInfo object, return it
+                return response
+            elif isinstance(response, dict):
+                # If response is a dict, convert to SongBasicInfo
+                return SongBasicInfo(
+                    title=response.get("title", song_name) or song_name,
+                    artist=response.get("artist", "") or "",
+                    album=response.get("album")
+                )
+            else:
+                # For other response types, try to convert to SongBasicInfo
+                return SongBasicInfo(title=str(response) or song_name, artist="", album=None)
         except Exception as e:
             logger.error("Ollama extraction failed: {0}", str(e))
-            # Return empty strings for artist and album on failure to avoid validation errors
+            # Return a default SongBasicInfo object on failure to avoid validation errors
             return SongBasicInfo(title=song_name, artist="", album=None)
 
     def search_song_info(self, song_name: str) -> Dict:
         """Search for song information using available search engines."""
+        # Check if agent is available
+        if not self.ollama_agent:
+            logger.error("Ollama agent not initialized")
+            return {
+                "title": song_name,
+                "artist": "",
+                "album": None,
+                "search_source": "error"
+            }
+            
         search_results = self._get_search_results(song_name)
 
         if (search_results["source"] == "error"):
             return {
                 "title": song_name,
-                "artist": None,
+                "artist": "",
                 "album": None,
                 "search_source": "error"
             }
 
-        song_details = self._extract_song_details(search_results["content"], song_name).model_dump()
+        song_details = self._extract_song_details(search_results["content"], song_name)
+        if isinstance(song_details, SongBasicInfo):
+            song_details = song_details.model_dump()
         song_details["search_source"] = search_results["source"]
         return song_details
 
