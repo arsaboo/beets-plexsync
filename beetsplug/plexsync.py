@@ -1416,28 +1416,56 @@ class PlexSync(BeetsPlugin):
             used_server_history = True
             self._log.debug("Using server history for section {} since {} ({} entries)", section_id, frm_dt.strftime('%Y-%m-%d'), len(history_entries))
 
+            skipped_entries = 0
             for h in history_entries:
-                # For tracks, parentRatingKey corresponds to album; viewedAt is the timestamp
-                album_key = getattr(h, "parentRatingKey", None)
-                viewed_at = getattr(h, "viewedAt", None)
-                if not album_key:
-                    continue
-                album_key = str(album_key)
+                try:
+                    viewed_at = getattr(h, "viewedAt", None)
 
-                # Ensure we have an album object; fall back to fetch if missing
-                album_obj = album_map.get(album_key)
-                if album_obj is None:
-                    try:
-                        album_obj = self.plex.fetchItem(int(album_key))
-                        album_map[album_key] = album_obj
-                    except Exception:
-                        # If we can't fetch, skip counting for collage purposes
+                    album_key = getattr(h, "parentRatingKey", None)
+                    if album_key:
+                        album_key = str(album_key)
+                    else:
+                        album_key = None
+
+                    album_obj = album_map.get(album_key) if album_key else None
+
+                    if album_obj is None:
+                        # First try to fetch album directly via parentRatingKey
+                        if album_key is not None:
+                            try:
+                                album_obj = self.plex.fetchItem(int(album_key))
+                                album_map[album_key] = album_obj
+                            except Exception:
+                                album_obj = None
+
+                    if album_obj is None:
+                        # Fallback: fetch the track from history and then resolve its album
+                        try:
+                            track_key = getattr(h, "ratingKey", None)
+                            if track_key is not None:
+                                trk = self.plex.fetchItem(int(track_key))
+                                album_obj = trk.album()
+                                # Derive a stable album key from the album object
+                                derived_key = str(getattr(album_obj, "ratingKey", album_obj.title))
+                                album_key = derived_key
+                                if album_key not in album_map:
+                                    album_map[album_key] = album_obj
+                        except Exception:
+                            album_obj = None
+
+                    if album_obj is None or album_key is None:
+                        skipped_entries += 1
                         continue
 
-                data = album_data.setdefault(album_key, {"album": album_obj, "count": 0, "last_played": None})
-                data["count"] += 1
-                if viewed_at and (data["last_played"] is None or viewed_at > data["last_played"]):
-                    data["last_played"] = viewed_at
+                    data = album_data.setdefault(album_key, {"album": album_obj, "count": 0, "last_played": None})
+                    data["count"] += 1
+                    if viewed_at and (data["last_played"] is None or viewed_at > data["last_played"]):
+                        data["last_played"] = viewed_at
+                except Exception:
+                    skipped_entries += 1
+                    continue
+            if skipped_entries:
+                self._log.debug("Skipped {} history entries that could not resolve to an album", skipped_entries)
         except Exception as e:
             # Fallback: per-track history (older approach). Some Plex setups or plexapi versions
             # may not support the server.history call with these filters.
