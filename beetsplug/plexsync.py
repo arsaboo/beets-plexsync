@@ -62,6 +62,7 @@ from beetsplug.helpers import (
 from beetsplug import plex_ops
 from beetsplug import spotify_provider
 from beetsplug import plex_search
+from beetsplug import playlist_import
 from beetsplug import collage as collage_mod
 from beetsplug import smartplaylists as sp_mod
 
@@ -959,87 +960,15 @@ class PlexSync(BeetsPlugin):
 
     def _plex_import_playlist(self, playlist, playlist_url=None, listenbrainz=False):
         """Import playlist into Plex."""
-        if listenbrainz:
-            try:
-                from beetsplug.listenbrainz import ListenBrainzPlugin
-            except ModuleNotFoundError:
-                self._log.error("ListenBrainz plugin not installed")
-                return
-            try:
-                lb = ListenBrainzPlugin()
-            except Exception as e:
-                self._log.error(
-                    "Unable to initialize ListenBrainz plugin. Error: {}", e
-                )
-                return
-            # there are 2 playlists to be imported. 1. Weekly jams 2. Weekly exploration
-            # get the weekly jams playlist
-            self._log.info("Importing weekly jams playlist")
-            weekly_jams = lb.get_weekly_jams()
-            self._log.info("Importing {} songs from Weekly Jams", len(weekly_jams))
-            self.add_songs_to_plex("Weekly Jams", weekly_jams, get_plexsync_config("manual_search", bool, False))
-
-            self._log.info("Importing weekly exploration playlist")
-            weekly_exploration = lb.get_weekly_exploration()
-            self._log.info(
-                "Importing {} songs from Weekly Exploration", len(weekly_exploration)
-            )
-            self.add_songs_to_plex("Weekly Exploration", weekly_exploration, get_plexsync_config("manual_search", bool, False))
-        else:
-            if playlist_url is None or (
-                "http://" not in playlist_url and "https://" not in playlist_url
-            ):
-                raise ui.UserError("Playlist URL not provided")
-            if "apple" in playlist_url:
-                songs = self.import_apple_playlist(playlist_url)
-            elif "jiosaavn" in playlist_url:
-                songs = self.import_jiosaavn_playlist(playlist_url)
-            elif "gaana.com" in playlist_url:
-                songs = self.import_gaana_playlist(playlist_url)
-            elif "spotify" in playlist_url:
-                songs = self.import_spotify_playlist(self.get_playlist_id(playlist_url))
-            elif "youtube" in playlist_url:
-                songs = self.import_yt_playlist(playlist_url)
-            elif "tidal" in playlist_url:
-                songs = self.import_tidal_playlist(playlist_url)
-            else:
-                songs = []
-                self._log.error("Playlist URL not supported")
-            self._log.info("Importing {} songs from {}", len(songs), playlist_url)
-            self.add_songs_to_plex(playlist, songs, get_plexsync_config("manual_search", bool, False))
+        return playlist_import.import_playlist(self, playlist, playlist_url, listenbrainz)
 
     def add_songs_to_plex(self, playlist, songs, manual_search):
-        """Add songs to a Plex playlist.
-
-        Args:
-            playlist: Name of the playlist
-            songs: List of songs to add
-            manual_search: Whether to enable manual search for matches
-        """
-        song_list = []
-        if songs:
-            for song in songs:
-                found = self.search_plex_song(song, manual_search)
-                if found is not None:
-                    song_list.append(found)
-
-        if not song_list:
-            self._log.warning("No songs found to add to playlist {}", playlist)
-            return
-
-        self._plex_add_playlist_item(song_list, playlist)
+        """Add songs to a Plex playlist."""
+        return playlist_import.add_songs_to_plex(self, playlist, songs, manual_search)
 
     def _plex_import_search(self, playlist, search, limit=10):
         """Import search results into Plex."""
-        self._log.info("Searching for {}", search)
-        songs = self.import_yt_search(search, limit)
-        song_list = []
-        if songs:
-            for song in songs:
-                found = self.search_plex_song(song)
-                if found is not None:
-                    song_list.append(found)
-        self._plex_add_playlist_item(song_list, playlist)
+        return playlist_import.import_search(self, playlist, search, limit)
 
     def _plex_clear_playlist(self, playlist):
         """Clear Plex playlist."""
