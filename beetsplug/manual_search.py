@@ -13,9 +13,9 @@ from beetsplug.matching import get_fuzzy_score
 
 def _render_actions() -> str:
     return (
-        ui.colorize('action', 'a') + ui.colorize('text', ': Abort') + '   '
-        + ui.colorize('action', 's') + ui.colorize('text', ': Skip') + '   '
-        + ui.colorize('action', 'e') + ui.colorize('text', ': Enter manual search') + '\n'
+        ui.colorize('action', 'a') + ui.colorize('text_highlight_minor', ': Abort') + '   '
+        + ui.colorize('action', 's') + ui.colorize('text_highlight_minor', ': Skip') + '   '
+        + ui.colorize('action', 'e') + ui.colorize('text_highlight_minor', ': Enter manual search') + '\n'
     )
 
 
@@ -50,7 +50,7 @@ def handle_manual_search(plugin, sorted_tracks, song, original_query=None):
         )
 
     print_(ui.colorize('text_highlight', '\nActions:'))
-    print_(ui.colorize('text', '  #: Select match by number'))
+    print_(ui.colorize('text_highlight_minor', '  #: Select match by number'))
     print_(_render_actions())
 
     sel = ui.input_options(("aBort", "Skip", "Enter"), numrange=(1, len(sorted_tracks)), default=1)
@@ -72,7 +72,7 @@ def handle_manual_search(plugin, sorted_tracks, song, original_query=None):
 def manual_track_search(plugin, original_query=None):
     """Interactively search for a Plex track."""
     print_(ui.colorize('text_highlight', '\nManual Search'))
-    print_(ui.colorize('text', 'Enter search criteria (empty to skip):'))
+    print_('Enter search criteria (empty to skip):')
 
     title = input_(ui.colorize('text_highlight_minor', 'Title: ')).strip()
     album = input_(ui.colorize('text_highlight_minor', 'Album: ')).strip()
@@ -122,7 +122,7 @@ def manual_track_search(plugin, original_query=None):
         )
 
     print_(ui.colorize('text_highlight', '\nActions:'))
-    print_(ui.colorize('text', '  #: Select match by number'))
+    print_(ui.colorize('text_highlight_minor', '  #: Select match by number'))
     print_(_render_actions())
 
     sel = ui.input_options(("aBort", "Skip", "Enter"), numrange=(1, len(sorted_tracks)), default=1)
