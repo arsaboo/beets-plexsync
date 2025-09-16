@@ -118,6 +118,9 @@ class PluginStub:
         self.last_manual = manual_search
         return f"match-{song['title']}"
 
+    def create_progress_counter(self, *args, **kwargs):
+        return None
+
     def _plex_add_playlist_item(self, tracks, playlist):
         self.added = (tracks, playlist)
 

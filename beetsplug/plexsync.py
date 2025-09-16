@@ -111,6 +111,9 @@ class PlexSync(BeetsPlugin):
         self.llm_client = None
         self.search_llm = None
 
+        self._progress_manager = None
+        self._progress_disabled = False
+
         # Initialize cache with plugin instance reference
         cache_path = os.path.join(self.config_dir, 'plexsync_cache.db')
         self.cache = Cache(cache_path, self)
@@ -189,6 +192,33 @@ class PlexSync(BeetsPlugin):
                 library not found"
             )
         self.register_listener("database_change", self.listen_for_db_change)
+
+    def _get_progress_manager(self):
+        """Create or return a cached enlighten manager for progress bars."""
+        if self._progress_disabled:
+            return None
+        if self._progress_manager is None:
+            try:
+                self._progress_manager = enlighten.get_manager()
+            except Exception as exc:  # noqa: BLE001 - keep progress optional
+                self._progress_disabled = True
+                self._log.debug("Progress manager unavailable: {}", exc)
+                return None
+        return self._progress_manager
+
+    def create_progress_counter(self, total: int, desc: str, unit: str = "item", **kwargs):
+        """Return an enlighten counter for progress tracking when possible."""
+        if not total:
+            return None
+        manager = self._get_progress_manager()
+        if manager is None:
+            return None
+        try:
+            return manager.counter(total=total, desc=desc, unit=unit, leave=False, **kwargs)
+        except Exception as exc:  # noqa: BLE001 - avoid breaking workflows
+            self._log.debug("Failed to create progress counter '{}': {}", desc, exc)
+            return None
+
 
     def get_event_loop(self):
         """Get or create an event loop."""
@@ -553,32 +583,52 @@ class PlexSync(BeetsPlugin):
     def _fetch_plex_info(self, items, write, force):
         """Obtain track information from Plex."""
         items_len = len(items)
-        with ThreadPoolExecutor() as executor:
-            for index, item in enumerate(items, start=1):
-                executor.submit(
-                    self._process_item, index, item, write, force, items_len
-                )
+        progress = self.create_progress_counter(
+            items_len,
+            "Syncing Plex library",
+            unit="track",
+            threadsafe=True,
+        )
+        try:
+            with ThreadPoolExecutor() as executor:
+                for index, item in enumerate(items, start=1):
+                    executor.submit(
+                        self._process_item, index, item, write, force, items_len, progress
+                    )
+        finally:
+            if progress is not None:
+                try:
+                    progress.close()
+                except Exception as exc:  # noqa: BLE001 - closing progress is best-effort
+                    self._log.debug("Failed to close progress counter: {}", exc)
 
-    def _process_item(self, index, item, write, force, items_len):
-        self._log.info("Processing {}/{} tracks - {} ", index, items_len, item)
-        if not force and "plex_userrating" in item:
-            self._log.debug("Plex rating already present for: {}", item)
-            return
-        plex_track = self.search_plex_track(item)
-        if plex_track is None:
-            self._log.info("No track found for: {}", item)
-            return
-        item.plex_guid = plex_track.guid
-        item.plex_ratingkey = plex_track.ratingKey
-        item.plex_userrating = plex_track.userRating
-        item.plex_skipcount = plex_track.skipCount
-        item.plex_viewcount = plex_track.viewCount
-        item.plex_lastviewedat = plex_track.lastViewedAt
-        item.plex_lastratedat = plex_track.lastRatedAt
-        item.plex_updated = time.time()
-        item.store()
-        if write:
-            item.try_write()
+    def _process_item(self, index, item, write, force, items_len, progress=None):
+        try:
+            self._log.info("Processing {}/{} tracks - {} ", index, items_len, item)
+            if not force and "plex_userrating" in item:
+                self._log.debug("Plex rating already present for: {}", item)
+                return
+            plex_track = self.search_plex_track(item)
+            if plex_track is None:
+                self._log.info("No track found for: {}", item)
+                return
+            item.plex_guid = plex_track.guid
+            item.plex_ratingkey = plex_track.ratingKey
+            item.plex_userrating = plex_track.userRating
+            item.plex_skipcount = plex_track.skipCount
+            item.plex_viewcount = plex_track.viewCount
+            item.plex_lastviewedat = plex_track.lastViewedAt
+            item.plex_lastratedat = plex_track.lastRatedAt
+            item.plex_updated = time.time()
+            item.store()
+            if write:
+                item.try_write()
+        finally:
+            if progress is not None:
+                try:
+                    progress.update()
+                except Exception as exc:  # noqa: BLE001 - keep sync resilient
+                    self._log.debug("Progress counter update failed: {}", exc)
 
     def search_plex_track(self, item):
         """Fetch the Plex track key."""
@@ -1164,27 +1214,41 @@ class PlexSync(BeetsPlugin):
             self._log.debug("Processing {} pre-filtered similar tracks", len(similar_tracks))
 
         # Process each playlist
-        for p in playlists_config:
-            playlist_type = p.get("type", "smart")
-            playlist_id = p.get("id")
-            playlist_name = p.get("name", "Unnamed playlist")
+        progress = self.create_progress_counter(
+            total=len(playlists_config),
+            desc="Playlists",
+            unit="list",
+        )
+        try:
+            for p in playlists_config:
+                playlist_type = p.get("type", "smart")
+                playlist_id = p.get("id")
+                playlist_name = p.get("name", "Unnamed playlist")
 
-            if (playlist_type == "imported"):
-                sp_mod.generate_imported_playlist(self, lib, p, plex_lookup)
-            elif playlist_id in ["daily_discovery", "forgotten_gems", "recent_hits"]:
-                if playlist_id == "daily_discovery":
-                    sp_mod.generate_daily_discovery(self, lib, p, plex_lookup, preferred_genres, similar_tracks)
-                elif playlist_id == "forgotten_gems":
-                    sp_mod.generate_forgotten_gems(self, lib, p, plex_lookup, preferred_genres, similar_tracks)
-                else:  # recent_hits
-                    sp_mod.generate_recent_hits(self, lib, p, plex_lookup, preferred_genres, similar_tracks)
-            else:
-                self._log.warning(
-                    "Unrecognized playlist configuration '{}' - type: '{}', id: '{}'. "
-                    "Valid types are 'imported' or 'smart'. "
-                    "Valid smart playlist IDs are 'daily_discovery', 'forgotten_gems', and 'recent_hits'.",
-                    playlist_name, playlist_type, playlist_id
-                )
+                if (playlist_type == "imported"):
+                    sp_mod.generate_imported_playlist(self, lib, p, plex_lookup)
+                elif playlist_id in ["daily_discovery", "forgotten_gems", "recent_hits"]:
+                    if playlist_id == "daily_discovery":
+                        sp_mod.generate_daily_discovery(self, lib, p, plex_lookup, preferred_genres, similar_tracks)
+                    elif playlist_id == "forgotten_gems":
+                        sp_mod.generate_forgotten_gems(self, lib, p, plex_lookup, preferred_genres, similar_tracks)
+                    else:  # recent_hits
+                        sp_mod.generate_recent_hits(self, lib, p, plex_lookup, preferred_genres, similar_tracks)
+                else:
+                    self._log.warning(
+                        "Unrecognized playlist configuration '{}' - type: '{}', id: '{}'. "
+                        "Valid types are 'imported' or 'smart'. "
+                        "Valid smart playlist IDs are 'daily_discovery', 'forgotten_gems', and 'recent_hits'.",
+                        playlist_name, playlist_type, playlist_id
+                    )
+                if progress is not None:
+                    progress.update()
+        finally:
+            if progress is not None:
+                try:
+                    progress.close()
+                except Exception as exc:  # noqa: BLE001 - best effort cleanup
+                    self._log.debug("Progress counter close failed: {}", exc)
 
     def shutdown(self, lib):
         """Clean up when plugin is disabled."""

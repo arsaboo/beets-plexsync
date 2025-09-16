@@ -66,12 +66,27 @@ def add_songs_to_plex(plugin, playlist, songs, manual_search=None):
     if manual_search is None:
         manual_search = get_plexsync_config("manual_search", bool, False)
 
+    songs_to_process = list(songs or [])
+    progress = plugin.create_progress_counter(
+        len(songs_to_process),
+        f"Matching Plex tracks for {playlist}",
+        unit="song",
+    )
+
     song_list = []
-    if songs:
-        for song in songs:
+    try:
+        for song in songs_to_process:
             found = plugin.search_plex_song(song, manual_search)
             if found is not None:
                 song_list.append(found)
+            if progress is not None:
+                progress.update()
+    finally:
+        if progress is not None:
+            try:
+                progress.close()
+            except Exception:  # noqa: BLE001 - progress is optional feedback
+                plugin._log.debug("Unable to close progress counter for playlist {}", playlist)
 
     if not song_list:
         plugin._log.warning("No songs found to add to playlist {}", playlist)
@@ -83,11 +98,24 @@ def add_songs_to_plex(plugin, playlist, songs, manual_search=None):
 def import_search(plugin, playlist, search, limit=10):
     """Import search results into Plex for the given playlist."""
     plugin._log.info("Searching for {}", search)
-    songs = import_yt_search(search, limit, plugin.cache)
+    songs = list(import_yt_search(search, limit, plugin.cache) or [])
+    progress = plugin.create_progress_counter(
+        len(songs),
+        f"Resolving search results for {playlist}",
+        unit="song",
+    )
     song_list = []
-    if songs:
+    try:
         for song in songs:
             found = plugin.search_plex_song(song)
             if found is not None:
                 song_list.append(found)
+            if progress is not None:
+                progress.update()
+    finally:
+        if progress is not None:
+            try:
+                progress.close()
+            except Exception:  # noqa: BLE001 - best effort feedback
+                plugin._log.debug("Unable to close search progress counter for playlist {}", playlist)
     plugin._plex_add_playlist_item(song_list, playlist)
