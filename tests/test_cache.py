@@ -15,9 +15,9 @@ class CacheTests(unittest.TestCase):
         sys.modules.setdefault('plexapi.audio', types.SimpleNamespace(Track=object))
         sys.modules.setdefault('plexapi.video', types.SimpleNamespace(Video=object))
         sys.modules.setdefault('plexapi.server', types.SimpleNamespace(PlexServer=object))
-        from beetsplug.caching import Cache
+        from beetsplug.core.cache import Cache
 
-        self.tempdir = tempfile.TemporaryDirectory()
+        self.tempdir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.db_path = os.path.join(self.tempdir.name, 'cache.db')
 
         class PluginStub:

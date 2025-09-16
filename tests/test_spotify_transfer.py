@@ -8,11 +8,11 @@ from tests.test_playlist_import import ensure_stubs, DummyLogger
 class SpotifyTransferTest(unittest.TestCase):
     def setUp(self):
         ensure_stubs({'plexsync': {}})
-        if 'beetsplug.spotify_transfer' in importlib.sys.modules:
-            importlib.reload(importlib.sys.modules['beetsplug.spotify_transfer'])
+        if 'beetsplug.plex.spotify_transfer' in importlib.sys.modules:
+            importlib.reload(importlib.sys.modules['beetsplug.plex.spotify_transfer'])
         else:
-            importlib.import_module('beetsplug.spotify_transfer')
-        self.transfer = importlib.import_module('beetsplug.spotify_transfer')
+            importlib.import_module('beetsplug.plex.spotify_transfer')
+        self.transfer = importlib.import_module('beetsplug.plex.spotify_transfer')
 
     def test_transfers_tracks_with_existing_ids(self):
         logger = DummyLogger()
@@ -45,14 +45,6 @@ class SpotifyTransferTest(unittest.TestCase):
             def authenticate_spotify(self):
                 self.called_auth = True
 
-            def build_plex_lookup(self, lib):
-                return {1: types.SimpleNamespace(
-                    spotify_track_id='spotify:track:123',
-                    artist='Artist',
-                    album='Album',
-                    title='Song',
-                )}
-
             def add_tracks_to_spotify_playlist(self, playlist, tracks):
                 self.sent = (playlist, tracks)
 
@@ -60,7 +52,20 @@ class SpotifyTransferTest(unittest.TestCase):
                 return 'alt-track'
 
         plugin = Plugin()
-        lib = types.SimpleNamespace(items=lambda *args, **kwargs: [])
+
+        class LibraryItem:
+            def __init__(self, rating_key, spotify_id, artist, album, title):
+                self.plex_ratingkey = rating_key
+                self.spotify_track_id = spotify_id
+                self.artist = artist
+                self.album = album
+                self.title = title
+
+        lib = types.SimpleNamespace(
+            items=lambda *args, **kwargs: [
+                LibraryItem(1, 'spotify:track:123', 'Artist', 'Album', 'Song')
+            ]
+        )
         self.transfer.plex_to_spotify(plugin, lib, 'Mix')
 
         self.assertTrue(plugin.called_auth)
@@ -81,14 +86,6 @@ class SpotifyTransferTest(unittest.TestCase):
             def authenticate_spotify(self):
                 pass
 
-            def build_plex_lookup(self, lib):
-                return {1: types.SimpleNamespace(
-                    spotify_track_id='orig',
-                    artist='Art',
-                    album='Alb',
-                    title='Song',
-                )}
-
             def _search_spotify_track(self, beets_item):
                 return 'fallback'
 
@@ -96,7 +93,20 @@ class SpotifyTransferTest(unittest.TestCase):
                 self.sent = tracks
 
         plugin = Plugin()
-        lib = types.SimpleNamespace(items=lambda *args, **kwargs: [])
+
+        class LibraryItem:
+            def __init__(self, rating_key, spotify_id, artist, album, title):
+                self.plex_ratingkey = rating_key
+                self.spotify_track_id = spotify_id
+                self.artist = artist
+                self.album = album
+                self.title = title
+
+        lib = types.SimpleNamespace(
+            items=lambda *args, **kwargs: [
+                LibraryItem(1, 'orig', 'Art', 'Alb', 'Song')
+            ]
+        )
         self.transfer.plex_to_spotify(plugin, lib, 'Mix')
 
         self.assertEqual(plugin.sent, ['fallback'])
@@ -104,3 +114,4 @@ class SpotifyTransferTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+

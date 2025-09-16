@@ -2,7 +2,7 @@ import logging
 import re
 import asyncio
 from jiosaavn import JioSaavn
-from beetsplug.helpers import parse_title, clean_album_name
+from beetsplug.utils.helpers import parse_title, clean_album_name
 
 _log = logging.getLogger('beets.plexsync.jiosaavn')
 

@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from beets import ui
 
-from beetsplug.helpers import get_plexsync_config
+from beetsplug.core.config import get_plexsync_config
+from beetsplug.providers.gaana import import_gaana_playlist
+from beetsplug.providers.youtube import import_yt_playlist, import_yt_search
+from beetsplug.providers.tidal import import_tidal_playlist
 
 
 def import_playlist(plugin, playlist, playlist_url=None, listenbrainz=False):
@@ -43,13 +46,13 @@ def import_playlist(plugin, playlist, playlist_url=None, listenbrainz=False):
     elif "jiosaavn" in playlist_url:
         songs = plugin.import_jiosaavn_playlist(playlist_url)
     elif "gaana.com" in playlist_url:
-        songs = plugin.import_gaana_playlist(playlist_url)
+        songs = import_gaana_playlist(playlist_url, plugin.cache)
     elif "spotify" in playlist_url:
         songs = plugin.import_spotify_playlist(plugin.get_playlist_id(playlist_url))
     elif "youtube" in playlist_url:
-        songs = plugin.import_yt_playlist(playlist_url)
+        songs = import_yt_playlist(playlist_url, plugin.cache)
     elif "tidal" in playlist_url:
-        songs = plugin.import_tidal_playlist(playlist_url)
+        songs = import_tidal_playlist(playlist_url, plugin.cache)
     else:
         songs = []
         plugin._log.error("Playlist URL not supported")
@@ -80,7 +83,7 @@ def add_songs_to_plex(plugin, playlist, songs, manual_search=None):
 def import_search(plugin, playlist, search, limit=10):
     """Import search results into Plex for the given playlist."""
     plugin._log.info("Searching for {}", search)
-    songs = plugin.import_yt_search(search, limit)
+    songs = import_yt_search(search, limit, plugin.cache)
     song_list = []
     if songs:
         for song in songs:

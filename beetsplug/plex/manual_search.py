@@ -7,8 +7,8 @@ from typing import Iterable
 from beets import ui
 from beets.ui import input_, print_
 
-from beetsplug.helpers import highlight_matches
-from beetsplug.matching import get_fuzzy_score
+from beetsplug.utils.helpers import highlight_matches
+from beetsplug.core.matching import get_fuzzy_score
 
 
 def _render_actions() -> str:

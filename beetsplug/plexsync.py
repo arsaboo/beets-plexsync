@@ -41,30 +41,27 @@ from pydantic import BaseModel, Field
 from requests.exceptions import ConnectionError, ContentDecodingError
 from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
 
-from beetsplug.caching import Cache
-from beetsplug.llm import search_track_info, Song, SongRecommendations
-from beetsplug.matching import clean_string, plex_track_distance, get_fuzzy_score
-from beetsplug.provider_gaana import import_gaana_playlist
-from beetsplug.provider_tidal import import_tidal_playlist
-from beetsplug.provider_youtube import import_yt_playlist, import_yt_search
-from beetsplug.provider_apple import import_apple_playlist
-from beetsplug.provider_jiosaavn import import_jiosaavn_playlist
-from beetsplug.provider_m3u8 import import_m3u8_playlist
-from beetsplug.provider_post import import_post_playlist
-from beetsplug.helpers import (
+from beetsplug.core.cache import Cache
+from beetsplug.ai.llm import search_track_info, Song, SongRecommendations
+from beetsplug.core.matching import clean_string, plex_track_distance, get_fuzzy_score
+from beetsplug.providers.apple import import_apple_playlist
+from beetsplug.providers.jiosaavn import import_jiosaavn_playlist
+from beetsplug.utils.helpers import (
     parse_title,
     clean_album_name,
+)
+from beetsplug.core.config import (
     get_config_value,
     get_plexsync_config,
 )
-from beetsplug import plex_ops
-from beetsplug import spotify_provider
-from beetsplug import plex_search
-from beetsplug import playlist_import
-from beetsplug import manual_search
-from beetsplug import spotify_transfer
-from beetsplug import collage as collage_mod
-from beetsplug import smartplaylists as sp_mod
+from beetsplug.plex import operations as plex_ops
+from beetsplug.providers import spotify as spotify_provider
+from beetsplug.plex import search as plex_search
+from beetsplug.plex import playlist_import
+from beetsplug.plex import manual_search
+from beetsplug.plex import spotify_transfer
+from beetsplug.plex import collage as collage_mod
+from beetsplug.plex import smartplaylists as sp_mod
 
 
 class PlexSync(BeetsPlugin):
@@ -622,7 +619,7 @@ class PlexSync(BeetsPlugin):
         self._log.info("Updating information for {} tracks", len(tracks))
 
         # Build lookup once for all tracks
-        plex_lookup = self.build_plex_lookup(lib)
+        plex_lookup = sp_mod.build_plex_lookup(self, lib)
 
         with lib.transaction():
             for track in tracks:
@@ -953,22 +950,6 @@ class PlexSync(BeetsPlugin):
             self._log.error("Unable to parse JSON. Error: {}", e)
             return None
 
-    def import_yt_playlist(self, url):
-        """Import YouTube playlist with caching."""
-        return import_yt_playlist(url, self.cache)
-
-    def import_yt_search(self, query, limit):
-        """Import YouTube search results."""
-        return import_yt_search(query, limit, self.cache)
-
-    def import_tidal_playlist(self, url):
-        """Import Tidal playlist with caching."""
-        return import_tidal_playlist(url, self.cache)
-
-    def import_gaana_playlist(self, url):
-        """Import Gaana playlist with caching."""
-        return import_gaana_playlist(url, self.cache)
-
     def _plex2spotify(self, lib, playlist, query_args=None):
         """Transfer Plex playlist to Spotify using plex_lookup with optional query filtering."""
         spotify_transfer.plex_to_spotify(self, lib, playlist, query_args)
@@ -980,12 +961,6 @@ class PlexSync(BeetsPlugin):
         return spotify_provider.add_tracks_to_spotify_playlist(self, playlist_name, track_uris)
 
 
-
-    def get_preferred_attributes(self):
-        return sp_mod.get_preferred_attributes(self)
-
-    def build_plex_lookup(self, lib):
-        return sp_mod.build_plex_lookup(self, lib)
 
     def calculate_rating_score(self, rating):
         """Calculate score based on rating (60% weight)."""
@@ -1031,59 +1006,6 @@ class PlexSync(BeetsPlugin):
             return 40 * 0.2
         else:
             return 20 * 0.2
-
-    def calculate_track_score(self, track, base_time=None, tracks_context=None):
-        from beetsplug import smartplaylists as sp_mod
-        return sp_mod.calculate_track_score(self, track, base_time, tracks_context)
-
-    def select_tracks_weighted(self, tracks, num_tracks):
-        from beetsplug import smartplaylists as sp_mod
-        return sp_mod.select_tracks_weighted(self, tracks, num_tracks)
-
-    def calculate_playlist_proportions(self, max_tracks, discovery_ratio):
-        from beetsplug import smartplaylists as sp_mod
-        return sp_mod.calculate_playlist_proportions(self, max_tracks, discovery_ratio)
-
-    def validate_filter_config(self, filter_config):
-        # Delegated to smartplaylists sidecar
-        return sp_mod.validate_filter_config(self, filter_config)
-
-    def _apply_exclusion_filters(self, tracks, exclude_config):
-        # Delegated to smartplaylists sidecar
-        return sp_mod._apply_exclusion_filters(self, tracks, exclude_config)
-
-    def _apply_inclusion_filters(self, tracks, include_config):
-        # Delegated to smartplaylists sidecar
-        return sp_mod._apply_inclusion_filters(self, tracks, include_config)
-
-    def apply_playlist_filters(self, tracks, filter_config):
-        # Delegated to smartplaylists sidecar
-        return sp_mod.apply_playlist_filters(self, tracks, filter_config)
-
-    def generate_daily_discovery(self, lib, dd_config, plex_lookup, preferred_genres, similar_tracks):
-        return sp_mod.generate_daily_discovery(self, lib, dd_config, plex_lookup, preferred_genres, similar_tracks)
-
-    # get_filtered_library_tracks is no longer needed; logic is in smartplaylists
-
-    def generate_forgotten_gems(self, lib, ug_config, plex_lookup, preferred_genres, similar_tracks):
-        # Delegated to smartplaylists sidecar
-        return sp_mod.generate_forgotten_gems(self, lib, ug_config, plex_lookup, preferred_genres, similar_tracks)
-
-    def generate_recent_hits(self, lib, rh_config, plex_lookup, preferred_genres, similar_tracks):
-        # Delegated to smartplaylists sidecar
-        return sp_mod.generate_recent_hits(self, lib, rh_config, plex_lookup, preferred_genres, similar_tracks)
-
-    def import_m3u8_playlist(self, filepath):
-        """Import M3U8 playlist with caching."""
-        return import_m3u8_playlist(filepath, self.cache)
-
-    def import_post_playlist(self, source_config):
-        """Import playlist from a POST request endpoint with caching."""
-        return import_post_playlist(source_config, self.cache)
-
-    def generate_imported_playlist(self, lib, playlist_config, plex_lookup=None):
-        """Generate a playlist by importing from external sources (delegated)."""
-        return sp_mod.generate_imported_playlist(self, lib, playlist_config, plex_lookup)
 
     def process_import_logs(self, lib, specific_log=None):
         """Process import logs in config directory and attempt manual import.
@@ -1230,14 +1152,14 @@ class PlexSync(BeetsPlugin):
         """Process all playlists at once with a single lookup dictionary."""
         # Build lookup once for all playlists
         self._log.info("Building Plex lookup dictionary...")
-        plex_lookup = self.build_plex_lookup(lib)
+        plex_lookup = sp_mod.build_plex_lookup(self, lib)
         self._log.debug("Found {} tracks in lookup dictionary", len(plex_lookup))
 
         # Get preferred attributes once if needed for smart playlists
         preferred_genres = None
         similar_tracks = None
         if any(p.get("id") in ["daily_discovery", "forgotten_gems"] for p in playlists_config):
-            preferred_genres, similar_tracks = self.get_preferred_attributes()
+            preferred_genres, similar_tracks = sp_mod.get_preferred_attributes(self)
             self._log.debug("Using preferred genres: {}", preferred_genres)
             self._log.debug("Processing {} pre-filtered similar tracks", len(similar_tracks))
 
@@ -1276,3 +1198,4 @@ class PlexSync(BeetsPlugin):
     def track_distance(self, item, info):
         """Metadata plugin interface method - PlexSync doesn't provide track distance."""
         return Distance()
+

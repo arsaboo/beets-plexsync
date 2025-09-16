@@ -7,9 +7,15 @@ and Plex/beets objects. Behavior preserved.
 from datetime import datetime, timedelta
 from typing import Tuple
 import time
+import os
 
 from beets import config
-from beetsplug.helpers import get_config_value, get_plexsync_config
+from beetsplug.core.config import get_config_value, get_plexsync_config
+from beetsplug.providers.gaana import import_gaana_playlist
+from beetsplug.providers.tidal import import_tidal_playlist
+from beetsplug.providers.youtube import import_yt_playlist
+from beetsplug.providers.m3u8 import import_m3u8_playlist
+from beetsplug.providers.http_post import import_post_playlist
 
 
 def build_plex_lookup(ps, lib):
@@ -645,9 +651,9 @@ def generate_imported_playlist(ps, lib, playlist_config, plex_lookup=None):
                     if not os.path.isabs(source):
                         source = os.path.join(ps.config_dir, source)
                     ps._log.info("Importing from M3U8: {}", source)
-                    tracks = ps.import_m3u8_playlist(source)
+                    tracks = import_m3u8_playlist(source, ps.cache)
                 elif 'spotify' in low:
-                    from beetsplug.spotify_provider import get_playlist_id as _get_pl_id
+                    from beetsplug.providers.spotify import get_playlist_id as _get_pl_id
                     ps._log.info("Importing from Spotify URL")
                     tracks = ps.import_spotify_playlist(_get_pl_id(source))
                 elif 'jiosaavn' in low:
@@ -658,13 +664,13 @@ def generate_imported_playlist(ps, lib, playlist_config, plex_lookup=None):
                     tracks = ps.import_apple_playlist(source)
                 elif 'gaana' in low:
                     ps._log.info("Importing from Gaana URL")
-                    tracks = ps.import_gaana_playlist(source)
+                    tracks = import_gaana_playlist(source, ps.cache)
                 elif 'youtube' in low:
                     ps._log.info("Importing from YouTube URL")
-                    tracks = ps.import_yt_playlist(source)
+                    tracks = import_yt_playlist(source, ps.cache)
                 elif 'tidal' in low:
                     ps._log.info("Importing from Tidal URL")
-                    tracks = ps.import_tidal_playlist(source)
+                    tracks = import_tidal_playlist(source, ps.cache)
                 else:
                     ps._log.warning("Unsupported string source: {}", source)
             # Dict source (typed)
@@ -679,26 +685,26 @@ def generate_imported_playlist(ps, lib, playlist_config, plex_lookup=None):
                     tracks = ps.import_jiosaavn_playlist(source.get("url", ""))
                 elif source_type == "Gaana":
                     ps._log.info("Importing from Gaana: {}", source.get("name", ""))
-                    tracks = ps.import_gaana_playlist(source.get("url", ""))
+                    tracks = import_gaana_playlist(source.get("url", ""), ps.cache)
                 elif source_type == "Spotify":
                     ps._log.info("Importing from Spotify: {}", source.get("name", ""))
-                    from beetsplug.spotify_provider import get_playlist_id as _get_pl_id
+                    from beetsplug.providers.spotify import get_playlist_id as _get_pl_id
                     tracks = ps.import_spotify_playlist(_get_pl_id(source.get("url", "")))
                 elif source_type == "YouTube":
                     ps._log.info("Importing from YouTube: {}", source.get("name", ""))
-                    tracks = ps.import_yt_playlist(source.get("url", ""))
+                    tracks = import_yt_playlist(source.get("url", ""), ps.cache)
                 elif source_type == "Tidal":
                     ps._log.info("Importing from Tidal: {}", source.get("name", ""))
-                    tracks = ps.import_tidal_playlist(source.get("url", ""))
+                    tracks = import_tidal_playlist(source.get("url", ""), ps.cache)
                 elif source_type == "M3U8":
                     fp = source.get("filepath", "")
                     if fp and not os.path.isabs(fp):
                         fp = os.path.join(ps.config_dir, fp)
                     ps._log.info("Importing from M3U8: {}", fp)
-                    tracks = ps.import_m3u8_playlist(fp)
+                    tracks = import_m3u8_playlist(fp, ps.cache)
                 elif source_type == "POST":
                     ps._log.info("Importing from POST endpoint")
-                    tracks = ps.import_post_playlist(source)
+                    tracks = import_post_playlist(source, ps.cache)
                 else:
                     ps._log.warning("Unsupported source type: {}", source_type)
             else:

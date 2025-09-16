@@ -45,6 +45,15 @@ class ConfigValueError(Exception):
     pass
 
 
+class CacheStub:
+    def get_playlist_cache(self, *args, **kwargs):
+        return None
+
+    def set_playlist_cache(self, *args, **kwargs):
+        return None
+
+
+
 def ensure_stubs(data):
     config = DummyConfig()
     config.set_data(data)
@@ -103,6 +112,7 @@ class PluginStub:
         self._log = logger
         self.added = None
         self.last_manual = None
+        self.cache = CacheStub()
 
     def search_plex_song(self, song, manual_search=False):
         self.last_manual = manual_search
@@ -123,27 +133,25 @@ class PluginStub:
     def import_jiosaavn_playlist(self, url):
         return []
 
-    def import_gaana_playlist(self, url):
-        return []
-
-    def import_yt_playlist(self, url):
-        return []
-
-    def import_tidal_playlist(self, url):
-        return []
-
-    def import_yt_search(self, query, limit):
-        return []
-
 
 class PlaylistImportTest(unittest.TestCase):
     def setUp(self):
         self.config, self.UserError = ensure_stubs({'plexsync': {'manual_search': False}})
-        if 'beetsplug.playlist_import' in sys.modules:
-            importlib.reload(sys.modules['beetsplug.playlist_import'])
+        if 'beetsplug.plex.playlist_import' in sys.modules:
+            importlib.reload(sys.modules['beetsplug.plex.playlist_import'])
         else:
-            importlib.import_module('beetsplug.playlist_import')
-        self.module = importlib.import_module('beetsplug.playlist_import')
+            importlib.import_module('beetsplug.plex.playlist_import')
+        self.module = importlib.import_module('beetsplug.plex.playlist_import')
+        self.search_calls = []
+
+        def _stub_search(query, limit, cache):
+            self.search_calls.append((query, limit))
+            return [{'title': 'Q'}]
+
+        self.module.import_yt_search = _stub_search
+        self.module.import_yt_playlist = lambda url, cache: []
+        self.module.import_gaana_playlist = lambda url, cache: []
+        self.module.import_tidal_playlist = lambda url, cache: []
 
     def test_add_songs_to_plex_adds_matches(self):
         logger = DummyLogger()
@@ -198,17 +206,12 @@ class PlaylistImportTest(unittest.TestCase):
 
     def test_import_search(self):
         logger = DummyLogger()
+        plugin = PluginStub(logger)
 
-        class SearchPlugin(PluginStub):
-            def import_yt_search(self, query, limit):
-                self.query = (query, limit)
-                return [{'title': 'Q'}]
-
-        plugin = SearchPlugin(logger)
         self.module.import_search(plugin, 'SearchMix', 'query', limit=5)
 
         self.assertEqual(plugin.added, (['match-Q'], 'SearchMix'))
-        self.assertEqual(plugin.query, ('query', 5))
+        self.assertEqual(self.search_calls[-1], ('query', 5))
 
 
 if __name__ == '__main__':

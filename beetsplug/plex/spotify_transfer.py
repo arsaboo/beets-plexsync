@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-"""Utilities for transferring Plex playlists to Spotify."""
+from beetsplug.plex import smartplaylists as sp_mod
 
+"""Utilities for transferring Plex playlists to Spotify."""
 
 def plex_to_spotify(plugin, lib, playlist, query_args=None):
     """Transfer a Plex playlist to Spotify using the plugin context."""
@@ -10,7 +11,7 @@ def plex_to_spotify(plugin, lib, playlist, query_args=None):
     plex_playlist_items = plex_playlist.items()
     plugin._log.debug("Total items in Plex playlist: {}", len(plex_playlist_items))
 
-    plex_lookup = plugin.build_plex_lookup(lib)
+    plex_lookup = sp_mod.build_plex_lookup(plugin, lib)
     spotify_tracks = []
 
     query_rating_keys = None
@@ -63,7 +64,6 @@ def plex_to_spotify(plugin, lib, playlist, query_args=None):
         )
 
     plugin.add_tracks_to_spotify_playlist(playlist, spotify_tracks)
-
 
 def _resolve_spotify_track(plugin, beets_item):
     spotify_track_id = None

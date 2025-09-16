@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from beets import ui
 
-from beetsplug.helpers import get_plexsync_config
-from beetsplug.llm import search_track_info
-from beetsplug.matching import clean_text_for_matching
+from beetsplug.core.config import get_plexsync_config
+from beetsplug.ai.llm import search_track_info
+from beetsplug.core.matching import clean_text_for_matching
 
 
 def search_plex_song(plugin, song, manual_search=None, llm_attempted=False):
