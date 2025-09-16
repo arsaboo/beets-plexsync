@@ -115,12 +115,19 @@ def search_plex_song(plugin, song, manual_search=None, llm_attempted=False):
             except Exception as exc:  # noqa: BLE001 - log but continue
                 plugin._log.debug("Artist+fuzzy search strategy failed: {}", exc)
 
+        if len(tracks) == 0 and song.get("album"):
+            search_strategies_tried.append("album_only")
+            tracks = plugin.music.searchTracks(
+                **{"album.title": song["album"]}, limit=150
+            )
+            plugin._log.debug("Strategy 5 (Album-only): Found {} tracks", len(tracks))
+
         if len(tracks) == 0 and song.get("artist"):
             search_strategies_tried.append("artist_only")
             tracks = plugin.music.searchTracks(
                 **{"artist.title": song["artist"]}, limit=150
             )
-            plugin._log.debug("Strategy 5 (Artist-only): Found {} tracks", len(tracks))
+            plugin._log.debug("Strategy 6 (Artist-only): Found {} tracks", len(tracks))
 
         if len(tracks) == 0 and song.get("title"):
             try:
@@ -130,7 +137,7 @@ def search_plex_song(plugin, song, manual_search=None, llm_attempted=False):
                     **{"track.title": fuzzy_query}, limit=100
                 )
                 plugin._log.debug(
-                    "Strategy 6 (Fuzzy Title): Query '{}' -> {} tracks",
+                    "Strategy 7 (Fuzzy Title): Query '{}' -> {} tracks",
                     fuzzy_query,
                     len(tracks),
                 )
