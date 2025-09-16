@@ -1,12 +1,64 @@
 """Shared Plex search helpers extracted from plexsync."""
 
 from __future__ import annotations
+import re
 
 from beets import ui
 
 from beetsplug.core.config import get_plexsync_config
 from beetsplug.ai.llm import search_track_info
 from beetsplug.core.matching import clean_text_for_matching
+
+
+_ARTIST_JOINER_RE = re.compile(r"\s*(?:,|;|&| and |\+|/)\s*")
+_FEATURE_SPLIT_RE = re.compile(r"\s*(?:feat\.?|ft\.?|featuring|with)\s+", re.IGNORECASE)
+
+def _split_artist_variants(artist: str | None) -> list[str]:
+    """Return candidate artist strings for relaxed matching."""
+    if not artist:
+        return []
+
+    seen: set[str] = set()
+    variants: list[str] = []
+
+    def add_variant(value: str | None) -> None:
+        if not value:
+            return
+        candidate = value.strip()
+        if not candidate:
+            return
+        key = candidate.lower()
+        if key not in seen:
+            variants.append(candidate)
+            seen.add(key)
+
+    normalized = artist.strip()
+    add_variant(normalized)
+
+    main_section = _FEATURE_SPLIT_RE.split(normalized, maxsplit=1)[0].strip() if normalized else ""
+    add_variant(main_section)
+
+    for source in filter(None, [normalized, main_section]):
+        for part in _ARTIST_JOINER_RE.split(source):
+            add_variant(part)
+
+    return variants
+
+
+def _track_matches_artist_variants(track, variants: list[str]) -> bool:
+    """Check if any candidate artist appears in the Plex track artist string."""
+    if not variants:
+        return True
+    try:
+        artist_name = getattr(track, "originalTitle", None) or track.artist().title
+    except Exception:  # noqa: BLE001 - avoid breaking search flow on Plex errors
+        artist_name = ""
+    artist_name = artist_name or ""
+    lower_artist = artist_name.lower()
+    for variant in variants:
+        if variant and variant.lower() in lower_artist:
+            return True
+    return False
 
 
 def search_plex_song(plugin, song, manual_search=None, llm_attempted=False):
@@ -95,23 +147,73 @@ def search_plex_song(plugin, song, manual_search=None, llm_attempted=False):
 
         if len(tracks) == 0 and song.get("artist"):
             search_strategies_tried.append("artist_title")
-            tracks = plugin.music.searchTracks(
-                **{"artist.title": song["artist"], "track.title": song["title"]}, limit=50
-            )
-            plugin._log.debug("Strategy 3 (Artist+Title): Found {} tracks", len(tracks))
+            artist_variants = _split_artist_variants(song["artist"])
+            search_artists = artist_variants or [song["artist"]]
+            unique_tracks = {}
+            for artist_variant in search_artists:
+                if not artist_variant:
+                    continue
+                candidate_tracks = plugin.music.searchTracks(
+                    **{"artist.title": artist_variant, "track.title": song["title"]},
+                    limit=50,
+                )
+                plugin._log.debug(
+                    "Strategy 3 (Artist+Title): Artist '{}' -> {} tracks",
+                    artist_variant,
+                    len(candidate_tracks),
+                )
+                for track in candidate_tracks:
+                    rating_key = getattr(track, "ratingKey", None)
+                    key = rating_key if rating_key is not None else id(track)
+                    if key not in unique_tracks:
+                        unique_tracks[key] = track
+            tracks = list(unique_tracks.values())
 
         if len(tracks) == 0 and song.get("artist") and song.get("title"):
             try:
                 search_strategies_tried.append("artist_fuzzy_title")
                 fuzzy_query = clean_text_for_matching(song["title"])
-                tracks = plugin.music.searchTracks(
-                    **{"artist.title": song["artist"], "track.title": fuzzy_query}, limit=100
-                )
-                plugin._log.debug(
-                    "Strategy 4 (Artist+Fuzzy Title): Query '{}' -> {} tracks",
-                    fuzzy_query,
-                    len(tracks),
-                )
+                artist_variants = _split_artist_variants(song["artist"])
+                search_artists = artist_variants or [song["artist"]]
+                unique_tracks = {}
+                for artist_variant in search_artists:
+                    if not artist_variant:
+                        continue
+                    candidate_tracks = plugin.music.searchTracks(
+                        **{"artist.title": artist_variant, "track.title": fuzzy_query},
+                        limit=100,
+                    )
+                    plugin._log.debug(
+                        "Strategy 4 (Artist+Fuzzy Title): Artist '{}' Query '{}' -> {} tracks",
+                        artist_variant,
+                        fuzzy_query,
+                        len(candidate_tracks),
+                    )
+                    for track in candidate_tracks:
+                        rating_key = getattr(track, "ratingKey", None)
+                        key = rating_key if rating_key is not None else id(track)
+                        if key not in unique_tracks:
+                            unique_tracks[key] = track
+                tracks = list(unique_tracks.values())
+                if not tracks and artist_variants:
+                    loose_candidates = plugin.music.searchTracks(
+                        **{"track.title": fuzzy_query}, limit=100
+                    )
+                    plugin._log.debug(
+                        "Strategy 4 (Artist+Fuzzy Title relaxed): Query '{}' -> {} tracks before filtering",
+                        fuzzy_query,
+                        len(loose_candidates),
+                    )
+                    filtered_tracks = [
+                        track
+                        for track in loose_candidates
+                        if _track_matches_artist_variants(track, artist_variants)
+                    ]
+                    plugin._log.debug(
+                        "Strategy 4 (Artist+Fuzzy Title relaxed): Filtered to {} tracks",
+                        len(filtered_tracks),
+                    )
+                    tracks = filtered_tracks
             except Exception as exc:  # noqa: BLE001 - log but continue
                 plugin._log.debug("Artist+fuzzy search strategy failed: {}", exc)
 
