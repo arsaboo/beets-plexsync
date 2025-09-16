@@ -61,6 +61,31 @@ def _track_matches_artist_variants(track, variants: list[str]) -> bool:
     return False
 
 
+def _log_cache_match_details(plugin, cache_key: str, track) -> None:
+    """Log the Plex track metadata before caching the match."""
+    if track is None:
+        return
+    try:
+        rating_key = getattr(track, "ratingKey", None)
+        title = getattr(track, "title", "") or "<unknown>"
+        album = getattr(track, "parentTitle", "") or "<unknown>"
+        try:
+            artist = getattr(track, "originalTitle", None) or track.artist().title
+        except Exception:  # noqa: BLE001 - tolerate Plex API lookup issues
+            artist = ""
+        artist = artist or "<unknown>"
+        plugin._log.debug(
+            "Caching result for key '{}' -> title='{}', artist='{}', album='{}', rating_key={}",
+            cache_key,
+            title,
+            artist,
+            album,
+            rating_key,
+        )
+    except Exception as exc:  # noqa: BLE001 - logging should never break caching
+        plugin._log.debug("Caching result for key '{}' but failed to collect metadata: {}", cache_key, exc)
+
+
 def search_plex_song(plugin, song, manual_search=None, llm_attempted=False):
     """Fetch a Plex track using multi-strategy search for the given song.
 
@@ -257,6 +282,7 @@ def search_plex_song(plugin, song, manual_search=None, llm_attempted=False):
 
     if len(tracks) == 1:
         result = tracks[0]
+        _log_cache_match_details(plugin, cache_key, result)
         plugin._cache_result(cache_key, result)
         return result
     if len(tracks) > 1:
@@ -271,11 +297,13 @@ def search_plex_song(plugin, song, manual_search=None, llm_attempted=False):
         if manual_search and sorted_tracks:
             result = plugin._handle_manual_search(sorted_tracks, song, original_query=song)
             if result is not None:
+                _log_cache_match_details(plugin, cache_key, result)
                 plugin._cache_result(cache_key, result)
             return result
 
         best_match = sorted_tracks[0]
         if best_match[1] >= 0.7:
+            _log_cache_match_details(plugin, cache_key, best_match[0])
             plugin._cache_result(cache_key, best_match[0])
             return best_match[0]
         plugin._log.debug(
@@ -312,6 +340,7 @@ def search_plex_song(plugin, song, manual_search=None, llm_attempted=False):
                     "LLM-cleaned search succeeded, caching for original query: {}",
                     song,
                 )
+                _log_cache_match_details(plugin, cache_key, result)
                 plugin._cache_result(cache_key, result)
                 return result
             cleaned_metadata_for_negative = cleaned_song
@@ -329,6 +358,7 @@ def search_plex_song(plugin, song, manual_search=None, llm_attempted=False):
             result = plugin.manual_track_search(song)
             if result is not None:
                 plugin._log.debug("Manual search succeeded, caching for original query: {}", song)
+                _log_cache_match_details(plugin, cache_key, result)
                 plugin._cache_result(cache_key, result)
                 return result
 
