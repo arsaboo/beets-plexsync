@@ -1214,27 +1214,41 @@ class PlexSync(BeetsPlugin):
             self._log.debug("Processing {} pre-filtered similar tracks", len(similar_tracks))
 
         # Process each playlist
-        for p in playlists_config:
-            playlist_type = p.get("type", "smart")
-            playlist_id = p.get("id")
-            playlist_name = p.get("name", "Unnamed playlist")
+        progress = self.create_progress_counter(
+            total=len(playlists_config),
+            desc="Playlists",
+            unit="list",
+        )
+        try:
+            for p in playlists_config:
+                playlist_type = p.get("type", "smart")
+                playlist_id = p.get("id")
+                playlist_name = p.get("name", "Unnamed playlist")
 
-            if (playlist_type == "imported"):
-                sp_mod.generate_imported_playlist(self, lib, p, plex_lookup)
-            elif playlist_id in ["daily_discovery", "forgotten_gems", "recent_hits"]:
-                if playlist_id == "daily_discovery":
-                    sp_mod.generate_daily_discovery(self, lib, p, plex_lookup, preferred_genres, similar_tracks)
-                elif playlist_id == "forgotten_gems":
-                    sp_mod.generate_forgotten_gems(self, lib, p, plex_lookup, preferred_genres, similar_tracks)
-                else:  # recent_hits
-                    sp_mod.generate_recent_hits(self, lib, p, plex_lookup, preferred_genres, similar_tracks)
-            else:
-                self._log.warning(
-                    "Unrecognized playlist configuration '{}' - type: '{}', id: '{}'. "
-                    "Valid types are 'imported' or 'smart'. "
-                    "Valid smart playlist IDs are 'daily_discovery', 'forgotten_gems', and 'recent_hits'.",
-                    playlist_name, playlist_type, playlist_id
-                )
+                if (playlist_type == "imported"):
+                    sp_mod.generate_imported_playlist(self, lib, p, plex_lookup)
+                elif playlist_id in ["daily_discovery", "forgotten_gems", "recent_hits"]:
+                    if playlist_id == "daily_discovery":
+                        sp_mod.generate_daily_discovery(self, lib, p, plex_lookup, preferred_genres, similar_tracks)
+                    elif playlist_id == "forgotten_gems":
+                        sp_mod.generate_forgotten_gems(self, lib, p, plex_lookup, preferred_genres, similar_tracks)
+                    else:  # recent_hits
+                        sp_mod.generate_recent_hits(self, lib, p, plex_lookup, preferred_genres, similar_tracks)
+                else:
+                    self._log.warning(
+                        "Unrecognized playlist configuration '{}' - type: '{}', id: '{}'. "
+                        "Valid types are 'imported' or 'smart'. "
+                        "Valid smart playlist IDs are 'daily_discovery', 'forgotten_gems', and 'recent_hits'.",
+                        playlist_name, playlist_type, playlist_id
+                    )
+                if progress is not None:
+                    progress.update()
+        finally:
+            if progress is not None:
+                try:
+                    progress.close()
+                except Exception as exc:  # noqa: BLE001 - best effort cleanup
+                    self._log.debug("Progress counter close failed: {}", exc)
 
     def shutdown(self, lib):
         """Clean up when plugin is disabled."""
