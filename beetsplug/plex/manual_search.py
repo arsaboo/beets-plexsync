@@ -227,11 +227,16 @@ def _store_negative_cache(plugin, song, original_query=None):
 
 
 def _cache_selection(plugin, song, track, original_query=None):
-    current_key = plugin.cache._make_cache_key(song)
-    plugin._cache_result(current_key, track)
-    plugin._log.debug("Cached result for current song query: {}", song)
+    """Cache the manual selection result where appropriate."""
 
-    if original_query is not None and original_query != song:
+    cached_original = False
+    if original_query:
         original_key = plugin.cache._make_cache_key(original_query)
-        plugin._log.debug("Also caching result for original query key: {}", original_query)
+        plugin._log.debug("Caching result for original query key: {}", original_query)
         plugin._cache_result(original_key, track)
+        cached_original = True
+
+    if not cached_original:
+        plugin._log.debug(
+            "Skipping cache write for manual search input: {} (no original query)", song
+        )
