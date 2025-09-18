@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 
 setup(
     name='beets-plexsync',
@@ -10,7 +10,7 @@ setup(
     url='https://github.com/arsaboo/beets-plexsync',
     license='MIT',
     platforms='ALL',
-    packages=['beetsplug'],
+    packages=find_packages(include=['beetsplug', 'beetsplug.*']),
     install_requires=[
         'beets>=2.4.0',
         'plexapi>=4.13.4',

@@ -28,17 +28,19 @@ The plugin is written in Python and leverages several libraries including `plexa
 - Maintain compatibility with beets plugin architecture
 
 ### Development Patterns
-- Follow existing error handling patterns using Python's `logging` module
+- Follow existing error handling patterns using Python's `logging` module and the `beets.plexsync` logger namespace
 - Use Pydantic models for data validation and structured data
 - Implement caching for external API calls to improve performance
 - Follow beets plugin conventions and use beets' library/UI components
 - Use the `agno` framework for LLM-related features
 
 ### Code Organization
-- Place provider-specific logic in dedicated `provider_*.py` modules
-- Keep utility functions in `helpers.py`
-- Use the existing `Cache` class for data persistence needs
-- Maintain separation between core plugin logic (`plexsync.py`) and specialized features (`llm.py`, `matching.py`)
+- Keep the core plugin entry point in `beetsplug/plexsync.py`
+- Shared infrastructure such as caching, matching, and config helpers lives under `beetsplug/core/`
+- Plex-specific operations (playlist import, manual search UI, smart playlists, collage, Spotify transfer, search/operations shims) are in `beetsplug/plex/`
+- Provider integrations are grouped in `beetsplug/providers/` (Apple, Spotify, YouTube, Tidal, JioSaavn, Gaana, M3U8, HTTP POST)
+- LLM tooling resides in `beetsplug/ai/`, while lightweight presentation helpers live in `beetsplug/utils/`
+- Continue using the shared `Cache` class for persistence without altering existing cache keys
 
 ## Key Technologies and Dependencies
 
@@ -57,12 +59,12 @@ The plugin is written in Python and leverages several libraries including `plexa
 - `setup.py`: Python package setup file.
 - `README.md`: Main documentation.
 - `beetsplug/`: Directory containing the plugin modules.
-  - `plexsync.py`: The main plugin file containing the core logic for all features.
-  - `llm.py`: Handles LLM integration and metadata search using Agno agents.
-  - `matching.py`: Custom utilities for matching beets items with Plex tracks.
-  - `caching.py`: Implements a SQLite-based cache for search results and API responses.
-  - `provider_*.py`: Modules for importing playlists from specific sources (Apple Music, Gaana, JioSaavn, M3U8, POST endpoints, Tidal, YouTube).
-  - `helpers.py`: Utility functions.
+  - `plexsync.py`: The main plugin class and beets integrations.
+  - `core/`: Shared infrastructure (`cache.py`, `config.py`, `matching.py`).
+  - `plex/`: Plex-facing helpers (playlist import, manual search UI, smart playlists, collage, Spotify transfer, search/operations).
+  - `providers/`: Source-specific playlist importers (Apple, Spotify, YouTube, Tidal, JioSaavn, Gaana, M3U8, HTTP POST).
+  - `ai/`: LLM tooling (`llm.py`) for metadata search and playlist suggestions.
+  - `utils/`: Lightweight presentation helpers.
 - `collage.png`: Example output of the album collage feature.
 
 ## Configuration
@@ -76,11 +78,12 @@ The plugin is configured via beets' `config.yaml` file. Key sections include:
 ## Key Classes and Concepts
 
 - `PlexSync`: The main plugin class inheriting from `beets.plugins.BeetsPlugin`.
-- `Song`, `SongRecommendations`: Pydantic models for LLM-generated playlist data.
-- `Cache`: A class managing a local SQLite database for caching search results and imported playlist data to improve performance and reduce API calls.
-- `MusicSearchTools`: A class in `llm.py` that uses Agno agents to perform web searches and extract structured metadata using an LLM.
-- Provider modules (`provider_*.py`): Contain functions to import playlist data from specific external sources.
-- `plex_track_distance`: A custom distance function in `matching.py` to accurately match beets `Item` objects to Plex `Track` objects.
+- `Song`, `SongRecommendations`: Pydantic models for LLM-generated playlist data (`beetsplug/ai/llm.py`).
+- `Cache`: SQLite-backed cache utilities in `beetsplug/core/cache.py`; cache keys must remain unchanged.
+- `MusicSearchTools`: Agno-powered search helpers in `beetsplug/ai/llm.py`.
+- Provider modules (`beetsplug/providers/*.py`): Import playlists from external sources (Spotify, Apple, YouTube, Tidal, JioSaavn, Gaana, M3U8, HTTP POST).
+- `plex_track_distance`: Distance helpers in `beetsplug/core/matching.py` used for accurate item matching.
+- Plex-facing helpers in `beetsplug/plex/` (manual search, playlist import, smart playlists, collage, Spotify transfer) provide reusable logic consumed by the main plugin.
 
 ## Development Conventions
 
@@ -89,7 +92,7 @@ The plugin is configured via beets' `config.yaml` file. Key sections include:
 - The plugin extensively uses beets' library and UI components.
 - Logging is done using Python's `logging` module with the `beets` logger namespace.
 - Caching is implemented to minimize redundant API calls and improve performance.
-- LLM features are implemented using the `agno` framework for building agents.
+- LLM features are implemented using the `agno` framework for building agents. Manual search prompts are controlled via `plexsync.manual_search` in config (there is no CLI flag).
 
 ## Building, Running, and Testing
 
@@ -115,4 +118,4 @@ beet plexplaylistimport -m "My Playlist" -u "https://open.spotify.com/playlist/.
 Refer to `README.md` for a full list of commands and configuration options.
 
 **Testing:**
-Testing would typically be done by running the beets CLI commands against a test Plex server and library. There are no dedicated unit or integration test files visible in the project structure.
+Basic unit coverage exists in `tests/test_cache.py`, `tests/test_playlist_import.py`, and `tests/test_spotify_transfer.py`. For end-to-end validation, run the beets CLI commands against a test Plex server/library.

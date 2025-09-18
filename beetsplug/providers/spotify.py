@@ -15,7 +15,7 @@ from bs4 import BeautifulSoup
 from spotipy.oauth2 import SpotifyOAuth
 import spotipy
 
-from beetsplug.helpers import parse_title, clean_album_name
+from beetsplug.utils.helpers import parse_title, clean_album_name
 from beets import config
 
 

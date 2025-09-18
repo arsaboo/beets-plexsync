@@ -8,6 +8,24 @@ beets-plexsync is a Python plugin for [beets](https://github.com/beetbox/beets),
 
 ## Working Effectively
 
+### VS Code and Copilot Chat (MCP) Setup
+
+- This repo ships a preconfigured MCP server for Copilot Chat:
+  - .vscode/mcp.json defines server "context7"
+  - .vscode/settings.json pins allowed models via chat.mcp.serverSampling for this project
+- Use Copilot Chat inside VS Code; the MCP server attaches automatically when the workspace is opened. If it doesn’t:
+  - Ensure both files exist (.vscode/mcp.json and .vscode/settings.json)
+  - Reload window
+- Network note: MCP tools may require external network access. Given this environment’s limitations, treat external tool calls as “best-effort” and prefer local validation steps below.
+
+### Editor, Formatting, and Tests (VS Code defaults)
+
+- Python formatting: ms-python.black-formatter is the default. Do not change provider; "python.formatting.provider" is intentionally set to "none".
+- Tests: VS Code is configured for unittest discovery with:
+  - Start dir: ./beetsplug
+  - Pattern: test_*.py
+- Keep tests compatible with unittest discovery or run the CLI snippets below.
+
 ### Prerequisites and Environment Setup
 
 **CRITICAL**: This environment has significant network limitations that prevent pip installations from PyPI due to timeout issues. Use system packages wherever possible.
@@ -110,11 +128,29 @@ Since this plugin requires external services (Plex server, Spotify, etc.), full 
 
 **Due to network limitations, focus validation on**:
 - Python syntax correctness ✓
-- Import structure validation ✓  
+- Import structure validation ✓
 - Configuration file parsing ✓
 - Code style consistency ✓
 
 ### Additional Validation Commands
+
+MCP configuration validation (<1 second):
+```bash
+cd /home/runner/work/beets-plexsync/beets-plexsync
+python3 - << 'PY'
+import json, os, sys
+for p in ('.vscode/mcp.json', '.vscode/settings.json'):
+    with open(p, 'r') as f:
+        json.load(f)
+print('VS Code MCP config loads successfully')
+PY
+```
+
+VS Code unittest discovery parity (<1 second):
+```bash
+cd /home/runner/work/beets-plexsync/beets-plexsync
+python3 -m unittest discover -s ./beetsplug -p "test_*.py" -v
+```
 
 **Provider module validation** (<1 second):
 ```bash
@@ -154,7 +190,7 @@ echo 'Total LOC:' $(cat beetsplug/*.py | wc -l)
 
 ```
 ├── README.md           # Comprehensive documentation (17KB)
-├── agents.md           # AI agent context documentation  
+├── agents.md           # AI agent context documentation
 ├── setup.py            # Package configuration
 ├── beetsplug/          # Main plugin directory
 │   ├── plexsync.py     # Core plugin (154KB) - main entry point
@@ -192,7 +228,7 @@ echo 'Total LOC:' $(cat beetsplug/*.py | wc -l)
    ```
 
 2. **Plugin command structure** - all commands start with `beet`:
-   - `beet plexsync` - Library sync  
+   - `beet plexsync` - Library sync
    - `beet plex_smartplaylists` - Generate smart playlists
    - `beet plexsonic -p "prompt"` - AI playlist generation
    - `beet plexplaylistimport -m "name" -u "url"` - Import playlists
@@ -238,7 +274,7 @@ echo 'Total LOC:' $(cat beetsplug/*.py | wc -l)
 
 **CRITICAL**: Network connectivity issues prevent:
 1. **PyPI package installation** - pip commands timeout after 2-5 minutes
-2. **External API testing** - Cannot reach Spotify, Plex, or other services  
+2. **External API testing** - Cannot reach Spotify, Plex, or other services
 3. **Full functional validation** - Limited to syntax and import testing
 
 **Working validation approaches**:
@@ -281,10 +317,15 @@ echo 'Total LOC:' $(cat beetsplug/*.py | wc -l)
 # Repository validation
 cd /home/runner/work/beets-plexsync/beets-plexsync && python3 -m py_compile beetsplug/*.py
 
+# MCP config check
+cd /home/runner/work/beets-plexsync/beets-plexsync && python3 - << 'PY'
+import json; json.load(open('.vscode/mcp.json')); json.load(open('.vscode/settings.json')); print('MCP OK')
+PY
+
 # Basic functionality test
 PYTHONPATH=/home/runner/work/beets-plexsync/beets-plexsync python3 -c "from beetsplug.helpers import parse_title; print('OK')"
 
-# Project structure overview  
+# Project structure overview
 ls -la beetsplug/
 
 # Documentation review
