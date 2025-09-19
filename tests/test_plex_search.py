@@ -55,11 +55,11 @@ class PlexSearchTests(unittest.TestCase):
             field_validator=field_validator,
         )
         ensure_stubs({'plexsync': {}, 'llm': {'search': {}}})
-        if 'beetsplug.plex_search' in sys.modules:
-            importlib.reload(sys.modules['beetsplug.plex_search'])
+        if 'beetsplug.plex.search' in sys.modules:
+            importlib.reload(sys.modules['beetsplug.plex.search'])
         else:
-            importlib.import_module('beetsplug.plex_search')
-        self.search = importlib.import_module('beetsplug.plex_search')
+            importlib.import_module('beetsplug.plex.search')
+        self.search = importlib.import_module('beetsplug.plex.search')
 
     def test_returns_cached_track(self):
         track = types.SimpleNamespace(ratingKey=42, title='Cached')
