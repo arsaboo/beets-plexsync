@@ -223,7 +223,6 @@ def select_tracks_weighted(ps, tracks, num_tracks, playlist_type=None):
                 last_played_timestamp = getattr(tr, 'plex_lastviewedat', None)
                 last_played = "Never"
                 if last_played_timestamp:
-                    from datetime import datetime
                     try:
                         last_played = datetime.fromtimestamp(last_played_timestamp).strftime('%Y-%m-%d')
                     except (ValueError, OSError):
