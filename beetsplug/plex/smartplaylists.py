@@ -205,16 +205,35 @@ def select_tracks_weighted(ps, tracks, num_tracks, playlist_type=None):
             "Selected {} tracks (avg score {:.2f})",
             len(selected_tracks), mean_score,
         )
-        sample_count = min(5, len(selected_tracks))
+        sample_count = min(10, len(selected_tracks))
         if sample_count:
             ps._log.debug("Sample selections (up to {}):", sample_count)
             for idx in range(sample_count):
                 tr = selected_tracks[idx]
                 sc = sel_scores[idx]
+                # Calculate age and last played info for debugging
+                release_year = getattr(tr, 'year', None)
+                age = "Unknown"
+                if release_year:
+                    try:
+                        age = int(release_year)
+                    except (ValueError, TypeError):
+                        age = "N/A"
+                
+                last_played_timestamp = getattr(tr, 'plex_lastviewedat', None)
+                last_played = "Never"
+                if last_played_timestamp:
+                    from datetime import datetime
+                    try:
+                        last_played = datetime.fromtimestamp(last_played_timestamp).strftime('%Y-%m-%d')
+                    except (ValueError, OSError):
+                        last_played = "Invalid Date"
+                
                 ps._log.debug(
-                    " • {} - {} (Score: {:.2f}, Rating: {}, Plays: {})",
+                    " • {} - {} (Score: {:.2f}, Rating: {}, Plays: {}, Age: {}, Last Played: {})",
                     getattr(tr, 'album', ''), getattr(tr, 'title', ''), sc,
                     getattr(tr, 'plex_userrating', 0), getattr(tr, 'plex_viewcount', 0),
+                    age, last_played
                 )
     except Exception:
         # Never fail selection due to logging issues
