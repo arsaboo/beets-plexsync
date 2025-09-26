@@ -148,10 +148,10 @@ def calculate_track_score(ps, track, base_time=None, tracks_context=None, playli
     elif playlist_type == "fresh_favorites":
         # Heavily weight rating and recency (newer = better), moderately penalize high play count
         if is_rated:
-            weighted_score = (z_rating * 0.35) + (-z_age * 0.25) + (z_popularity * 0.2) + (-z_play_count * 0.15) + (z_recency * 0.05)
+            weighted_score = (z_rating * 0.35) + (z_age * 0.25) + (z_popularity * 0.2) + (-z_play_count * 0.15) + (z_recency * 0.05)
         else:
             # For unrated, prioritize newness and popularity, avoid overplayed
-            weighted_score = (-z_age * 0.35) + (z_popularity * 0.3) + (-z_play_count * 0.25) + (z_recency * 0.1)
+            weighted_score = (z_age * 0.35) + (z_popularity * 0.3) + (-z_play_count * 0.25) + (z_recency * 0.1)
     elif playlist_type == "daily_discovery":
         # Focus on discovery: emphasize unrated tracks with high popularity relative to user's preferences
         # For rated tracks: maintain good balance of rating and discovery potential
@@ -165,10 +165,10 @@ def calculate_track_score(ps, track, base_time=None, tracks_context=None, playli
         # Focus on recent popular tracks: emphasize popularity, recency, and recent release
         if is_rated:
             # For rated tracks: emphasize popularity and recency of additions/plays
-            weighted_score = (z_rating * 0.25) + (z_recency * 0.3) + (z_popularity * 0.35) + (-z_age * 0.1)  # Negative age = newer = better
+            weighted_score = (z_rating * 0.25) + (z_recency * 0.3) + (z_popularity * 0.35) + (z_age * 0.1)
         else:
             # For unrated tracks: focus on popularity and newness
-            weighted_score = (z_popularity * 0.5) + (-z_age * 0.3) + (z_recency * 0.2)
+            weighted_score = (z_popularity * 0.5) + (z_age * 0.3) + (z_recency * 0.2)
     else:  # Default fallback for other playlists
         if is_rated:
             weighted_score = (z_rating * 0.5) + (z_recency * 0.1) + (z_popularity * 0.1) + (z_age * 0.2)
