@@ -71,7 +71,7 @@ def get_preferred_attributes(ps) -> Tuple[list, list]:
     return sorted_genres, list(similar_tracks)
 
 
-def calculate_track_score(ps, track, base_time=None, tracks_context=None):
+def calculate_track_score(ps, track, base_time=None, tracks_context=None, playlist_type=None):
     import numpy as np
     from scipy import stats
 
@@ -80,6 +80,7 @@ def calculate_track_score(ps, track, base_time=None, tracks_context=None):
 
     rating = float(getattr(track, 'plex_userrating', 0))
     last_played = getattr(track, 'plex_lastviewedat', None)
+    play_count = getattr(track, 'plex_viewcount', 0)
     popularity = float(getattr(track, 'spotify_track_popularity', 0))
     release_year = getattr(track, 'year', None)
 
@@ -104,35 +105,58 @@ def calculate_track_score(ps, track, base_time=None, tracks_context=None):
             (base_time - datetime.fromtimestamp(getattr(t, 'plex_lastviewedat', base_time - timedelta(days=365)))).days
             for t in tracks_context
         ]
+        all_play_counts = [getattr(t, 'plex_viewcount', 0) for t in tracks_context]
         all_popularity = [float(getattr(t, 'spotify_track_popularity', 0)) for t in tracks_context]
         all_ages = [base_time.year - int(getattr(t, 'year', base_time.year)) for t in tracks_context]
 
         rating_mean, rating_std = np.mean(all_ratings), np.std(all_ratings) or 1
         days_mean, days_std = np.mean(all_days), np.std(all_days) or 1
+        play_count_mean, play_count_std = np.mean(all_play_counts), np.std(all_play_counts) or 1
         popularity_mean, popularity_std = np.mean(all_popularity), np.std(all_popularity) or 1
         age_mean, age_std = np.mean(all_ages), np.std(all_ages) or 1
     else:
         rating_mean, rating_std = 5, 2.5
         days_mean, days_std = 365, 180
+        play_count_mean, play_count_std = 10, 15  # Default mean for play count
         popularity_mean, popularity_std = 30, 20
         age_mean, age_std = 30, 10
 
     z_rating = (rating - rating_mean) / rating_std if rating > 0 else -2.0
     z_recency = -(days_since_played - days_mean) / days_std
+    z_play_count = (play_count - play_count_mean) / play_count_std
     z_popularity = (popularity - popularity_mean) / popularity_std
     z_age = -(age - age_mean) / age_std
 
     import numpy as _np
     z_rating = _np.clip(z_rating, -3, 3)
     z_recency = _np.clip(z_recency, -3, 3)
+    z_play_count = _np.clip(z_play_count, -3, 3)
     z_popularity = _np.clip(z_popularity, -3, 3)
     z_age = _np.clip(z_age, -3, 3)
 
     is_rated = rating > 0
-    if is_rated:
-        weighted_score = (z_rating * 0.5) + (z_recency * 0.1) + (z_popularity * 0.1) + (z_age * 0.2)
-    else:
-        weighted_score = (z_recency * 0.2) + (z_popularity * 0.5) + (z_age * 0.3)
+    
+    # Different weightings for different playlist types
+    if playlist_type == "forgotten_gems":
+        # For forgotten gems, penalize high play count, emphasize low play + long time since play
+        if is_rated:
+            # Higher weight on recency (forgotten) and negative weight on play count (frequently played)
+            weighted_score = (z_rating * 0.3) + (z_recency * 0.3) + (-z_play_count * 0.2) + (z_popularity * 0.1) + (z_age * 0.1)
+        else:
+            # For unrated tracks, emphasize recency and low play count even more
+            weighted_score = (z_recency * 0.4) + (-z_play_count * 0.3) + (z_popularity * 0.2) + (z_age * 0.1)
+    elif playlist_type == "fresh_favorites":
+        # Heavily weight rating and recency (newer = better), moderately penalize high play count
+        if is_rated:
+            weighted_score = (z_rating * 0.35) + (-z_age * 0.25) + (z_popularity * 0.2) + (-z_play_count * 0.15) + (z_recency * 0.05)
+        else:
+            # For unrated, prioritize newness and popularity, avoid overplayed
+            weighted_score = (-z_age * 0.35) + (z_popularity * 0.3) + (-z_play_count * 0.25) + (z_recency * 0.1)
+    else:  # Default behavior for daily_discovery, recent_hits, and other playlists
+        if is_rated:
+            weighted_score = (z_rating * 0.5) + (z_recency * 0.1) + (z_popularity * 0.1) + (z_age * 0.2)
+        else:
+            weighted_score = (z_recency * 0.2) + (z_popularity * 0.5) + (z_age * 0.3)
 
     final_score = stats.norm.cdf(weighted_score * 1.5) * 100
     noise = _np.random.normal(0, 0.5)
@@ -143,12 +167,12 @@ def calculate_track_score(ps, track, base_time=None, tracks_context=None):
     return max(0, min(100, final_score))
 
 
-def select_tracks_weighted(ps, tracks, num_tracks):
+def select_tracks_weighted(ps, tracks, num_tracks, playlist_type=None):
     import numpy as np
     if not tracks:
         return []
     base_time = datetime.now()
-    track_scores = [(track, calculate_track_score(ps, track, base_time)) for track in tracks]
+    track_scores = [(track, calculate_track_score(ps, track, base_time, playlist_type=playlist_type)) for track in tracks]
     scores = np.array([score for _, score in track_scores])
     probabilities = np.exp(scores / 10) / sum(np.exp(scores / 10))
     selected_indices = np.random.choice(
@@ -384,12 +408,12 @@ def generate_daily_discovery(ps, lib, dd_config, plex_lookup, preferred_genres, 
             unrated_tracks.append(track)
     ps._log.debug("Split into {} rated and {} unrated tracks", len(rated_tracks), len(unrated_tracks))
     unrated_tracks_count, rated_tracks_count = calculate_playlist_proportions(ps, max_tracks, discovery_ratio)
-    selected_rated = select_tracks_weighted(ps, rated_tracks, rated_tracks_count)
-    selected_unrated = select_tracks_weighted(ps, unrated_tracks, unrated_tracks_count)
+    selected_rated = select_tracks_weighted(ps, rated_tracks, rated_tracks_count, playlist_type="daily_discovery")
+    selected_unrated = select_tracks_weighted(ps, unrated_tracks, unrated_tracks_count, playlist_type="daily_discovery")
     if len(selected_unrated) < unrated_tracks_count:
         additional_count = min(unrated_tracks_count - len(selected_unrated), max_tracks - len(selected_rated) - len(selected_unrated))
         remaining_rated = [t for t in rated_tracks if t not in selected_rated]
-        additional_rated = select_tracks_weighted(ps, remaining_rated, additional_count)
+        additional_rated = select_tracks_weighted(ps, remaining_rated, additional_count, playlist_type="daily_discovery")
         selected_rated.extend(additional_rated)
     selected_tracks = selected_rated + selected_unrated
     if len(selected_tracks) > max_tracks:
@@ -532,12 +556,12 @@ def generate_forgotten_gems(ps, lib, ug_config, plex_lookup, preferred_genres, s
         else:
             unrated_tracks.append(track)
     unrated_tracks_count, rated_tracks_count = calculate_playlist_proportions(ps, max_tracks, discovery_ratio)
-    selected_rated = select_tracks_weighted(ps, rated_tracks, rated_tracks_count)
-    selected_unrated = select_tracks_weighted(ps, unrated_tracks, unrated_tracks_count)
+    selected_rated = select_tracks_weighted(ps, rated_tracks, rated_tracks_count, playlist_type="forgotten_gems")
+    selected_unrated = select_tracks_weighted(ps, unrated_tracks, unrated_tracks_count, playlist_type="forgotten_gems")
     if len(selected_unrated) < unrated_tracks_count:
         additional_count = min(unrated_tracks_count - len(selected_unrated), max_tracks - len(selected_rated) - len(selected_unrated))
         remaining_rated = [t for t in rated_tracks if t not in selected_rated]
-        additional_rated = select_tracks_weighted(ps, remaining_rated, additional_count)
+        additional_rated = select_tracks_weighted(ps, remaining_rated, additional_count, playlist_type="forgotten_gems")
         selected_rated.extend(additional_rated)
     selected_tracks = selected_rated + selected_unrated
     if len(selected_tracks) > max_tracks:
@@ -591,12 +615,12 @@ def generate_recent_hits(ps, lib, rh_config, plex_lookup, preferred_genres, simi
         else:
             unrated_tracks.append(track)
     unrated_tracks_count, rated_tracks_count = calculate_playlist_proportions(ps, max_tracks, discovery_ratio)
-    selected_rated = select_tracks_weighted(ps, rated_tracks, rated_tracks_count)
-    selected_unrated = select_tracks_weighted(ps, unrated_tracks, unrated_tracks_count)
+    selected_rated = select_tracks_weighted(ps, rated_tracks, rated_tracks_count, playlist_type="recent_hits")
+    selected_unrated = select_tracks_weighted(ps, unrated_tracks, unrated_tracks_count, playlist_type="recent_hits")
     if len(selected_unrated) < unrated_tracks_count:
         additional_count = min(unrated_tracks_count - len(selected_unrated), max_tracks - len(selected_rated) - len(selected_unrated))
         remaining_rated = [t for t in rated_tracks if t not in selected_rated]
-        additional_rated = select_tracks_weighted(ps, remaining_rated, additional_count)
+        additional_rated = select_tracks_weighted(ps, remaining_rated, additional_count, playlist_type="recent_hits")
         selected_rated.extend(additional_rated)
     selected_tracks = selected_rated + selected_unrated
     if len(selected_tracks) > max_tracks:
@@ -611,6 +635,68 @@ def generate_recent_hits(ps, lib, rh_config, plex_lookup, preferred_genres, simi
         ps._log.info("Cleared existing Recent Hits playlist")
     except Exception:
         ps._log.debug("No existing Recent Hits playlist found")
+    ps._plex_add_playlist_item(selected_tracks, playlist_name)
+    ps._log.info("Successfully updated {} playlist with {} tracks", playlist_name, len(selected_tracks))
+
+
+def generate_fresh_favorites(ps, lib, ff_config, plex_lookup, preferred_genres, similar_tracks):
+    playlist_name = ff_config.get("name", "Fresh Favorites")
+    ps._log.info("Generating {} playlist", playlist_name)
+    defaults_cfg = get_plexsync_config(["playlists", "defaults"], dict, {})
+    max_tracks = get_config_value(ff_config, defaults_cfg, "max_tracks", 100)
+    discovery_ratio = get_config_value(ff_config, defaults_cfg, "discovery_ratio", 25)
+    exclusion_days = get_config_value(ff_config, defaults_cfg, "exclusion_days", 21)
+    min_rating = get_config_value(ff_config, defaults_cfg, "min_rating", 6)
+    filters = ff_config.get("filters", {})
+    ps._log.debug("Collecting candidate tracks avoiding recent plays...")
+    all_library_tracks = _get_library_tracks(ps, preferred_genres, filters, exclusion_days)
+    # Skip redundant client-side filtering when server-side filters fully covered them
+    if filters:
+        try:
+            adv = build_advanced_filters(filters, exclusion_days)
+        except Exception:
+            adv = None
+        if not adv:
+            all_library_tracks = apply_playlist_filters(ps, all_library_tracks, filters)
+    final_tracks = []
+    for track in all_library_tracks:
+        try:
+            beets_item = plex_lookup.get(track.ratingKey)
+            if beets_item:
+                final_tracks.append(beets_item)
+        except Exception as e:
+            ps._log.debug("Error converting track {}: {}", track.title, e)
+    rated_tracks = []
+    unrated_tracks = []
+    for track in final_tracks:
+        rating = float(getattr(track, 'plex_userrating', 0))
+        # Apply min_rating filter for rated tracks only
+        if rating > 0 and rating >= min_rating:
+            rated_tracks.append(track)
+        elif rating == 0:  # Only include unrated tracks
+            unrated_tracks.append(track)
+    ps._log.debug("Found {} rated and {} unrated tracks", len(rated_tracks), len(unrated_tracks))
+    unrated_tracks_count, rated_tracks_count = calculate_playlist_proportions(ps, max_tracks, discovery_ratio)
+    selected_rated = select_tracks_weighted(ps, rated_tracks, rated_tracks_count, playlist_type="fresh_favorites")
+    selected_unrated = select_tracks_weighted(ps, unrated_tracks, unrated_tracks_count, playlist_type="fresh_favorites")
+    if len(selected_unrated) < unrated_tracks_count:
+        additional_count = min(unrated_tracks_count - len(selected_unrated), max_tracks - len(selected_rated) - len(selected_unrated))
+        remaining_rated = [t for t in rated_tracks if t not in selected_rated]
+        additional_rated = select_tracks_weighted(ps, remaining_rated, additional_count, playlist_type="fresh_favorites")
+        selected_rated.extend(additional_rated)
+    selected_tracks = selected_rated + selected_unrated
+    if len(selected_tracks) > max_tracks:
+        selected_tracks = selected_tracks[:max_tracks]
+    import random
+    random.shuffle(selected_tracks)
+    if not selected_tracks:
+        ps._log.warning("No tracks matched criteria for Fresh Favorites playlist")
+        return
+    try:
+        ps._plex_clear_playlist(playlist_name)
+        ps._log.info("Cleared existing Fresh Favorites playlist")
+    except Exception:
+        ps._log.debug("No existing Fresh Favorites playlist found")
     ps._plex_add_playlist_item(selected_tracks, playlist_name)
     ps._log.info("Successfully updated {} playlist with {} tracks", playlist_name, len(selected_tracks))
 

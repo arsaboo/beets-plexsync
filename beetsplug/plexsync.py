@@ -1227,13 +1227,15 @@ class PlexSync(BeetsPlugin):
 
                 if (playlist_type == "imported"):
                     sp_mod.generate_imported_playlist(self, lib, p, plex_lookup)
-                elif playlist_id in ["daily_discovery", "forgotten_gems", "recent_hits"]:
+                elif playlist_id in ["daily_discovery", "forgotten_gems", "recent_hits", "fresh_favorites"]:
                     if playlist_id == "daily_discovery":
                         sp_mod.generate_daily_discovery(self, lib, p, plex_lookup, preferred_genres, similar_tracks)
                     elif playlist_id == "forgotten_gems":
                         sp_mod.generate_forgotten_gems(self, lib, p, plex_lookup, preferred_genres, similar_tracks)
-                    else:  # recent_hits
+                    elif playlist_id == "recent_hits":
                         sp_mod.generate_recent_hits(self, lib, p, plex_lookup, preferred_genres, similar_tracks)
+                    else:  # fresh_favorites
+                        sp_mod.generate_fresh_favorites(self, lib, p, plex_lookup, preferred_genres, similar_tracks)
                 else:
                     self._log.warning(
                         "Unrecognized playlist configuration '{}' - type: '{}', id: '{}'. "

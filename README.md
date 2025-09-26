@@ -7,7 +7,7 @@ A plugin for [beets][beets] to sync with your Plex server.
 - **AI-Generated Playlists**: Use `beet plexsonic -p "YOUR_PROMPT"` to create a playlist based on YOUR_PROMPT. Modify the playlist name using `-m` flag, change the number of tracks requested with `-n` flag, and clear the playlist before adding new songs with `-c` flag.
 
 ### Smart Playlists
-Use `beet plex_smartplaylists [-o ONLY]` to generate or manage custom playlists in Plex. The plugin currently supports three types of playlists:
+Use `beet plex_smartplaylists [-o ONLY]` to generate or manage custom playlists in Plex. The plugin currently supports four types of playlists:
 
 You can use the `-o` or `--only` option to specify a comma-separated list of playlist IDs to update. This is useful for updating only certain playlists (e.g., just the AI playlists) on a schedule:
 
@@ -55,7 +55,15 @@ The command will only generate the specified playlists, skipping others in your 
       - Percentage of playlist to fill with highly-rated tracks (configurable via `discovery_ratio`, default 20%)
       - Includes tracks played recently by default, but you can exclude recently played tracks by setting `exclusion_days` (default: 0, set to >0 to exclude tracks played in the last N days)
 
-  4. **Imported Playlists**:
+  4. **Fresh Favorites**:
+      - Creates a playlist of high-quality tracks that deserve more plays
+      - Features popular or well-rated songs that haven't gotten their due attention recently
+      - Uses sophisticated scoring that heavily weights rating and recency (newer = better) for rated tracks
+      - For unrated tracks, prioritizes newness and popularity while avoiding overplayed tracks
+      - Default exclusion period is 21 days to prevent immediate replays while allowing reasonable rotation
+      - Defaults: `max_tracks: 100`, `discovery_ratio: 25` (more focus on rated tracks), `min_rating: 6`, `exclusion_days: 21`
+
+  5. **Imported Playlists**:
       - Import playlists from external services (Spotify, Apple Music, YouTube, etc.) and local M3U8 files
       - Configure multiple source URLs and file paths per playlist
       - For M3U8 files, use paths relative to beets config directory or absolute paths
