@@ -21,15 +21,16 @@ The command will only generate the specified playlists, skipping others in your 
       - Uses tracks you've played in the last 15 days as a base to learn about listening habits (configurable via `history_days`)
       - Excludes tracks played in the last 30 days (configurable via `exclusion_days`)
       - Uses an intelligent scoring system that considers:
-          - Track rating (primary factor)
-          - Last played date
-          - Play count
-          - Recently added bonus
+          - Track popularity relative to your library
+          - Rating for rated tracks
+          - Recency of addition to library
+          - Release year (favors newer releases)
       - Introduces controlled randomization to ensure variety
-      - Matches genres with your recent listening history
+      - Matches genres with your recent listening history using both sonic analysis and library-wide genre preferences
       - Uses Plex's [Sonic Analysis](https://support.plex.tv/articles/sonic-analysis-music/) to find sonically similar tracks
+      - Also discovers tracks from your entire library that match your preferred genres
       - Limits the playlist size (configurable via `max_tracks`, default 20)
-      - Controls discovery vs. familiar ratio (configurable via `discovery_ratio`, default 70%)
+      - Controls discovery vs. familiar ratio (configurable via `discovery_ratio`, default 30% - more familiar tracks)
 
   2. **Forgotten Gems**:
       - Creates a playlist of tracks that deserve more attention
@@ -46,13 +47,17 @@ The command will only generate the specified playlists, skipping others in your 
   3. **Recent Hits**:
       - Creates a playlist of recent and popular tracks
       - Focuses on tracks released in the last 2 years (configurable via `years.after` filter)
-      - Prioritizes highly-rated and popular tracks based on a scoring system
+      - Prioritizes highly-rated and popular tracks based on a scoring system that heavily weights:
+          - Track popularity scores
+          - Recent release dates (favors newer tracks)
+          - User ratings for rated tracks
+          - Recency of addition to library
       - Uses weighted randomness for track selection to ensure variety
       - Only includes tracks matching your genre preferences
       - Automatically adjusts selection criteria based on your library's characteristics
       - Limits the playlist size (configurable via `max_tracks`, default 20)
       - Minimum rating for tracks to be included (configurable via `min_rating`, default 4)
-      - Percentage of playlist to fill with highly-rated tracks (configurable via `discovery_ratio`, default 20%)
+      - Percentage of playlist to fill with highly-rated tracks (configurable via `discovery_ratio`, default 20% - mostly popular tracks)
       - Includes tracks played recently by default, but you can exclude recently played tracks by setting `exclusion_days` (default: 0, set to >0 to exclude tracks played in the last N days)
 
   4. **Fresh Favorites**:
