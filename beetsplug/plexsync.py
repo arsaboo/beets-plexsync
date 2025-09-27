@@ -1226,7 +1226,7 @@ class PlexSync(BeetsPlugin):
                 playlist_name = p.get("name", "Unnamed playlist")
 
                 if (playlist_type == "imported"):
-                    sp_mod.generate_imported_playlist(self, lib, p, plex_lookup)
+                    playlist_import.generate_imported_playlist(self, lib, p, plex_lookup)
                 elif playlist_id in ["daily_discovery", "forgotten_gems", "recent_hits", "fresh_favorites"]:
                     if playlist_id == "daily_discovery":
                         sp_mod.generate_daily_discovery(self, lib, p, plex_lookup, preferred_genres, similar_tracks)
