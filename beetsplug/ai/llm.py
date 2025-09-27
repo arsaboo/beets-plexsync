@@ -330,8 +330,10 @@ class MusicSearchTools:
             # Use the agent's structured output capability to get SongBasicInfo directly
             response = self.ollama_agent.run(prompt, response_model=SongBasicInfo, timeout=30)
 
-            # Log the raw response for debugging
-            logger.debug("Raw Ollama response: {}", response)
+            # Log just the content part of the response for debugging
+            content_to_log = getattr(response, 'content', str(response)) if hasattr(response, 'content') else str(response)
+            # Only log first 300 characters to avoid excessive logs
+            logger.debug("Raw Ollama response content: {}", content_to_log[:300] + "..." if len(content_to_log) > 300 else content_to_log)
 
             # Handle structured output response
             if hasattr(response, 'content'):
