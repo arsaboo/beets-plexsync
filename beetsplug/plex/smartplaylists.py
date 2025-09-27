@@ -201,9 +201,50 @@ def select_tracks_weighted(ps, tracks, num_tracks, playlist_type=None):
     try:
         sel_scores = [track_scores[i][1] for i in selected_indices]
         mean_score = float(np.mean(sel_scores)) if sel_scores else 0.0
+        rating_values = []
+        play_values = []
+        age_values = []
+        days_since_played_values = []
+        for tr in selected_tracks:
+            rating_val = getattr(tr, 'plex_userrating', 0)
+            try:
+                rating_values.append(float(rating_val if rating_val is not None else 0))
+            except (TypeError, ValueError):
+                rating_values.append(0.0)
+            play_val = getattr(tr, 'plex_viewcount', 0)
+            try:
+                play_values.append(int(play_val if play_val not in (None, '') else 0))
+            except (TypeError, ValueError):
+                play_values.append(0)
+            release_year = getattr(tr, 'year', None)
+            if release_year not in (None, ''):
+                try:
+                    year_int = int(release_year)
+                    age_values.append(max(base_time.year - year_int, 0))
+                except (TypeError, ValueError):
+                    pass
+            last_played_ts = getattr(tr, 'plex_lastviewedat', None)
+            if last_played_ts:
+                try:
+                    last_played_dt = datetime.fromtimestamp(float(last_played_ts))
+                    delta_days = max((base_time - last_played_dt).days, 0)
+                    days_since_played_values.append(delta_days)
+                except (ValueError, TypeError, OSError, OverflowError):
+                    pass
+        avg_rating = (sum(rating_values) / len(rating_values)) if rating_values else None
+        avg_plays = (sum(play_values) / len(play_values)) if play_values else None
+        avg_age = (sum(age_values) / len(age_values)) if age_values else None
+        avg_days_since_played = (
+            sum(days_since_played_values) / len(days_since_played_values)
+            if days_since_played_values else None
+        )
+        rating_str = f"{avg_rating:.2f}" if avg_rating is not None else 'N/A'
+        plays_str = f"{avg_plays:.2f}" if avg_plays is not None else 'N/A'
+        age_str = f"{avg_age:.1f}" if avg_age is not None else 'N/A'
+        days_str = f"{avg_days_since_played:.1f}" if avg_days_since_played is not None else 'N/A'
         ps._log.debug(
-            "Selected {} tracks (avg score {:.2f})",
-            len(selected_tracks), mean_score,
+            "Selected {} tracks (avg score {:.2f}, avg rating {}, avg plays {}, avg age {}, avg days since played {})",
+            len(selected_tracks), mean_score, rating_str, plays_str, age_str, days_str,
         )
         sample_count = min(10, len(selected_tracks))
         if sample_count:
