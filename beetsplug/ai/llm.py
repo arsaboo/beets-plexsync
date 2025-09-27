@@ -130,7 +130,7 @@ class MusicSearchTools:
         """Initialize the Ollama agent for text extraction."""
         try:
             self.ollama_agent = Agent(
-                model=Ollama(id=self.model_id, host=self.ollama_host),
+                model=Ollama(id=self.model_id, host=self.ollama_host, timeout=30),
                 structured_outputs=True
             )
         except Exception as e:
@@ -188,7 +188,7 @@ class MusicSearchTools:
         if tools:
             try:
                 self.search_agent = Agent(
-                    model=Ollama(id=self.model_id, host=self.ollama_host),
+                    model=Ollama(id=self.model_id, host=self.ollama_host, timeout=30),
                     tools=tools
                 )
             except Exception as e:
@@ -228,7 +228,7 @@ class MusicSearchTools:
         query = f"{song_name} song album, title, and artist. Please respond in English only."
         logger.debug(f"Unified search querying: {query}")
         try:
-            response = self.search_agent.run(query, timeout=20)
+            response = self.search_agent.run(query, timeout=30)  # Increased timeout from 20 to 30 seconds
             content = getattr(response, 'content', str(response))
 
             # Handle JSON string responses from tools like Tavily
@@ -271,7 +271,7 @@ class MusicSearchTools:
             logger.error("Ollama agent not initialized")
             return SongBasicInfo(title=song_name, artist="", album=None)
             
-        prompt = textwrap.dedent(f"""\n
+        prompt = textwrap.dedent(f"""
         <instruction>
         IMPORTANT: Analyze ONLY the search results data below to extract accurate information about a song.
         The query "{song_name}" may contain incorrect or incomplete information - DO NOT rely on the query itself for extracting details.
@@ -326,7 +326,8 @@ class MusicSearchTools:
         logger.debug("First chars of content: {0}...", content_preview)
 
         try:
-            response = self.ollama_agent.run(prompt, response_model=SongBasicInfo)
+            # Add timeout parameter to the agent run call
+            response = self.ollama_agent.run(prompt, response_model=SongBasicInfo, timeout=30)
 
             # Log the raw response for debugging
             logger.debug("Raw Ollama response: {}", response)
