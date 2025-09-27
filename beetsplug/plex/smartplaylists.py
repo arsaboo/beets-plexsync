@@ -135,7 +135,7 @@ def calculate_track_score(ps, track, base_time=None, tracks_context=None, playli
     z_age = _np.clip(z_age, -3, 3)
 
     is_rated = rating > 0
-    
+
     # Different weightings for different playlist types
     if playlist_type == "forgotten_gems":
         # For forgotten gems, penalize high play count, emphasize low play + long time since play
@@ -219,7 +219,7 @@ def select_tracks_weighted(ps, tracks, num_tracks, playlist_type=None):
                         age = int(release_year)
                     except (ValueError, TypeError):
                         age = "N/A"
-                
+
                 last_played_timestamp = getattr(tr, 'plex_lastviewedat', None)
                 last_played = "Never"
                 if last_played_timestamp:
@@ -227,7 +227,7 @@ def select_tracks_weighted(ps, tracks, num_tracks, playlist_type=None):
                         last_played = datetime.fromtimestamp(last_played_timestamp).strftime('%Y-%m-%d')
                     except (ValueError, OSError):
                         last_played = "Invalid Date"
-                
+
                 ps._log.debug(
                     " • {} - {} (Score: {:.2f}, Rating: {}, Plays: {}, Age: {}, Last Played: {})",
                     getattr(tr, 'album', ''), getattr(tr, 'title', ''), sc,
@@ -408,7 +408,7 @@ def generate_daily_discovery(ps, lib, dd_config, plex_lookup, preferred_genres, 
     discovery_ratio = get_config_value(dd_config, defaults_cfg, "discovery_ratio", 30)
     exclusion_days = get_config_value(dd_config, defaults_cfg, "exclusion_days", 30)
     filters = dd_config.get("filters", {})
-    
+
     # Get tracks from sonic analysis (similar tracks to recently played)
     matched_sonic_tracks = []
     for plex_track in similar_tracks:
@@ -419,11 +419,11 @@ def generate_daily_discovery(ps, lib, dd_config, plex_lookup, preferred_genres, 
         except Exception as e:
             ps._log.debug("Error processing sonic track {}: {}", plex_track.title, e)
             continue
-    
+
     # Also include tracks from the entire library that match user's genre preferences
     ps._log.debug("Collecting additional tracks from library for discovery...")
     all_library_tracks = _get_library_tracks(ps, preferred_genres, filters, exclusion_days)
-    
+
     # Filter library tracks
     if filters:
         try:
@@ -432,7 +432,7 @@ def generate_daily_discovery(ps, lib, dd_config, plex_lookup, preferred_genres, 
             adv = None
         if not adv:
             all_library_tracks = apply_playlist_filters(ps, all_library_tracks, filters)
-    
+
     # Convert library tracks to beets items
     library_final_tracks = []
     for track in all_library_tracks:
@@ -442,12 +442,12 @@ def generate_daily_discovery(ps, lib, dd_config, plex_lookup, preferred_genres, 
                 library_final_tracks.append(beets_item)
         except Exception as e:
             ps._log.debug("Error converting library track {}: {}", track.title, e)
-    
+
     # Combine both sources of potential discovery tracks
     all_potential_tracks = matched_sonic_tracks + library_final_tracks
-    ps._log.debug("Found {} sonic analysis tracks and {} library tracks for discovery", 
+    ps._log.debug("Found {} sonic analysis tracks and {} library tracks for discovery",
                   len(matched_sonic_tracks), len(library_final_tracks))
-    
+
     # Final track selection after removing duplicates
     unique_tracks = []
     seen_keys = set()
@@ -455,9 +455,9 @@ def generate_daily_discovery(ps, lib, dd_config, plex_lookup, preferred_genres, 
         key = getattr(track, 'ratingKey', None)
         if key and key not in seen_keys:
             seen_keys.add(key)
-            unique_tracks.append(track if hasattr(track, 'plex_userrating') else 
+            unique_tracks.append(track if hasattr(track, 'plex_userrating') else
                                 plex_lookup.get(key) if key and key in plex_lookup else track)
-    
+
     # Separate rated and unrated tracks
     rated_tracks = []
     unrated_tracks = []
@@ -468,27 +468,27 @@ def generate_daily_discovery(ps, lib, dd_config, plex_lookup, preferred_genres, 
                 rated_tracks.append(track)
             else:
                 unrated_tracks.append(track)
-    
+
     ps._log.debug("Split into {} rated and {} unrated tracks", len(rated_tracks), len(unrated_tracks))
-    
+
     # Calculate track proportions based on discovery_ratio
     unrated_tracks_count, rated_tracks_count = calculate_playlist_proportions(ps, max_tracks, discovery_ratio)
-    
+
     # Select tracks using weighted scoring
     selected_rated = select_tracks_weighted(ps, rated_tracks, rated_tracks_count, playlist_type="daily_discovery")
     selected_unrated = select_tracks_weighted(ps, unrated_tracks, unrated_tracks_count, playlist_type="daily_discovery")
-    
+
     # Fill remaining slots if needed
     if len(selected_unrated) < unrated_tracks_count:
         additional_count = min(unrated_tracks_count - len(selected_unrated), max_tracks - len(selected_rated) - len(selected_unrated))
         remaining_rated = [t for t in rated_tracks if t not in selected_rated]
         additional_rated = select_tracks_weighted(ps, remaining_rated, additional_count, playlist_type="daily_discovery")
         selected_rated.extend(additional_rated)
-    
+
     selected_tracks = selected_rated + selected_unrated
     if len(selected_tracks) > max_tracks:
         selected_tracks = selected_tracks[:max_tracks]
-    
+
     import random
     random.shuffle(selected_tracks)
     ps._log.info("Selected {} rated tracks and {} unrated tracks", len(selected_rated), len(selected_unrated))
@@ -592,14 +592,14 @@ def _get_library_tracks(ps, preferred_genres, filters, exclusion_days):
     return tracks
 
 
-def generate_forgotten_gems(ps, lib, ug_config, plex_lookup, preferred_genres, similar_tracks):
-    playlist_name = ug_config.get("name", "Forgotten Gems")
+def generate_forgotten_gems(ps, lib, fg_config, plex_lookup, preferred_genres, similar_tracks):
+    playlist_name = fg_config.get("name", "Forgotten Gems")
     ps._log.info("Generating {} playlist", playlist_name)
     defaults_cfg = get_plexsync_config(["playlists", "defaults"], dict, {})
-    max_tracks = get_config_value(ug_config, defaults_cfg, "max_tracks", 20)
-    discovery_ratio = get_config_value(ug_config, defaults_cfg, "discovery_ratio", 30)
-    exclusion_days = get_config_value(ug_config, defaults_cfg, "exclusion_days", 30)
-    filters = ug_config.get("filters", {})
+    max_tracks = get_config_value(fg_config, defaults_cfg, "max_tracks", 20)
+    discovery_ratio = get_config_value(fg_config, defaults_cfg, "discovery_ratio", 30)
+    exclusion_days = get_config_value(fg_config, defaults_cfg, "exclusion_days", 30)
+    filters = fg_config.get("filters", {})
     ps._log.debug("Collecting candidate tracks avoiding recent plays...")
     all_library_tracks = _get_library_tracks(ps, preferred_genres, filters, exclusion_days)
     # Skip redundant client-side filtering when server-side filters fully covered them
@@ -677,7 +677,7 @@ def generate_recent_hits(ps, lib, rh_config, plex_lookup, preferred_genres, simi
                 final_tracks.append(beets_item)
         except Exception as e:
             ps._log.debug("Error converting track {}: {}", track.title, e)
-    
+
     # Separate rated and unrated tracks
     rated_tracks = []
     unrated_tracks = []
@@ -687,28 +687,28 @@ def generate_recent_hits(ps, lib, rh_config, plex_lookup, preferred_genres, simi
             rated_tracks.append(track)
         else:
             unrated_tracks.append(track)
-    
+
     ps._log.debug("Split into {} rated and {} unrated tracks", len(rated_tracks), len(unrated_tracks))
-    
+
     # Calculate track proportions based on discovery_ratio
     # For Recent Hits, we typically want more highly-rated popular tracks
     unrated_tracks_count, rated_tracks_count = calculate_playlist_proportions(ps, max_tracks, discovery_ratio)
-    
+
     # Select tracks using weighted scoring optimized for recent hits
     selected_rated = select_tracks_weighted(ps, rated_tracks, rated_tracks_count, playlist_type="recent_hits")
     selected_unrated = select_tracks_weighted(ps, unrated_tracks, unrated_tracks_count, playlist_type="recent_hits")
-    
+
     # Fill remaining slots if needed
     if len(selected_unrated) < unrated_tracks_count:
         additional_count = min(unrated_tracks_count - len(selected_unrated), max_tracks - len(selected_rated) - len(selected_unrated))
         remaining_rated = [t for t in rated_tracks if t not in selected_rated]
         additional_rated = select_tracks_weighted(ps, remaining_rated, additional_count, playlist_type="recent_hits")
         selected_rated.extend(additional_rated)
-    
+
     selected_tracks = selected_rated + selected_unrated
     if len(selected_tracks) > max_tracks:
         selected_tracks = selected_tracks[:max_tracks]
-    
+
     import random
     random.shuffle(selected_tracks)
     if not selected_tracks:
