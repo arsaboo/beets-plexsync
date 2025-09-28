@@ -45,28 +45,20 @@ The command will only generate the specified playlists, skipping others in your 
       - Excludes tracks played recently (configurable via `exclusion_days`)
 
   3. **Recent Hits**:
-      - Creates a playlist of recent and popular tracks
-      - Focuses on tracks released in the last 2 years (configurable via `years.after` filter)
-      - Prioritizes highly-rated and popular tracks based on a scoring system that heavily weights:
-          - Track popularity scores
-          - Recent release dates (favors newer tracks)
-          - User ratings for rated tracks
-          - Recency of addition to library
-      - Uses weighted randomness for track selection to ensure variety
-      - Only includes tracks matching your genre preferences
-      - Automatically adjusts selection criteria based on your library's characteristics
-      - Limits the playlist size (configurable via `max_tracks`, default 20)
-      - Minimum rating for tracks to be included (configurable via `min_rating`, default 4)
-      - Percentage of playlist to fill with highly-rated tracks (configurable via `discovery_ratio`, default 20% - mostly popular tracks)
-      - Includes tracks played recently by default, but you can exclude recently played tracks by setting `exclusion_days` (default: 0, set to >0 to exclude tracks played in the last N days)
+      - Curates a playlist of recent, high-energy tracks
+      - Applies a default release-year guard covering roughly the last 3 years whenever no year filter is provided; override with `filters.include.years` or the playlist-level `max_age_years`/`min_year` options
+      - Updated scoring leans harder on release recency and last-play data, with popularity and ratings acting as the tie-breakers
+      - Uses weighted randomness for track selection while respecting your genre preferences
+      - Automatically adjusts selection criteria and limits size (configurable via `max_tracks`, default 20)
+      - Requires a minimum rating (`min_rating`, default 4) and lets you control the discovery ratio (default 20%)
+      - Set `exclusion_days` if you want to keep very recent listens out (default 30 days)
 
   4. **Fresh Favorites**:
       - Creates a playlist of high-quality tracks that deserve more plays
-      - Features popular or well-rated songs that haven't gotten their due attention recently
-      - Uses sophisticated scoring that heavily weights rating and recency (newer = better) for rated tracks
-      - For unrated tracks, prioritizes newness and popularity while avoiding overplayed tracks
-      - Default exclusion period is 21 days to prevent immediate replays while allowing reasonable rotation
-      - Defaults: `max_tracks: 100`, `discovery_ratio: 25` (more focus on rated tracks), `min_rating: 6`, `exclusion_days: 21`
+      - Enforces a default release window spanning roughly the last 7 years unless you supply custom year filters or specify `max_age_years`/`min_year`
+      - Updated scoring strongly favors release recency and recent spins while still rewarding strong ratings and popularity
+      - Skips tracks without a trusted release year when the recency guard is active to keep the mix on-theme
+      - Defaults: `max_tracks: 100`, `discovery_ratio: 25`, `min_rating: 6`, `exclusion_days: 21`
 
   5. **Imported Playlists**:
       - Import playlists from external services (Spotify, Apple Music, YouTube, etc.) and local M3U8 files

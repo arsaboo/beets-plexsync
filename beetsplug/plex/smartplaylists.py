@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from typing import Tuple
 import time
 import os
+import copy
 
 from beets import config
 from beetsplug.core.config import get_config_value, get_plexsync_config
@@ -25,6 +26,121 @@ def build_plex_lookup(ps, lib):
         if hasattr(item, "plex_ratingkey"):
             plex_lookup[item.plex_ratingkey] = item
     return plex_lookup
+
+def _resolve_min_year(ps, playlist_config, default_max_age_years, playlist_label):
+    now_year = datetime.now().year
+    min_year = None
+
+    explicit_year = playlist_config.get("min_year") or playlist_config.get("min_release_year")
+    if explicit_year is not None:
+        try:
+            min_year = int(explicit_year)
+        except (TypeError, ValueError):
+            ps._log.debug("Ignoring invalid min_year '{}' for {} playlist", explicit_year, playlist_label)
+
+    if min_year is None:
+        max_age_config = playlist_config.get("max_age_years")
+        if max_age_config is not None:
+            try:
+                max_age_years = int(max_age_config)
+                if max_age_years >= 0:
+                    min_year = now_year - max_age_years
+            except (TypeError, ValueError):
+                ps._log.debug(
+                    "Ignoring invalid max_age_years '{}' for {} playlist",
+                    max_age_config,
+                    playlist_label,
+                )
+
+    if min_year is None:
+        min_year = now_year - default_max_age_years
+
+    min_year = max(min_year, now_year - 100)
+    return min_year
+
+
+def _ensure_min_year_filter(filter_config, min_year):
+    if min_year is None:
+        return filter_config, False
+
+    filters = copy.deepcopy(filter_config) if filter_config else {}
+
+    include = filters.get("include") if isinstance(filters.get("include"), dict) else {}
+    years = include.get("years") if isinstance(include.get("years"), dict) else {}
+
+    has_year_constraint = False
+    if years:
+        has_year_constraint = any(key in years for key in ("after", "before", "between"))
+
+    exclude = filters.get("exclude") if isinstance(filters.get("exclude"), dict) else {}
+    exc_years = exclude.get("years") if isinstance(exclude.get("years"), dict) else {}
+    if exc_years:
+        has_year_constraint = True
+
+    if has_year_constraint:
+        if include:
+            filters["include"] = include
+        return filters, False
+
+    years = dict(years) if years else {}
+    years["after"] = min_year
+    include = dict(include) if include else {}
+    include["years"] = years
+    filters["include"] = include
+    return filters, True
+
+
+def _apply_recency_guard(ps, playlist_config, filters, playlist_label, default_max_age_years):
+    min_year = _resolve_min_year(ps, playlist_config, default_max_age_years, playlist_label)
+    adjusted_filters, injected = _ensure_min_year_filter(filters, min_year)
+    if injected:
+        ps._log.debug(
+            "Applying default min release year {} to {} playlist filters",
+            min_year,
+            playlist_label,
+        )
+    return min_year, adjusted_filters
+
+
+def _filter_tracks_by_min_year(ps, tracks, min_year, playlist_label):
+    if min_year is None or not tracks:
+        return tracks
+
+    filtered = []
+    dropped = 0
+    for track in tracks:
+        year = getattr(track, "year", None)
+        try:
+            if year is None:
+                raise ValueError
+            year_int = int(year)
+        except (TypeError, ValueError):
+            dropped += 1
+            continue
+
+        if year_int >= min_year:
+            filtered.append(track)
+        else:
+            dropped += 1
+
+    if dropped and filtered:
+        ps._log.debug(
+            "Removed {} tracks older than {} for {} playlist",
+            dropped,
+            min_year,
+            playlist_label,
+        )
+        return filtered
+
+    if dropped and not filtered:
+        ps._log.debug(
+            "Min year {} removed all tracks for {} playlist; retaining original pool",
+            min_year,
+            playlist_label,
+        )
+
+    return tracks
+
 
 
 def get_preferred_attributes(ps) -> Tuple[list, list]:
@@ -146,12 +262,23 @@ def calculate_track_score(ps, track, base_time=None, tracks_context=None, playli
             # For unrated tracks, emphasize recency and low play count even more
             weighted_score = (z_recency * 0.4) + (-z_play_count * 0.3) + (z_popularity * 0.2) + (z_age * 0.1)
     elif playlist_type == "fresh_favorites":
-        # Heavily weight rating and recency (newer = better), moderately penalize high play count
+        # Strongly favor newer, recently played favourites while keeping quality high
         if is_rated:
-            weighted_score = (z_rating * 0.35) + (z_age * 0.25) + (z_popularity * 0.2) + (-z_play_count * 0.15) + (z_recency * 0.05)
+            weighted_score = (
+                (z_age * 0.4)
+                + (z_recency * 0.25)
+                + (z_rating * 0.2)
+                + (z_popularity * 0.1)
+                + (-z_play_count * 0.05)
+            )
         else:
-            # For unrated, prioritize newness and popularity, avoid overplayed
-            weighted_score = (z_age * 0.35) + (z_popularity * 0.3) + (-z_play_count * 0.25) + (z_recency * 0.1)
+            # For unrated, heavily prioritize newness and recent activity
+            weighted_score = (
+                (z_age * 0.45)
+                + (z_recency * 0.25)
+                + (z_popularity * 0.2)
+                + (-z_play_count * 0.1)
+            )
     elif playlist_type == "daily_discovery":
         # Focus on discovery: emphasize unrated tracks with high popularity relative to user's preferences
         # For rated tracks: maintain good balance of rating and discovery potential
@@ -162,13 +289,20 @@ def calculate_track_score(ps, track, base_time=None, tracks_context=None, playli
             # For unrated tracks: emphasize popularity and recency to surface new discoveries
             weighted_score = (z_popularity * 0.4) + (z_recency * 0.3) + (z_age * 0.3)
     elif playlist_type == "recent_hits":
-        # Focus on recent popular tracks: emphasize popularity, recency, and recent release
+        # Focus on recent popular tracks: emphasize recency of release and playback
         if is_rated:
-            # For rated tracks: emphasize popularity and recency of additions/plays
-            weighted_score = (z_rating * 0.25) + (z_recency * 0.3) + (z_popularity * 0.35) + (z_age * 0.1)
+            weighted_score = (
+                (z_age * 0.35)
+                + (z_recency * 0.3)
+                + (z_popularity * 0.25)
+                + (z_rating * 0.1)
+            )
         else:
-            # For unrated tracks: focus on popularity and newness
-            weighted_score = (z_popularity * 0.5) + (z_age * 0.3) + (z_recency * 0.2)
+            weighted_score = (
+                (z_age * 0.4)
+                + (z_recency * 0.35)
+                + (z_popularity * 0.25)
+            )
     else:  # Default fallback for other playlists
         if is_rated:
             weighted_score = (z_rating * 0.5) + (z_recency * 0.1) + (z_popularity * 0.1) + (z_age * 0.2)
@@ -659,6 +793,7 @@ def generate_forgotten_gems(ps, lib, fg_config, plex_lookup, preferred_genres, s
                 final_tracks.append(beets_item)
         except Exception as e:
             ps._log.debug("Error converting track {}: {}", track.title, e)
+
     rated_tracks = []
     unrated_tracks = []
     for track in final_tracks:
@@ -700,6 +835,7 @@ def generate_recent_hits(ps, lib, rh_config, plex_lookup, preferred_genres, simi
     discovery_ratio = get_config_value(rh_config, defaults_cfg, "discovery_ratio", 20)
     exclusion_days = get_config_value(rh_config, defaults_cfg, "exclusion_days", 30)
     filters = rh_config.get("filters", {})
+    min_year, filters = _apply_recency_guard(ps, rh_config, filters, playlist_name, default_max_age_years=3)
     ps._log.debug("Collecting recent tracks...")
     all_library_tracks = _get_library_tracks(ps, preferred_genres, filters, exclusion_days)
     # Skip redundant client-side filtering when server-side filters fully covered them
@@ -718,6 +854,8 @@ def generate_recent_hits(ps, lib, rh_config, plex_lookup, preferred_genres, simi
                 final_tracks.append(beets_item)
         except Exception as e:
             ps._log.debug("Error converting track {}: {}", track.title, e)
+
+    final_tracks = _filter_tracks_by_min_year(ps, final_tracks, min_year, playlist_name)
 
     # Separate rated and unrated tracks
     rated_tracks = []
@@ -773,6 +911,7 @@ def generate_fresh_favorites(ps, lib, ff_config, plex_lookup, preferred_genres, 
     exclusion_days = get_config_value(ff_config, defaults_cfg, "exclusion_days", 30)
     min_rating = get_config_value(ff_config, defaults_cfg, "min_rating", 6)
     filters = ff_config.get("filters", {})
+    min_year, filters = _apply_recency_guard(ps, ff_config, filters, playlist_name, default_max_age_years=7)
     ps._log.debug("Collecting candidate tracks avoiding recent plays...")
     all_library_tracks = _get_library_tracks(ps, preferred_genres, filters, exclusion_days)
     # Skip redundant client-side filtering when server-side filters fully covered them
@@ -791,6 +930,9 @@ def generate_fresh_favorites(ps, lib, ff_config, plex_lookup, preferred_genres, 
                 final_tracks.append(beets_item)
         except Exception as e:
             ps._log.debug("Error converting track {}: {}", track.title, e)
+
+    final_tracks = _filter_tracks_by_min_year(ps, final_tracks, min_year, playlist_name)
+
     rated_tracks = []
     unrated_tracks = []
     for track in final_tracks:
