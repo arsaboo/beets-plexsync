@@ -200,6 +200,20 @@ def calculate_track_score(ps, track, base_time=None, tracks_context=None, playli
     popularity = float(getattr(track, 'spotify_track_popularity', 0))
     release_year = getattr(track, 'year', None)
 
+    # Xtractor audio features
+    danceability = float(getattr(track, 'danceability', 0))  # From beets-xtractor
+    average_loudness = float(getattr(track, 'average_loudness', -60))  # From beets-xtractor (typical range -70 to 0)
+    bpm = float(getattr(track, 'bpm', 120))  # From beets-xtractor
+    
+    # Mood attributes from xtractor (0-1 scale)
+    mood_acoustic = float(getattr(track, 'mood_acoustic', 0))  # From beets-xtractor
+    mood_aggressive = float(getattr(track, 'mood_aggressive', 0))
+    mood_electronic = float(getattr(track, 'mood_electronic', 0))
+    mood_happy = float(getattr(track, 'mood_happy', 0))
+    mood_sad = float(getattr(track, 'mood_sad', 0))
+    mood_party = float(getattr(track, 'mood_party', 0))
+    mood_relaxed = float(getattr(track, 'mood_relaxed', 0))
+
     if release_year:
         try:
             release_year = int(release_year)
@@ -215,6 +229,7 @@ def calculate_track_score(ps, track, base_time=None, tracks_context=None, playli
         days = (base_time - datetime.fromtimestamp(last_played)).days
         days_since_played = min(days, 1095)
 
+    # Calculate context-based statistics for normalization across all features
     if tracks_context:
         all_ratings = [float(getattr(t, 'plex_userrating', 0)) for t in tracks_context]
         all_days = [
@@ -224,31 +239,83 @@ def calculate_track_score(ps, track, base_time=None, tracks_context=None, playli
         all_play_counts = [getattr(t, 'plex_viewcount', 0) for t in tracks_context]
         all_popularity = [float(getattr(t, 'spotify_track_popularity', 0)) for t in tracks_context]
         all_ages = [base_time.year - int(getattr(t, 'year', base_time.year)) for t in tracks_context]
+        
+        # Xtractor audio features statistics
+        all_danceability = [float(getattr(t, 'danceability', 0)) for t in tracks_context]
+        all_loudness = [float(getattr(t, 'average_loudness', -60)) for t in tracks_context]
+        all_bpm = [float(getattr(t, 'bpm', 120)) for t in tracks_context]
+        all_mood_acoustic = [float(getattr(t, 'mood_acoustic', 0)) for t in tracks_context]
+        all_mood_happy = [float(getattr(t, 'mood_happy', 0)) for t in tracks_context]
+        all_mood_party = [float(getattr(t, 'mood_party', 0)) for t in tracks_context]
+        all_mood_relaxed = [float(getattr(t, 'mood_relaxed', 0)) for t in tracks_context]
+        all_mood_sad = [float(getattr(t, 'mood_sad', 0)) for t in tracks_context]
 
         rating_mean, rating_std = np.mean(all_ratings), np.std(all_ratings) or 1
         days_mean, days_std = np.mean(all_days), np.std(all_days) or 1
         play_count_mean, play_count_std = np.mean(all_play_counts), np.std(all_play_counts) or 1
         popularity_mean, popularity_std = np.mean(all_popularity), np.std(all_popularity) or 1
         age_mean, age_std = np.mean(all_ages), np.std(all_ages) or 1
+        
+        # Audio feature statistics for normalization
+        danceability_mean, danceability_std = np.mean(all_danceability), np.std(all_danceability) or 1
+        loudness_mean, loudness_std = np.mean(all_loudness), np.std(all_loudness) or 1
+        bpm_mean, bpm_std = np.mean(all_bpm), np.std(all_bpm) or 1
+        mood_acoustic_mean, mood_acoustic_std = np.mean(all_mood_acoustic), np.std(all_mood_acoustic) or 1
+        mood_happy_mean, mood_happy_std = np.mean(all_mood_happy), np.std(all_mood_happy) or 1
+        mood_party_mean, mood_party_std = np.mean(all_mood_party), np.std(all_mood_party) or 1
+        mood_relaxed_mean, mood_relaxed_std = np.mean(all_mood_relaxed), np.std(all_mood_relaxed) or 1
+        mood_sad_mean, mood_sad_std = np.mean(all_mood_sad), np.std(all_mood_sad) or 1
     else:
         rating_mean, rating_std = 5, 2.5
         days_mean, days_std = 365, 180
         play_count_mean, play_count_std = 10, 15  # Default mean for play count
         popularity_mean, popularity_std = 30, 20
         age_mean, age_std = 30, 10
+        
+        # Default audio feature values
+        danceability_mean, danceability_std = 0.5, 0.2
+        loudness_mean, loudness_std = -15.0, 10.0  # Around average loudness value
+        bpm_mean, bpm_std = 120, 30
+        mood_acoustic_mean, mood_acoustic_std = 0.2, 0.2
+        mood_happy_mean, mood_happy_std = 0.2, 0.2
+        mood_party_mean, mood_party_std = 0.1, 0.1
+        mood_relaxed_mean, mood_relaxed_std = 0.2, 0.2
+        mood_sad_mean, mood_sad_std = 0.2, 0.2
 
+    # Calculate z-scores for all features (for scale-independent comparison)
     z_rating = (rating - rating_mean) / rating_std if rating > 0 else -2.0
     z_recency = -(days_since_played - days_mean) / days_std
     z_play_count = (play_count - play_count_mean) / play_count_std
     z_popularity = (popularity - popularity_mean) / popularity_std
     z_age = -(age - age_mean) / age_std
+    
+    # Xtractor audio feature z-scores
+    z_danceability = (danceability - danceability_mean) / danceability_std if danceability > 0 else -1.0
+    z_loudness = (average_loudness - loudness_mean) / loudness_std  # Higher loudness = more energetic
+    z_bpm = (bpm - bpm_mean) / bpm_std
+    z_mood_acoustic = (mood_acoustic - mood_acoustic_mean) / mood_acoustic_std
+    z_mood_happy = (mood_happy - mood_happy_mean) / mood_happy_std
+    z_mood_party = (mood_party - mood_party_mean) / mood_party_std
+    z_mood_relaxed = (mood_relaxed - mood_relaxed_mean) / mood_relaxed_std
+    z_mood_sad = (mood_sad - mood_sad_mean) / mood_sad_std
 
     import numpy as _np
+    # Clip z-scores to prevent extreme outliers from dominating
     z_rating = _np.clip(z_rating, -3, 3)
     z_recency = _np.clip(z_recency, -3, 3)
     z_play_count = _np.clip(z_play_count, -3, 3)
     z_popularity = _np.clip(z_popularity, -3, 3)
     z_age = _np.clip(z_age, -3, 3)
+    
+    # Audio feature z-scores
+    z_danceability = _np.clip(z_danceability, -3, 3)
+    z_loudness = _np.clip(z_loudness, -3, 3)
+    z_bpm = _np.clip(z_bpm, -3, 3)
+    z_mood_acoustic = _np.clip(z_mood_acoustic, -3, 3)
+    z_mood_happy = _np.clip(z_mood_happy, -3, 3)
+    z_mood_party = _np.clip(z_mood_party, -3, 3)
+    z_mood_relaxed = _np.clip(z_mood_relaxed, -3, 3)
+    z_mood_sad = _np.clip(z_mood_sad, -3, 3)
 
     is_rated = rating > 0
 
@@ -303,6 +370,35 @@ def calculate_track_score(ps, track, base_time=None, tracks_context=None, playli
                 + (z_recency * 0.35)
                 + (z_popularity * 0.25)
             )
+    elif playlist_type == "pulse_check":
+        # For pulse check: emphasize recency of addition, low play count
+        # Weight recency of addition (z_age will represent newness) and low play count
+        weighted_score = (
+            (z_recency * 0.2)    # Recency of last played (to find tracks not recently played)
+            + (z_age * 0.3)      # Age (to favor newer tracks)
+            + (-z_play_count * 0.4)  # Negative of play count (to favor low play count tracks)
+            + (z_danceability * 0.1)  # Minor influence of danceability
+        )
+    elif playlist_type == "weekend_warmup":
+        # For weekend warmup: emphasize high energy characteristics
+        # Weight danceability, loudness (as energy), bpm, happy/mood_party
+        weighted_score = (
+            (z_danceability * 0.3)   # Danceability 
+            + (z_loudness * 0.25)    # Loudness (energy proxy)
+            + (z_bpm * 0.15)         # BPM (tempo)
+            + (z_mood_happy * 0.15)  # Happy mood
+            + (z_mood_party * 0.15)  # Party mood
+        )
+    elif playlist_type == "acoustic_reset":
+        # For acoustic reset: emphasize acousticness, calm characteristics
+        # Weight acoustic mood, relaxed mood, low loudness (calm energy)
+        weighted_score = (
+            (z_mood_acoustic * 0.3)   # Acoustic mood
+            + (z_mood_relaxed * 0.3)  # Relaxed mood
+            + (-z_loudness * 0.2)     # Negative loudness (quieter tracks)
+            + (-z_play_count * 0.1)   # Low play count (less familiar tracks for reset)
+            + (z_age * 0.1)           # Slightly favor newer tracks
+        )
     else:  # Default fallback for other playlists
         if is_rated:
             weighted_score = (z_rating * 0.5) + (z_recency * 0.1) + (z_popularity * 0.1) + (z_age * 0.2)
@@ -968,4 +1064,258 @@ def generate_fresh_favorites(ps, lib, ff_config, plex_lookup, preferred_genres, 
     ps._log.info("Successfully updated {} playlist with {} tracks", playlist_name, len(selected_tracks))
 
 
+def generate_pulse_check(ps, lib, pc_config, plex_lookup, preferred_genres, similar_tracks):
+    playlist_name = pc_config.get("name", "Pulse Check")
+    ps._log.info("Generating {} playlist", playlist_name)
+    defaults_cfg = get_plexsync_config(["playlists", "defaults"], dict, {})
+    max_tracks = get_config_value(pc_config, defaults_cfg, "max_tracks", 20)
+    discovery_ratio = get_config_value(pc_config, defaults_cfg, "discovery_ratio", 30)
+    exclusion_days = get_config_value(pc_config, defaults_cfg, "exclusion_days", 30)
+    # Default to 45 days for recently added tracks
+    recent_days = get_config_value(pc_config, defaults_cfg, "recent_days", 45)
+    filters = pc_config.get("filters", {})
+    
+    # Get all tracks first
+    all_library_tracks = _get_library_tracks(ps, preferred_genres, filters, exclusion_days)
+    
+    # Apply filters if needed
+    if filters:
+        try:
+            adv = build_advanced_filters(filters, exclusion_days)
+        except Exception:
+            adv = None
+        if not adv:
+            all_library_tracks = apply_playlist_filters(ps, all_library_tracks, filters)
+    
+    final_tracks = []
+    base_time = datetime.now()
+    recent_threshold = base_time - timedelta(days=recent_days)
+    
+    for track in all_library_tracks:
+        try:
+            beets_item = plex_lookup.get(track.ratingKey)
+            if beets_item:
+                # Check if track was added recently (using beets' added field)
+                if hasattr(beets_item, 'added') and beets_item.added:
+                    added_date = datetime.fromtimestamp(beets_item.added)
+                    if added_date > recent_threshold:
+                        final_tracks.append(beets_item)
+        except Exception as e:
+            ps._log.debug("Error processing track {}: {}", track.title, e)
 
+    # Separate rated and unrated tracks
+    rated_tracks = []
+    unrated_tracks = []
+    for track in final_tracks:
+        rating = float(getattr(track, 'plex_userrating', 0))
+        if rating > 0:
+            rated_tracks.append(track)
+        else:
+            unrated_tracks.append(track)
+
+    ps._log.debug("Found {} recently added rated and {} recently added unrated tracks", 
+                  len(rated_tracks), len(unrated_tracks))
+
+    # Calculate track proportions based on discovery_ratio
+    unrated_tracks_count, rated_tracks_count = calculate_playlist_proportions(ps, max_tracks, discovery_ratio)
+
+    # Select tracks using weighted scoring optimized for pulse check
+    selected_rated = select_tracks_weighted(ps, rated_tracks, rated_tracks_count, playlist_type="pulse_check")
+    selected_unrated = select_tracks_weighted(ps, unrated_tracks, unrated_tracks_count, playlist_type="pulse_check")
+
+    # Fill remaining slots if needed
+    if len(selected_unrated) < unrated_tracks_count:
+        additional_count = min(unrated_tracks_count - len(selected_unrated), max_tracks - len(selected_rated) - len(selected_unrated))
+        remaining_rated = [t for t in rated_tracks if t not in selected_rated]
+        additional_rated = select_tracks_weighted(ps, remaining_rated, additional_count, playlist_type="pulse_check")
+        selected_rated.extend(additional_rated)
+
+    selected_tracks = selected_rated + selected_unrated
+    if len(selected_tracks) > max_tracks:
+        selected_tracks = selected_tracks[:max_tracks]
+
+    import random
+    random.shuffle(selected_tracks)
+    ps._log.info("Selected {} rated tracks and {} unrated tracks", len(selected_rated), len(selected_unrated))
+    if not selected_tracks:
+        ps._log.warning("No tracks matched criteria for Pulse Check playlist")
+        return
+    try:
+        ps._plex_clear_playlist(playlist_name)
+        ps._log.info("Cleared existing Pulse Check playlist")
+    except Exception:
+        ps._log.debug("No existing Pulse Check playlist found")
+    ps._plex_add_playlist_item(selected_tracks, playlist_name)
+    ps._log.info("Successfully updated {} playlist with {} tracks", playlist_name, len(selected_tracks))
+
+
+def generate_weekend_warmup(ps, lib, ww_config, plex_lookup, preferred_genres, similar_tracks):
+    playlist_name = ww_config.get("name", "Weekend Warmup")
+    ps._log.info("Generating {} playlist", playlist_name)
+    defaults_cfg = get_plexsync_config(["playlists", "defaults"], dict, {})
+    max_tracks = get_config_value(ww_config, defaults_cfg, "max_tracks", 20)
+    discovery_ratio = get_config_value(ww_config, defaults_cfg, "discovery_ratio", 20)  # Lower discovery ratio for this playlist
+    exclusion_days = get_config_value(ww_config, defaults_cfg, "exclusion_days", 14)  # Less exclusion for energy-based selection
+    filters = ww_config.get("filters", {})
+    
+    # Get all tracks first
+    all_library_tracks = _get_library_tracks(ps, preferred_genres, filters, exclusion_days)
+    
+    # Apply filters if needed
+    if filters:
+        try:
+            adv = build_advanced_filters(filters, exclusion_days)
+        except Exception:
+            adv = None
+        if not adv:
+            all_library_tracks = apply_playlist_filters(ps, all_library_tracks, filters)
+    
+    final_tracks = []
+    for track in all_library_tracks:
+        try:
+            beets_item = plex_lookup.get(track.ratingKey)
+            if beets_item:
+                # Include track if it has sufficient energy characteristics (danceability, loudness, mood)
+                danceability = getattr(beets_item, 'danceability', 0)
+                loudness = getattr(beets_item, 'average_loudness', -60)
+                mood_happy = getattr(beets_item, 'mood_happy', 0)
+                mood_party = getattr(beets_item, 'mood_party', 0)
+                
+                # Criteria for a high-energy, weekend-appropriate track
+                has_energy = danceability > 0.5 or loudness > -15 or mood_happy > 0.3 or mood_party > 0.3
+                
+                if has_energy:
+                    final_tracks.append(beets_item)
+        except Exception as e:
+            ps._log.debug("Error processing track {}: {}", track.title, e)
+
+    # Separate rated and unrated tracks
+    rated_tracks = []
+    unrated_tracks = []
+    for track in final_tracks:
+        rating = float(getattr(track, 'plex_userrating', 0))
+        if rating > 0:
+            rated_tracks.append(track)
+        else:
+            unrated_tracks.append(track)
+
+    ps._log.debug("Found {} high energy rated and {} high energy unrated tracks", 
+                  len(rated_tracks), len(unrated_tracks))
+
+    # Calculate track proportions based on discovery_ratio
+    unrated_tracks_count, rated_tracks_count = calculate_playlist_proportions(ps, max_tracks, discovery_ratio)
+
+    # Select tracks using weighted scoring optimized for weekend warmup (high energy)
+    selected_rated = select_tracks_weighted(ps, rated_tracks, rated_tracks_count, playlist_type="weekend_warmup")
+    selected_unrated = select_tracks_weighted(ps, unrated_tracks, unrated_tracks_count, playlist_type="weekend_warmup")
+
+    # Fill remaining slots if needed
+    if len(selected_unrated) < unrated_tracks_count:
+        additional_count = min(unrated_tracks_count - len(selected_unrated), max_tracks - len(selected_rated) - len(selected_unrated))
+        remaining_rated = [t for t in rated_tracks if t not in selected_rated]
+        additional_rated = select_tracks_weighted(ps, remaining_rated, additional_count, playlist_type="weekend_warmup")
+        selected_rated.extend(additional_rated)
+
+    selected_tracks = selected_rated + selected_unrated
+    if len(selected_tracks) > max_tracks:
+        selected_tracks = selected_tracks[:max_tracks]
+
+    import random
+    random.shuffle(selected_tracks)
+    ps._log.info("Selected {} rated tracks and {} unrated tracks", len(selected_rated), len(selected_unrated))
+    if not selected_tracks:
+        ps._log.warning("No tracks matched criteria for Weekend Warmup playlist")
+        return
+    try:
+        ps._plex_clear_playlist(playlist_name)
+        ps._log.info("Cleared existing Weekend Warmup playlist")
+    except Exception:
+        ps._log.debug("No existing Weekend Warmup playlist found")
+    ps._plex_add_playlist_item(selected_tracks, playlist_name)
+    ps._log.info("Successfully updated {} playlist with {} tracks", playlist_name, len(selected_tracks))
+
+
+def generate_acoustic_reset(ps, lib, ar_config, plex_lookup, preferred_genres, similar_tracks):
+    playlist_name = ar_config.get("name", "Acoustic Reset")
+    ps._log.info("Generating {} playlist", playlist_name)
+    defaults_cfg = get_plexsync_config(["playlists", "defaults"], dict, {})
+    max_tracks = get_config_value(ar_config, defaults_cfg, "max_tracks", 20)
+    discovery_ratio = get_config_value(ar_config, defaults_cfg, "discovery_ratio", 40)  # Higher discovery for new acoustic finds
+    exclusion_days = get_config_value(ar_config, defaults_cfg, "exclusion_days", 7)  # Less exclusion to include more tracks
+    filters = ar_config.get("filters", {})
+    
+    # Get all tracks first
+    all_library_tracks = _get_library_tracks(ps, preferred_genres, filters, exclusion_days)
+    
+    # Apply filters if needed
+    if filters:
+        try:
+            adv = build_advanced_filters(filters, exclusion_days)
+        except Exception:
+            adv = None
+        if not adv:
+            all_library_tracks = apply_playlist_filters(ps, all_library_tracks, filters)
+    
+    final_tracks = []
+    for track in all_library_tracks:
+        try:
+            beets_item = plex_lookup.get(track.ratingKey)
+            if beets_item:
+                # Include track if it has sufficient acoustic characteristics (acoustic, relaxed mood, lower energy)
+                mood_acoustic = getattr(beets_item, 'mood_acoustic', 0)
+                mood_relaxed = getattr(beets_item, 'mood_relaxed', 0)
+                loudness = getattr(beets_item, 'average_loudness', -60)
+                mood_sad = getattr(beets_item, 'mood_sad', 0)
+                
+                # Criteria for a mellow, acoustic track
+                has_acoustic_character = (mood_acoustic > 0.4 or mood_relaxed > 0.4 or loudness < -20 or mood_sad > 0.3)
+                
+                if has_acoustic_character:
+                    final_tracks.append(beets_item)
+        except Exception as e:
+            ps._log.debug("Error processing track {}: {}", track.title, e)
+
+    # Separate rated and unrated tracks
+    rated_tracks = []
+    unrated_tracks = []
+    for track in final_tracks:
+        rating = float(getattr(track, 'plex_userrating', 0))
+        if rating > 0:
+            rated_tracks.append(track)
+        else:
+            unrated_tracks.append(track)
+
+    ps._log.debug("Found {} acoustic rated and {} acoustic unrated tracks", 
+                  len(rated_tracks), len(unrated_tracks))
+
+    # Calculate track proportions based on discovery_ratio
+    unrated_tracks_count, rated_tracks_count = calculate_playlist_proportions(ps, max_tracks, discovery_ratio)
+
+    # Select tracks using weighted scoring optimized for acoustic reset (calm, acoustic)
+    selected_rated = select_tracks_weighted(ps, rated_tracks, rated_tracks_count, playlist_type="acoustic_reset")
+    selected_unrated = select_tracks_weighted(ps, unrated_tracks, unrated_tracks_count, playlist_type="acoustic_reset")
+
+    # Fill remaining slots if needed
+    if len(selected_unrated) < unrated_tracks_count:
+        additional_count = min(unrated_tracks_count - len(selected_unrated), max_tracks - len(selected_rated) - len(selected_unrated))
+        remaining_rated = [t for t in rated_tracks if t not in selected_rated]
+        additional_rated = select_tracks_weighted(ps, remaining_rated, additional_count, playlist_type="acoustic_reset")
+        selected_rated.extend(additional_rated)
+
+    selected_tracks = selected_rated + selected_unrated
+    if len(selected_tracks) > max_tracks:
+        selected_tracks = selected_tracks[:max_tracks]
+
+    import random
+    random.shuffle(selected_tracks)
+    ps._log.info("Selected {} rated tracks and {} unrated tracks", len(selected_rated), len(selected_unrated))
+    if not selected_tracks:
+        ps._log.warning("No tracks matched criteria for Acoustic Reset playlist")
+        return
+    try:
+        ps._plex_clear_playlist(playlist_name)
+        ps._log.info("Cleared existing Acoustic Reset playlist")
+    except Exception:
+        ps._log.debug("No existing Acoustic Reset playlist found")
+    ps._plex_add_playlist_item(selected_tracks, playlist_name)
+    ps._log.info("Successfully updated {} playlist with {} tracks", playlist_name, len(selected_tracks))
