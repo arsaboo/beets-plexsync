@@ -7,7 +7,7 @@ A plugin for [beets][beets] to sync with your Plex server.
 - **AI-Generated Playlists**: Use `beet plexsonic -p "YOUR_PROMPT"` to create a playlist based on YOUR_PROMPT. Modify the playlist name using `-m` flag, change the number of tracks requested with `-n` flag, and clear the playlist before adding new songs with `-c` flag.
 
 ### Smart Playlists
-Use `beet plex_smartplaylists [-o ONLY]` to generate or manage custom playlists in Plex. The plugin currently supports seven types of playlists:
+Use `beet plex_smartplaylists [-o ONLY]` to generate or manage custom playlists in Plex. The plugin currently supports four types of playlists:
 
 You can use the `-o` or `--only` option to specify a comma-separated list of playlist IDs to update. This is useful for updating only certain playlists (e.g., just the AI playlists) on a schedule:
 
@@ -60,31 +60,7 @@ The command will only generate the specified playlists, skipping others in your 
       - Skips tracks without a trusted release year when the recency guard is active to keep the mix on-theme
       - Defaults: `max_tracks: 100`, `discovery_ratio: 25`, `min_rating: 6`, `exclusion_days: 21`
 
-  5. **Pulse Check**:
-      - Highlights freshly added tracks (default last 45 days) that still have zero or very few plays
-      - Uses beets' `added` field to identify recently added tracks
-      - Respects any supplemental `filters` supplied in the config
-      - Weighting emphasizes low play counts and recency so new additions get an early spin
-      - Configurable `recent_days` parameter (default 45) to define "fresh" tracks
-      - Supports all standard playlist options like `max_tracks`, `discovery_ratio`, `exclusion_days`
-
-  6. **Weekend Warmup**:
-      - Assembles high-energy, danceable tracks using audio features from the beets-xtractor plugin
-      - Leverages `danceability`, `average_loudness`, `bpm`, `mood_happy`, and `mood_party` attributes
-      - Scoring prioritizes energy, danceability, popularity, and recency for an upbeat mix
-      - Respects any supplemental `filters` supplied in the config
-      - Uses scale-independent normalization for fair comparison across different audio features
-      - Supports all standard playlist options like `max_tracks`, `discovery_ratio`, `exclusion_days`
-
-  7. **Acoustic Reset**:
-      - Builds a mellow reset set using high acousticness and relaxed mood cues from xtractor
-      - Prioritizes tracks with `mood_acoustic`, `mood_relaxed`, and lower `average_loudness` (calmer energy)
-      - Respects any supplemental `filters` supplied in the config
-      - Prioritizes recent tracks and low play counts for a calm exploration experience
-      - Weighting favors acoustic texture, calmer energy, and supports all standard playlist options
-      - Uses scale-independent normalization for consistent audio feature comparison
-
-  8. **Imported Playlists**:
+  5. **Imported Playlists**:
       - Import playlists from external services (Spotify, Apple Music, YouTube, etc.) and local M3U8 files
       - Configure multiple source URLs and file paths per playlist
       - For M3U8 files, use paths relative to beets config directory or absolute paths

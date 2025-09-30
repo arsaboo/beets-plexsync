@@ -1227,32 +1227,20 @@ class PlexSync(BeetsPlugin):
 
                 if (playlist_type == "imported"):
                     playlist_import.generate_imported_playlist(self, lib, p, plex_lookup)
-                elif playlist_id in ["daily_discovery", "forgotten_gems", "recent_hits", "fresh_favorites", "pulse_check", "weekend_warmup", "acoustic_reset"]:
+                elif playlist_id in ["daily_discovery", "forgotten_gems", "recent_hits", "fresh_favorites"]:
                     if playlist_id == "daily_discovery":
                         sp_mod.generate_daily_discovery(self, lib, p, plex_lookup, preferred_genres, similar_tracks)
                     elif playlist_id == "forgotten_gems":
                         sp_mod.generate_forgotten_gems(self, lib, p, plex_lookup, preferred_genres, similar_tracks)
                     elif playlist_id == "recent_hits":
                         sp_mod.generate_recent_hits(self, lib, p, plex_lookup, preferred_genres, similar_tracks)
-                    elif playlist_id == "fresh_favorites":
+                    else:  # fresh_favorites
                         sp_mod.generate_fresh_favorites(self, lib, p, plex_lookup, preferred_genres, similar_tracks)
-                    elif playlist_id == "pulse_check":
-                        sp_mod.generate_pulse_check(self, lib, p, plex_lookup, preferred_genres, similar_tracks)
-                    elif playlist_id == "weekend_warmup":
-                        sp_mod.generate_weekend_warmup(self, lib, p, plex_lookup, preferred_genres, similar_tracks)
-                    elif playlist_id == "acoustic_reset":
-                        sp_mod.generate_acoustic_reset(self, lib, p, plex_lookup, preferred_genres, similar_tracks)
-                    else:
-                        self._log.warning(
-                            "Unrecognized playlist configuration '{}' - type: '{}', id: '{}'. "
-                            "Valid types are 'imported' or 'smart'.",
-                            playlist_name, playlist_type, playlist_id
-                        )
                 else:
                     self._log.warning(
                         "Unrecognized playlist configuration '{}' - type: '{}', id: '{}'. "
                         "Valid types are 'imported' or 'smart'. "
-                        "Valid smart playlist IDs are 'daily_discovery', 'forgotten_gems', 'recent_hits', 'fresh_favorites', 'pulse_check', 'weekend_warmup', and 'acoustic_reset'.",
+                        "Valid smart playlist IDs are 'daily_discovery', 'forgotten_gems', and 'recent_hits'.",
                         playlist_name, playlist_type, playlist_id
                     )
                 if progress is not None:
