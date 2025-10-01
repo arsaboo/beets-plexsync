@@ -9,6 +9,7 @@ from typing import Tuple
 import time
 import os
 import copy
+import copy
 
 from beets import config
 from beetsplug.core.config import get_config_value, get_plexsync_config
@@ -345,7 +346,7 @@ def select_tracks_weighted(ps, tracks, num_tracks, playlist_type=None):
     import numpy as np
     if not tracks:
         return []
-    
+
     # Standard weighted selection for all playlist types
     base_time = datetime.now()
     track_scores = [(track, calculate_track_score(ps, track, base_time, playlist_type=playlist_type)) for track in tracks]
@@ -1001,15 +1002,15 @@ def generate_70s80s_flashback(ps, lib, fb_config, plex_lookup, preferred_genres,
     discovery_ratio = get_config_value(fb_config, defaults_cfg, "discovery_ratio", 30)
     exclusion_days = get_config_value(fb_config, defaults_cfg, "exclusion_days", 30)
     filters = fb_config.get("filters", {})
-    
+
     # Get all items from beets library that have been synced with Plex
     all_beets_items = []
     for item in lib.items():
         if hasattr(item, "plex_ratingkey") and item.plex_ratingkey:
             all_beets_items.append(item)
-    
+
     ps._log.debug("Found {} tracks with Plex sync data", len(all_beets_items))
-    
+
     # Apply decade filter (1970-1989) and additional filters to beets items
     filtered_items = []
     for item in all_beets_items:
@@ -1017,7 +1018,7 @@ def generate_70s80s_flashback(ps, lib, fb_config, plex_lookup, preferred_genres,
         year = getattr(item, 'year', None)
         if not (year and 1970 <= year <= 1989):
             continue  # Skip if not in 70s/80s range
-            
+
         # Apply additional filters
         include_item = True
         # Apply year filters if they exist in config (though may conflict with decade filter)
@@ -1031,7 +1032,7 @@ def generate_70s80s_flashback(ps, lib, fb_config, plex_lookup, preferred_genres,
                 start_year, end_year = years_config['between']
                 if not (start_year <= year <= end_year):
                     include_item = False
-        
+
         # Apply genre filters if they exist
         if include_item and filters.get('include', {}).get('genres'):
             item_genres = set()
@@ -1043,7 +1044,7 @@ def generate_70s80s_flashback(ps, lib, fb_config, plex_lookup, preferred_genres,
             include_genres = set(g.lower().strip() for g in filters['include']['genres'])
             if not (item_genres & include_genres):
                 include_item = False
-        
+
         # Apply exclude filters
         if include_item and filters.get('exclude', {}).get('genres'):
             item_genres = set()
@@ -1055,7 +1056,7 @@ def generate_70s80s_flashback(ps, lib, fb_config, plex_lookup, preferred_genres,
             exclude_genres = set(g.lower().strip() for g in filters['exclude']['genres'])
             if item_genres & exclude_genres:
                 include_item = False
-        
+
         # Apply exclude years
         if include_item and filters.get('exclude', {}).get('years'):
             years_config = filters['exclude']['years']
@@ -1063,18 +1064,18 @@ def generate_70s80s_flashback(ps, lib, fb_config, plex_lookup, preferred_genres,
                 include_item = False
             if 'after' in years_config and year and year > years_config['after']:
                 include_item = False
-        
+
         # Apply min rating filter
         if include_item and 'min_rating' in filters:
             rating = float(getattr(item, 'rating', 0)) or float(getattr(item, 'plex_userrating', 0)) or 0
             if rating < filters['min_rating']:
                 include_item = False
-        
+
         if include_item:
             filtered_items.append(item)
-    
+
     ps._log.debug("Filtered to {} tracks from 70s/80s after applying additional filters", len(filtered_items))
-    
+
     # Separate rated and unrated tracks
     rated_items = []
     unrated_items = []
@@ -1084,34 +1085,34 @@ def generate_70s80s_flashback(ps, lib, fb_config, plex_lookup, preferred_genres,
             rated_items.append(item)
         else:
             unrated_items.append(item)
-    
+
     ps._log.debug("Split into {} rated and {} unrated tracks", len(rated_items), len(unrated_items))
-    
+
     # Calculate track proportions based on discovery_ratio
     unrated_items_count, rated_items_count = calculate_playlist_proportions(ps, max_tracks, discovery_ratio)
-    
+
     # Select tracks with special scoring for 70s/80s flashback playlist
     selected_rated = select_tracks_weighted(ps, rated_items, rated_items_count, playlist_type="70s80s_flashback")
     selected_unrated = select_tracks_weighted(ps, unrated_items, unrated_items_count, playlist_type="70s80s_flashback")
-    
+
     # Fill remaining slots if needed
     if len(selected_unrated) < unrated_items_count:
         additional_count = min(unrated_items_count - len(selected_unrated), max_tracks - len(selected_rated) - len(selected_unrated))
         remaining_rated = [t for t in rated_items if t not in selected_rated]
         additional_rated = select_tracks_weighted(ps, remaining_rated, additional_count, playlist_type="70s80s_flashback")
         selected_rated.extend(additional_rated)
-    
+
     selected_items = selected_rated + selected_unrated
     if len(selected_items) > max_tracks:
         selected_items = selected_items[:max_tracks]
-    
+
     import random
     random.shuffle(selected_items)
-    
+
     if not selected_items:
         ps._log.warning("No tracks matched criteria for 70s/80s Flashback playlist")
         return
-    
+
     # Convert selected beets items back to Plex tracks for playlist creation
     plex_tracks = []
     for item in selected_items:
@@ -1128,17 +1129,17 @@ def generate_70s80s_flashback(ps, lib, fb_config, plex_lookup, preferred_genres,
                         plex_tracks.append(tracks[0])
                 except Exception:
                     continue
-    
+
     if not plex_tracks:
         ps._log.warning("Could not find any Plex tracks for 70s/80s Flashback playlist")
         return
-    
+
     try:
         ps._plex_clear_playlist(playlist_name)
         ps._log.info("Cleared existing 70s/80s Flashback playlist")
     except Exception:
         ps._log.debug("No existing 70s/80s Flashback playlist found")
-    
+
     ps._plex_add_playlist_item(plex_tracks, playlist_name)
     ps._log.info("Successfully updated {} playlist with {} tracks", playlist_name, len(plex_tracks))
 
@@ -1150,15 +1151,15 @@ def generate_highly_rated_tracks(ps, lib, hr_config, plex_lookup, preferred_genr
     max_tracks = get_config_value(hr_config, defaults_cfg, "max_tracks", 20)
     exclusion_days = get_config_value(hr_config, defaults_cfg, "exclusion_days", 30)
     filters = hr_config.get("filters", {})
-    
+
     # Get all items from beets library that have been synced with Plex
     all_beets_items = []
     for item in lib.items():
         if hasattr(item, "plex_ratingkey") and item.plex_ratingkey:
             all_beets_items.append(item)
-    
+
     ps._log.debug("Found {} tracks with Plex sync data", len(all_beets_items))
-    
+
     # Apply filters to beets items
     filtered_items = []
     for item in all_beets_items:
@@ -1174,7 +1175,7 @@ def generate_highly_rated_tracks(ps, lib, hr_config, plex_lookup, preferred_genr
                 start_year, end_year = years_config['between']
                 if not (start_year <= item.year <= end_year):
                     include_item = False
-        
+
         # Apply genre filters if they exist
         if include_item and filters.get('include', {}).get('genres'):
             item_genres = set()
@@ -1186,7 +1187,7 @@ def generate_highly_rated_tracks(ps, lib, hr_config, plex_lookup, preferred_genr
             include_genres = set(g.lower().strip() for g in filters['include']['genres'])
             if not (item_genres & include_genres):
                 include_item = False
-        
+
         # Apply exclude filters
         if include_item and filters.get('exclude', {}).get('genres'):
             item_genres = set()
@@ -1198,7 +1199,7 @@ def generate_highly_rated_tracks(ps, lib, hr_config, plex_lookup, preferred_genr
             exclude_genres = set(g.lower().strip() for g in filters['exclude']['genres'])
             if item_genres & exclude_genres:
                 include_item = False
-        
+
         # Apply exclude years
         if include_item and filters.get('exclude', {}).get('years'):
             years_config = filters['exclude']['years']
@@ -1206,16 +1207,16 @@ def generate_highly_rated_tracks(ps, lib, hr_config, plex_lookup, preferred_genr
                 include_item = False
             if 'after' in years_config and item.year and item.year > years_config['after']:
                 include_item = False
-        
+
         # Apply min rating filter (for highly rated, we apply this separately below)
         if include_item and 'min_rating' in filters:
             rating = float(getattr(item, 'rating', 0)) or float(getattr(item, 'plex_userrating', 0)) or 0
             if rating < filters['min_rating']:
                 include_item = False
-        
+
         if include_item:
             filtered_items.append(item)
-    
+
     # Filter for highly rated tracks (rating >= 7)
     highly_rated_items = []
     for item in filtered_items:
@@ -1270,15 +1271,15 @@ def generate_most_played_tracks(ps, lib, mp_config, plex_lookup, preferred_genre
     max_tracks = get_config_value(mp_config, defaults_cfg, "max_tracks", 20)
     exclusion_days = get_config_value(mp_config, defaults_cfg, "exclusion_days", 30)
     filters = mp_config.get("filters", {})
-    
+
     # Get all items from beets library that have been synced with Plex
     all_beets_items = []
     for item in lib.items():
         if hasattr(item, "plex_ratingkey") and item.plex_ratingkey:
             all_beets_items.append(item)
-    
+
     ps._log.debug("Found {} tracks with Plex sync data", len(all_beets_items))
-    
+
     # Apply filters to beets items (similar to the helper I created earlier)
     filtered_items = []
     for item in all_beets_items:
@@ -1294,7 +1295,7 @@ def generate_most_played_tracks(ps, lib, mp_config, plex_lookup, preferred_genre
                 start_year, end_year = years_config['between']
                 if not (start_year <= item.year <= end_year):
                     include_item = False
-        
+
         # Apply genre filters if they exist
         if include_item and filters.get('include', {}).get('genres'):
             item_genres = set()
@@ -1306,7 +1307,7 @@ def generate_most_played_tracks(ps, lib, mp_config, plex_lookup, preferred_genre
             include_genres = set(g.lower().strip() for g in filters['include']['genres'])
             if not (item_genres & include_genres):
                 include_item = False
-        
+
         # Apply exclude filters
         if include_item and filters.get('exclude', {}).get('genres'):
             item_genres = set()
@@ -1318,7 +1319,7 @@ def generate_most_played_tracks(ps, lib, mp_config, plex_lookup, preferred_genre
             exclude_genres = set(g.lower().strip() for g in filters['exclude']['genres'])
             if item_genres & exclude_genres:
                 include_item = False
-        
+
         # Apply exclude years
         if include_item and filters.get('exclude', {}).get('years'):
             years_config = filters['exclude']['years']
@@ -1326,24 +1327,24 @@ def generate_most_played_tracks(ps, lib, mp_config, plex_lookup, preferred_genre
                 include_item = False
             if 'after' in years_config and item.year and item.year > years_config['after']:
                 include_item = False
-        
+
         # Apply min rating filter
         if include_item and 'min_rating' in filters:
             rating = float(getattr(item, 'rating', 0)) or float(getattr(item, 'plex_userrating', 0)) or 0
             if rating < filters['min_rating']:
                 include_item = False
-        
+
         if include_item:
             filtered_items.append(item)
-    
+
     ps._log.debug("Filtered to {} tracks after applying filters", len(filtered_items))
-    
+
     # Sort by play count in descending order (prioritize plex_viewcount)
     def get_play_count(item):
         return getattr(item, 'plex_viewcount', 0) or 0
 
     sorted_items = sorted(filtered_items, key=get_play_count, reverse=True)
-    
+
     ps._log.debug("Sorted {} tracks by play count for Most Played playlist", len(sorted_items))
 
     # Select the top tracks by play count, using weighted selection to add some variety
