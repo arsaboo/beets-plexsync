@@ -1002,8 +1002,7 @@ def generate_70s80s_flashback(ps, lib, fb_config, plex_lookup, preferred_genres,
     exclusion_days = get_config_value(fb_config, defaults_cfg, "exclusion_days", 30)
     filters = fb_config.get("filters", {})
     
-    # Get tracks from the entire library using server-side filters if possible
-    # Add year constraints for 70s/80s manually since filters don't support this by default
+    # Get all tracks from the Plex library
     _t0 = time.time()
     all_library_tracks = ps.music.search(libtype="track")
     ps._log.debug(
@@ -1011,7 +1010,7 @@ def generate_70s80s_flashback(ps, lib, fb_config, plex_lookup, preferred_genres,
         len(all_library_tracks), time.time() - _t0,
     )
     
-    # Filter for tracks from the 1970s and 1980s (70s/80s)
+    # Filter for tracks from the 1970s and 1980s (70s/80s) first
     decade_filtered_tracks = []
     for track in all_library_tracks:
         year = getattr(track, 'year', None)
@@ -1089,7 +1088,7 @@ def generate_highly_rated_tracks(ps, lib, hr_config, plex_lookup, preferred_genr
     exclusion_days = get_config_value(hr_config, defaults_cfg, "exclusion_days", 30)
     filters = hr_config.get("filters", {})
     
-    # Get tracks from the entire library
+    # Get all tracks from the Plex library
     _t0 = time.time()
     all_library_tracks = ps.music.search(libtype="track")
     ps._log.debug(
@@ -1145,7 +1144,7 @@ def generate_most_played_tracks(ps, lib, mp_config, plex_lookup, preferred_genre
     exclusion_days = get_config_value(mp_config, defaults_cfg, "exclusion_days", 30)
     filters = mp_config.get("filters", {})
     
-    # Get tracks from the entire library
+    # Get all tracks from the Plex library
     _t0 = time.time()
     all_library_tracks = ps.music.search(libtype="track")
     ps._log.debug(
@@ -1157,7 +1156,7 @@ def generate_most_played_tracks(ps, lib, mp_config, plex_lookup, preferred_genre
     if filters:
         all_library_tracks = apply_playlist_filters(ps, all_library_tracks, filters)
     
-    # Convert to beets items
+    # Convert to beets items using the plex lookup
     final_tracks = []
     for track in all_library_tracks:
         try:
@@ -1167,8 +1166,13 @@ def generate_most_played_tracks(ps, lib, mp_config, plex_lookup, preferred_genre
         except Exception as e:
             ps._log.debug("Error converting track {}: {}", track.title, e)
     
-    # Sort all tracks by play count in descending order (no hard cutoff)
-    sorted_tracks = sorted(final_tracks, key=lambda t: getattr(t, 'plex_viewcount', 0), reverse=True)
+    # Sort by play count in descending order (no hard cutoff)
+    # Prioritize plex_viewcount if available
+    def get_play_count(track):
+        # Check plex view count
+        return getattr(track, 'plex_viewcount', 0) or 0
+    
+    sorted_tracks = sorted(final_tracks, key=get_play_count, reverse=True)
     
     ps._log.debug("Sorted {} tracks by play count for Most Played playlist", len(sorted_tracks))
     
