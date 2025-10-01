@@ -1226,19 +1226,27 @@ class PlexSync(BeetsPlugin):
                 playlist_name = p.get("name", "Unnamed playlist")
 
                 if (playlist_type == "imported"):
-                    sp_mod.generate_imported_playlist(self, lib, p, plex_lookup)
-                elif playlist_id in ["daily_discovery", "forgotten_gems", "recent_hits"]:
+                    playlist_import.generate_imported_playlist(self, lib, p, plex_lookup)
+                elif playlist_id in ["daily_discovery", "forgotten_gems", "recent_hits", "fresh_favorites", "70s80s_flashback", "highly_rated", "most_played"]:
                     if playlist_id == "daily_discovery":
                         sp_mod.generate_daily_discovery(self, lib, p, plex_lookup, preferred_genres, similar_tracks)
                     elif playlist_id == "forgotten_gems":
                         sp_mod.generate_forgotten_gems(self, lib, p, plex_lookup, preferred_genres, similar_tracks)
-                    else:  # recent_hits
+                    elif playlist_id == "recent_hits":
                         sp_mod.generate_recent_hits(self, lib, p, plex_lookup, preferred_genres, similar_tracks)
+                    elif playlist_id == "fresh_favorites":
+                        sp_mod.generate_fresh_favorites(self, lib, p, plex_lookup, preferred_genres, similar_tracks)
+                    elif playlist_id == "70s80s_flashback":
+                        sp_mod.generate_70s80s_flashback(self, lib, p, plex_lookup, preferred_genres, similar_tracks)
+                    elif playlist_id == "highly_rated":
+                        sp_mod.generate_highly_rated_tracks(self, lib, p, plex_lookup, preferred_genres, similar_tracks)
+                    elif playlist_id == "most_played":
+                        sp_mod.generate_most_played_tracks(self, lib, p, plex_lookup, preferred_genres, similar_tracks)
                 else:
                     self._log.warning(
                         "Unrecognized playlist configuration '{}' - type: '{}', id: '{}'. "
                         "Valid types are 'imported' or 'smart'. "
-                        "Valid smart playlist IDs are 'daily_discovery', 'forgotten_gems', and 'recent_hits'.",
+                        "Valid smart playlist IDs are 'daily_discovery', 'forgotten_gems', 'recent_hits', 'fresh_favorites', '70s80s_flashback', 'highly_rated', and 'most_played'.",
                         playlist_name, playlist_type, playlist_id
                     )
                 if progress is not None:
