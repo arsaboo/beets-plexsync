@@ -303,6 +303,29 @@ def calculate_track_score(ps, track, base_time=None, tracks_context=None, playli
                 + (z_recency * 0.35)
                 + (z_popularity * 0.25)
             )
+    elif playlist_type == "70s80s_flashback":
+        # For 70s/80s Flashback: emphasize nostalgic value with high rating and age (70s/80s era)
+        # This playlist focuses on well-rated tracks from that era that may not have been played recently
+        if is_rated:
+            # For rated tracks, emphasize age (70s/80s) and rating, but also consider recency (to avoid overplayed tracks)
+            weighted_score = (z_rating * 0.4) + (z_age * 0.3) + (z_recency * 0.2) + (z_play_count * 0.1)
+        else:
+            # For unrated tracks from 70s/80s, emphasize recency and age (discovering forgotten gems)
+            weighted_score = (z_age * 0.4) + (z_recency * 0.35) + (z_popularity * 0.25)
+    elif playlist_type == "highly_rated":
+        # For highly rated tracks: emphasize rating above all else, but add some recency to keep variety
+        if is_rated:
+            weighted_score = (z_rating * 0.7) + (z_recency * 0.2) + (z_popularity * 0.1)
+        else:
+            # For unrated tracks, use a baseline score to include some variety
+            weighted_score = (z_recency * 0.4) + (z_popularity * 0.4) + (z_age * 0.2)
+    elif playlist_type == "most_played":
+        # For most played tracks: emphasize play count and rating, with some recency
+        if is_rated:
+            weighted_score = (z_play_count * 0.4) + (z_rating * 0.3) + (z_recency * 0.3)
+        else:
+            # For unrated tracks, emphasize play count and recency
+            weighted_score = (z_play_count * 0.5) + (z_recency * 0.4) + (z_popularity * 0.1)
     else:  # Default fallback for other playlists
         if is_rated:
             weighted_score = (z_rating * 0.5) + (z_recency * 0.1) + (z_popularity * 0.1) + (z_age * 0.2)
@@ -322,6 +345,8 @@ def select_tracks_weighted(ps, tracks, num_tracks, playlist_type=None):
     import numpy as np
     if not tracks:
         return []
+    
+    # Standard weighted selection for all playlist types
     base_time = datetime.now()
     track_scores = [(track, calculate_track_score(ps, track, base_time, playlist_type=playlist_type)) for track in tracks]
     scores = np.array([score for _, score in track_scores])
@@ -964,6 +989,202 @@ def generate_fresh_favorites(ps, lib, ff_config, plex_lookup, preferred_genres, 
         ps._log.info("Cleared existing Fresh Favorites playlist")
     except Exception:
         ps._log.debug("No existing Fresh Favorites playlist found")
+    ps._plex_add_playlist_item(selected_tracks, playlist_name)
+    ps._log.info("Successfully updated {} playlist with {} tracks", playlist_name, len(selected_tracks))
+
+
+def generate_70s80s_flashback(ps, lib, fb_config, plex_lookup, preferred_genres, similar_tracks):
+    playlist_name = fb_config.get("name", "70s/80s Flashback")
+    ps._log.info("Generating {} playlist", playlist_name)
+    defaults_cfg = get_plexsync_config(["playlists", "defaults"], dict, {})
+    max_tracks = get_config_value(fb_config, defaults_cfg, "max_tracks", 20)
+    discovery_ratio = get_config_value(fb_config, defaults_cfg, "discovery_ratio", 30)
+    exclusion_days = get_config_value(fb_config, defaults_cfg, "exclusion_days", 30)
+    filters = fb_config.get("filters", {})
+    
+    # Get tracks from the entire library using server-side filters if possible
+    # Add year constraints for 70s/80s manually since filters don't support this by default
+    _t0 = time.time()
+    all_library_tracks = ps.music.search(libtype="track")
+    ps._log.debug(
+        "Fetched all tracks for 70s/80s Flashback (no server filters) -> {} in {:.2f}s",
+        len(all_library_tracks), time.time() - _t0,
+    )
+    
+    # Filter for tracks from the 1970s and 1980s (70s/80s)
+    decade_filtered_tracks = []
+    for track in all_library_tracks:
+        year = getattr(track, 'year', None)
+        if year and 1970 <= year <= 1989:
+            decade_filtered_tracks.append(track)
+    
+    ps._log.debug("Filtered to {} tracks from 1970-1989", len(decade_filtered_tracks))
+    
+    # Apply additional filters if specified
+    if filters:
+        decade_filtered_tracks = apply_playlist_filters(ps, decade_filtered_tracks, filters)
+    
+    # Convert to beets items
+    final_tracks = []
+    for track in decade_filtered_tracks:
+        try:
+            beets_item = plex_lookup.get(track.ratingKey)
+            if beets_item:
+                final_tracks.append(beets_item)
+        except Exception as e:
+            ps._log.debug("Error converting track {}: {}", track.title, e)
+    
+    # Separate rated and unrated tracks
+    rated_tracks = []
+    unrated_tracks = []
+    for track in final_tracks:
+        rating = float(getattr(track, 'plex_userrating', 0))
+        if rating > 0:
+            rated_tracks.append(track)
+        else:
+            unrated_tracks.append(track)
+    
+    ps._log.debug("Split into {} rated and {} unrated tracks", len(rated_tracks), len(unrated_tracks))
+    
+    # Calculate track proportions based on discovery_ratio
+    unrated_tracks_count, rated_tracks_count = calculate_playlist_proportions(ps, max_tracks, discovery_ratio)
+    
+    # Select tracks with special scoring for 70s/80s flashback playlist
+    selected_rated = select_tracks_weighted(ps, rated_tracks, rated_tracks_count, playlist_type="70s80s_flashback")
+    selected_unrated = select_tracks_weighted(ps, unrated_tracks, unrated_tracks_count, playlist_type="70s80s_flashback")
+    
+    # Fill remaining slots if needed
+    if len(selected_unrated) < unrated_tracks_count:
+        additional_count = min(unrated_tracks_count - len(selected_unrated), max_tracks - len(selected_rated) - len(selected_unrated))
+        remaining_rated = [t for t in rated_tracks if t not in selected_rated]
+        additional_rated = select_tracks_weighted(ps, remaining_rated, additional_count, playlist_type="70s80s_flashback")
+        selected_rated.extend(additional_rated)
+    
+    selected_tracks = selected_rated + selected_unrated
+    if len(selected_tracks) > max_tracks:
+        selected_tracks = selected_tracks[:max_tracks]
+    
+    import random
+    random.shuffle(selected_tracks)
+    
+    if not selected_tracks:
+        ps._log.warning("No tracks matched criteria for 70s/80s Flashback playlist")
+        return
+    
+    try:
+        ps._plex_clear_playlist(playlist_name)
+        ps._log.info("Cleared existing 70s/80s Flashback playlist")
+    except Exception:
+        ps._log.debug("No existing 70s/80s Flashback playlist found")
+    
+    ps._plex_add_playlist_item(selected_tracks, playlist_name)
+    ps._log.info("Successfully updated {} playlist with {} tracks", playlist_name, len(selected_tracks))
+
+
+def generate_highly_rated_tracks(ps, lib, hr_config, plex_lookup, preferred_genres, similar_tracks):
+    playlist_name = hr_config.get("name", "Highly Rated Tracks")
+    ps._log.info("Generating {} playlist", playlist_name)
+    defaults_cfg = get_plexsync_config(["playlists", "defaults"], dict, {})
+    max_tracks = get_config_value(hr_config, defaults_cfg, "max_tracks", 20)
+    exclusion_days = get_config_value(hr_config, defaults_cfg, "exclusion_days", 30)
+    filters = hr_config.get("filters", {})
+    
+    # Get tracks from the entire library
+    _t0 = time.time()
+    all_library_tracks = ps.music.search(libtype="track")
+    ps._log.debug(
+        "Fetched all tracks for Highly Rated Tracks (no server filters) -> {} in {:.2f}s",
+        len(all_library_tracks), time.time() - _t0,
+    )
+    
+    # Apply filters if specified
+    if filters:
+        all_library_tracks = apply_playlist_filters(ps, all_library_tracks, filters)
+    
+    # Convert to beets items
+    final_tracks = []
+    for track in all_library_tracks:
+        try:
+            beets_item = plex_lookup.get(track.ratingKey)
+            if beets_item:
+                final_tracks.append(beets_item)
+        except Exception as e:
+            ps._log.debug("Error converting track {}: {}", track.title, e)
+    
+    # Filter for highly rated tracks (rating >= 7)
+    highly_rated_tracks = []
+    for track in final_tracks:
+        rating = float(getattr(track, 'plex_userrating', 0))
+        if rating >= 7.0:  # High rating threshold
+            highly_rated_tracks.append(track)
+    
+    ps._log.debug("Filtered to {} highly rated tracks (rating >= 7.0)", len(highly_rated_tracks))
+    
+    # Select tracks using weighted scoring (with slight recency factor to keep rotation)
+    selected_tracks = select_tracks_weighted(ps, highly_rated_tracks, max_tracks, playlist_type="highly_rated")
+    
+    if not selected_tracks:
+        ps._log.warning("No tracks matched criteria for Highly Rated Tracks playlist")
+        return
+    
+    try:
+        ps._plex_clear_playlist(playlist_name)
+        ps._log.info("Cleared existing Highly Rated Tracks playlist")
+    except Exception:
+        ps._log.debug("No existing Highly Rated Tracks playlist found")
+    
+    ps._plex_add_playlist_item(selected_tracks, playlist_name)
+    ps._log.info("Successfully updated {} playlist with {} tracks", playlist_name, len(selected_tracks))
+
+
+def generate_most_played_tracks(ps, lib, mp_config, plex_lookup, preferred_genres, similar_tracks):
+    playlist_name = mp_config.get("name", "Most Played Tracks")
+    ps._log.info("Generating {} playlist", playlist_name)
+    defaults_cfg = get_plexsync_config(["playlists", "defaults"], dict, {})
+    max_tracks = get_config_value(mp_config, defaults_cfg, "max_tracks", 20)
+    exclusion_days = get_config_value(mp_config, defaults_cfg, "exclusion_days", 30)
+    filters = mp_config.get("filters", {})
+    
+    # Get tracks from the entire library
+    _t0 = time.time()
+    all_library_tracks = ps.music.search(libtype="track")
+    ps._log.debug(
+        "Fetched all tracks for Most Played Tracks (no server filters) -> {} in {:.2f}s",
+        len(all_library_tracks), time.time() - _t0,
+    )
+    
+    # Apply filters if specified
+    if filters:
+        all_library_tracks = apply_playlist_filters(ps, all_library_tracks, filters)
+    
+    # Convert to beets items
+    final_tracks = []
+    for track in all_library_tracks:
+        try:
+            beets_item = plex_lookup.get(track.ratingKey)
+            if beets_item:
+                final_tracks.append(beets_item)
+        except Exception as e:
+            ps._log.debug("Error converting track {}: {}", track.title, e)
+    
+    # Sort all tracks by play count in descending order (no hard cutoff)
+    sorted_tracks = sorted(final_tracks, key=lambda t: getattr(t, 'plex_viewcount', 0), reverse=True)
+    
+    ps._log.debug("Sorted {} tracks by play count for Most Played playlist", len(sorted_tracks))
+    
+    # Select the top tracks by play count, using weighted selection to add some variety
+    selected_tracks = select_tracks_weighted(ps, sorted_tracks, max_tracks, playlist_type="most_played")
+    
+    if not selected_tracks:
+        ps._log.warning("No tracks matched criteria for Most Played Tracks playlist")
+        return
+    
+    try:
+        ps._plex_clear_playlist(playlist_name)
+        ps._log.info("Cleared existing Most Played Tracks playlist")
+    except Exception:
+        ps._log.debug("No existing Most Played Tracks playlist found")
+    
     ps._plex_add_playlist_item(selected_tracks, playlist_name)
     ps._log.info("Successfully updated {} playlist with {} tracks", playlist_name, len(selected_tracks))
 

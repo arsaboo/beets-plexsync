@@ -7,7 +7,7 @@ A plugin for [beets][beets] to sync with your Plex server.
 - **AI-Generated Playlists**: Use `beet plexsonic -p "YOUR_PROMPT"` to create a playlist based on YOUR_PROMPT. Modify the playlist name using `-m` flag, change the number of tracks requested with `-n` flag, and clear the playlist before adding new songs with `-c` flag.
 
 ### Smart Playlists
-Use `beet plex_smartplaylists [-o ONLY]` to generate or manage custom playlists in Plex. The plugin currently supports four types of playlists:
+Use `beet plex_smartplaylists [-o ONLY]` to generate or manage custom playlists in Plex. The plugin currently supports various types of playlists:
 
 You can use the `-o` or `--only` option to specify a comma-separated list of playlist IDs to update. This is useful for updating only certain playlists (e.g., just the AI playlists) on a schedule:
 
@@ -32,7 +32,29 @@ The command will only generate the specified playlists, skipping others in your 
       - Limits the playlist size (configurable via `max_tracks`, default 20)
       - Controls discovery vs. familiar ratio (configurable via `discovery_ratio`, default 30% - more familiar tracks)
 
-  2. **Forgotten Gems**:
+  2. **70s/80s Flashback**:
+      - Creates a nostalgic playlist featuring tracks from 1970-1989
+      - Prioritizes well-rated tracks from the 70s and 80s that may not have been played recently
+      - Uses a specialized scoring algorithm that emphasizes nostalgic value and age
+      - Balances between familiar favorites and forgotten gems from the era
+      - Limits the playlist size (configurable via `max_tracks`, default 20)
+      - Controls discovery vs. nostalgia ratio (configurable via `discovery_ratio`, default 30%)
+
+  3. **Highly Rated Tracks**:
+      - Curates tracks with high user ratings (7.0 and above)
+      - Focuses on quality by prioritizing highly-rated content
+      - Includes tracks that have stood the test of time according to your ratings
+      - Adds slight recency factor to maintain variety in the playlist
+      - Limits the playlist size (configurable via `max_tracks`, default 20)
+
+  4. **Most Played Tracks**:
+      - Features your most frequently played tracks
+      - Ranks tracks based on cumulative play counts (plex_viewcount)
+      - Uses weighted selection to add variety while prioritizing popular tracks
+      - Sorts all tracks by play count in descending order
+      - Limits the playlist size (configurable via `max_tracks`, default 20)
+
+  5. **Forgotten Gems**:
       - Creates a playlist of tracks that deserve more attention
       - Uses your highly-rated tracks to establish a quality baseline
       - Prioritizes unrated tracks with popularity comparable to your favorites
@@ -44,7 +66,7 @@ The command will only generate the specified playlists, skipping others in your 
       - Percentage of playlist to fill with unrated but popular tracks (configurable via `discovery_ratio`, default 30%)
       - Excludes tracks played recently (configurable via `exclusion_days`)
 
-  3. **Recent Hits**:
+  6. **Recent Hits**:
       - Curates a playlist of recent, high-energy tracks
       - Applies a default release-year guard covering roughly the last 3 years whenever no year filter is provided; override with `filters.include.years` or the playlist-level `max_age_years`/`min_year` options
       - Updated scoring leans harder on release recency and last-play data, with popularity and ratings acting as the tie-breakers
@@ -53,14 +75,14 @@ The command will only generate the specified playlists, skipping others in your 
       - Requires a minimum rating (`min_rating`, default 4) and lets you control the discovery ratio (default 20%)
       - Set `exclusion_days` if you want to keep very recent listens out (default 30 days)
 
-  4. **Fresh Favorites**:
+  7. **Fresh Favorites**:
       - Creates a playlist of high-quality tracks that deserve more plays
       - Enforces a default release window spanning roughly the last 7 years unless you supply custom year filters or specify `max_age_years`/`min_year`
       - Updated scoring strongly favors release recency and recent spins while still rewarding strong ratings and popularity
       - Skips tracks without a trusted release year when the recency guard is active to keep the mix on-theme
       - Defaults: `max_tracks: 100`, `discovery_ratio: 25`, `min_rating: 6`, `exclusion_days: 21`
 
-  5. **Imported Playlists**:
+  8. **Imported Playlists**:
       - Import playlists from external services (Spotify, Apple Music, YouTube, etc.) and local M3U8 files
       - Configure multiple source URLs and file paths per playlist
       - For M3U8 files, use paths relative to beets config directory or absolute paths
