@@ -16,6 +16,7 @@ setup(
         'plexapi>=4.13.4',
         'jiosaavn-python>=0.2',
         'spotipy',
+        'ollama'
         'openai',
         'pydantic>=2.0.0',
         'python-dateutil',
