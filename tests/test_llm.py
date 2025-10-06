@@ -32,15 +32,15 @@ class LLMSearchTest(unittest.TestCase):
             field_validator=field_validator,
         )
         ensure_stubs({'llm': {'search': {}}})
-        if 'beetsplug.llm' in sys.modules:
-            importlib.reload(sys.modules['beetsplug.llm'])
+        if 'beetsplug.ai.llm' in sys.modules:
+            importlib.reload(sys.modules['beetsplug.ai.llm'])
         else:
-            importlib.import_module('beetsplug.llm')
-        self.llm = importlib.import_module('beetsplug.llm')
+            importlib.import_module('beetsplug.ai.llm')
+        self.llm = importlib.import_module('beetsplug.ai.llm')
 
     def tearDown(self):
-        if 'beetsplug.llm' in sys.modules:
-            sys.modules['beetsplug.llm']._search_toolkit = None
+        if 'beetsplug.ai.llm' in sys.modules:
+            sys.modules['beetsplug.ai.llm']._search_toolkit = None
 
     def test_search_track_info_toolkit_missing(self):
         self.llm._search_toolkit = None
