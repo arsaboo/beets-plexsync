@@ -162,10 +162,10 @@ class PlexSync(BeetsPlugin):
                 "model": "gpt-3.5-turbo",
                 "base_url": "",  # Optional, for other providers
                 "search": {
-                    "provider": "ollama",
+                    "provider": "",  # Auto-detect: uses OpenAI if llm.api_key is set, otherwise Ollama
                     "api_key": "",  # Will use base key if empty
-                    "base_url": "http://192.168.2.162:3006/api/search",  # Override base_url for search
-                    "model": "qwen2.5:latest",  # Override model for search
+                    "base_url": "",  # Will use base base_url if empty
+                    "model": "",  # Will use base model if empty (for OpenAI) or default (for Ollama)
                     "embedding_model": "snowflake-arctic-embed2:latest"  # Embedding model
                 }
             }

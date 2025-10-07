@@ -63,10 +63,10 @@ except ImportError:
 # Add default configuration for LLM search
 config['llm'].add({
     'search': {
-        'provider': 'ollama',
+        'provider': '',  # Auto-detect: uses OpenAI if llm.api_key is set, otherwise Ollama
         'api_key': '',  # Will fall back to llm.api_key if empty
         'base_url': '',  # Will fall back to llm.base_url if empty
-        'model': 'qwen3:latest',
+        'model': '',  # Will fall back to llm.model if empty (when using OpenAI), or 'qwen3:latest' for Ollama
         'ollama_host': 'http://localhost:11434',
         'tavily_api_key': '',
         'searxng_host': '',
@@ -658,28 +658,35 @@ def initialize_search_toolkit():
         logger.error("Agno package not available. Please install with: pip install agno")
         return None
 
-    # Get search provider configuration
-    provider = config["llm"]["search"]["provider"].get() or "ollama"
+    # Get API key from main config first to determine provider
+    main_api_key = config["llm"]["api_key"].get()
     
-    # Get model configuration - prefer search-specific, fall back to main llm config
-    model_id = config["llm"]["search"]["model"].get()
-    if not model_id or model_id == "qwen3:latest":
-        # Fall back to main llm model if search model is not set or is default
-        fallback_model = config["llm"]["model"].get()
-        if fallback_model and provider != "ollama":
-            model_id = fallback_model
-    if not model_id:
-        model_id = "qwen3:latest"
+    # Auto-detect provider if not explicitly set
+    provider = config["llm"]["search"]["provider"].get()
+    if not provider:
+        # If main llm has an api_key, default to OpenAI; otherwise use Ollama
+        provider = "openai" if main_api_key else "ollama"
+        logger.debug(f"Auto-detected provider: {provider}")
     
     # Get API key - prefer search-specific, fall back to main llm config
     api_key = config["llm"]["search"]["api_key"].get()
     if not api_key:
-        api_key = config["llm"]["api_key"].get()
+        api_key = main_api_key
     
     # Get base URL - prefer search-specific, fall back to main llm config
     base_url = config["llm"]["search"]["base_url"].get()
     if not base_url:
         base_url = config["llm"]["base_url"].get()
+    
+    # Get model configuration - prefer search-specific, fall back to main llm config
+    model_id = config["llm"]["search"]["model"].get()
+    if not model_id:
+        # Fall back to main llm model for OpenAI, or use default for Ollama
+        if provider == "openai":
+            fallback_model = config["llm"]["model"].get()
+            model_id = fallback_model if fallback_model else "gpt-3.5-turbo"
+        else:
+            model_id = "qwen3:latest"
     
     # Get Ollama-specific configuration
     ollama_host = config["llm"]["search"]["ollama_host"].get() or "http://localhost:11434"
