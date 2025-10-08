@@ -163,7 +163,7 @@ class MusicSearchTools:
                 else:
                     # Import OpenAILike model class for OpenAI-compatible providers
                     from agno.models.openai.like import OpenAILike
-                    model_args = {"model": self.model_id}
+                    model_args = {"id": self.model_id}
                     if self.api_key:
                         model_args["api_key"] = self.api_key
                     if self.base_url:
@@ -241,7 +241,7 @@ class MusicSearchTools:
                     else:
                         # Import OpenAILike model class for OpenAI-compatible providers
                         from agno.models.openai.like import OpenAILike
-                        model_args = {"model": self.model_id}
+                        model_args = {"id": self.model_id}
                         if self.api_key:
                             model_args["api_key"] = self.api_key
                         if self.base_url:
@@ -268,7 +268,7 @@ class MusicSearchTools:
                         else:
                             # Import OpenAILike model class for OpenAI-compatible providers
                             from agno.models.openai.like import OpenAILike
-                            model_args = {"model": self.model_id}
+                            model_args = {"id": self.model_id}
                             if self.api_key:
                                 model_args["api_key"] = self.api_key
                             if self.base_url:
