@@ -231,13 +231,14 @@ spotify:
 
   **Using OpenAI or OpenAI-compatible APIs for search:**
   
-  The plugin automatically uses OpenAI for LLM search if you have `llm.api_key` configured. No additional configuration needed!
+  The plugin automatically uses OpenAI-compatible models (via OpenAILike) for LLM search if you have `llm.api_key` configured. No additional configuration needed!
   
   **Simple configuration** (auto-detects OpenAI):
   ```yaml
   llm:
     api_key: YOUR_OPENAI_API_KEY
-    model: "gpt-3.5-turbo"
+    model: "gpt-4.1-mini"  # Or your preferred model
+    base_url: "https://api.openai.com/v1"  # Or your preferred endpoint
     search:
       brave_api_key: "your-brave-api-key"  # At least one search provider is required
   ```
