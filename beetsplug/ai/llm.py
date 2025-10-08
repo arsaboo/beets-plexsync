@@ -27,7 +27,7 @@ try:
 
     # Check for OpenAI model support
     try:
-        from agno.models.openai import OpenAIChat
+        from agno.models.openai.like import OpenAILike
         OPENAI_MODEL_AVAILABLE = True
     except ImportError:
         logger.debug("OpenAI model not available in agno")
@@ -161,12 +161,14 @@ class MusicSearchTools:
                     logger.error("OpenAI model not available in agno. Falling back to Ollama.")
                     model = Ollama(id=self.model_id, host=self.ollama_host, timeout=30)
                 else:
-                    model_args = {"id": self.model_id}
+                    # Import OpenAILike model class for OpenAI-compatible providers
+                    from agno.models.openai.like import OpenAILike
+                    model_args = {"model": self.model_id}
                     if self.api_key:
                         model_args["api_key"] = self.api_key
                     if self.base_url:
                         model_args["base_url"] = self.base_url
-                    model = OpenAIChat(**model_args)
+                    model = OpenAILike(**model_args)
                     logger.debug(f"Initializing OpenAI-compatible agent with model {self.model_id}")
             
             self.ollama_agent = Agent(
@@ -237,12 +239,14 @@ class MusicSearchTools:
                         logger.warning("OpenAI model not available. Falling back to Ollama for search agent.")
                         model = Ollama(id=self.model_id, host=self.ollama_host, timeout=30)
                     else:
-                        model_args = {"id": self.model_id}
+                        # Import OpenAILike model class for OpenAI-compatible providers
+                        from agno.models.openai.like import OpenAILike
+                        model_args = {"model": self.model_id}
                         if self.api_key:
                             model_args["api_key"] = self.api_key
                         if self.base_url:
                             model_args["base_url"] = self.base_url
-                        model = OpenAIChat(**model_args)
+                        model = OpenAILike(**model_args)
                 
                 self.search_agent = Agent(
                     model=model,
@@ -250,7 +254,28 @@ class MusicSearchTools:
                 )
             except Exception as e:
                 logger.error(f"Failed to initialize search agent: {e}")
-                self.search_agent = None
+                # If tools failed with OpenAI, try with a model that doesn't use tools
+                if self.provider != 'ollama' and OPENAI_MODEL_AVAILABLE and tools:
+                    try:
+                        # Import OpenAILike model class for OpenAI-compatible providers
+                        from agno.models.openai.like import OpenAILike
+                        model_args = {"model": self.model_id}
+                        if self.api_key:
+                            model_args["api_key"] = self.api_key
+                        if self.base_url:
+                            model_args["base_url"] = self.base_url
+                        model = OpenAILike(**model_args)
+                        
+                        # Create search agent without tools for basic functionality
+                        self.search_agent = Agent(
+                            model=model
+                        )
+                        logger.info("Created OpenAI search agent without tools due to compatibility issues")
+                    except Exception as fallback_e:
+                        logger.error(f"Fallback initialization also failed: {fallback_e}")
+                        self.search_agent = None
+                else:
+                    self.search_agent = None
 
     def _log_available_providers(self) -> None:
         """Log which search providers are available."""
