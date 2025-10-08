@@ -144,12 +144,12 @@ class MusicSearchTools:
 
     def _init_llm_agent(self) -> None:
         """Initialize the LLM agent for text extraction.
-        
+
         Supports both Ollama and OpenAI-compatible models.
         """
         try:
             model = None
-            
+
             # Determine which model to use based on provider
             if self.provider == 'ollama':
                 # Use Ollama model
@@ -170,7 +170,7 @@ class MusicSearchTools:
                         model_args["base_url"] = self.base_url
                     model = OpenAILike(**model_args)
                     logger.debug(f"Initializing OpenAI-compatible agent with model {self.model_id}")
-            
+
             self.ollama_agent = Agent(
                 model=model,
                 description="You extract structured song information from search results.",
@@ -247,7 +247,7 @@ class MusicSearchTools:
                         if self.base_url:
                             model_args["base_url"] = self.base_url
                         model = OpenAILike(**model_args)
-                
+
                 # Try to create Agent with tools first
                 self.search_agent = Agent(
                     model=model,
@@ -274,7 +274,7 @@ class MusicSearchTools:
                             if self.base_url:
                                 model_args["base_url"] = self.base_url
                             fallback_model = OpenAILike(**model_args)
-                    
+
                     # Create search agent without tools for basic functionality
                     self.search_agent = Agent(
                         model=fallback_model
@@ -692,37 +692,37 @@ def initialize_search_toolkit():
 
     # Get API key from main config first to determine provider
     main_api_key = config["llm"]["api_key"].get()
-    
+
     # Auto-detect provider if not explicitly set
     provider = config["llm"]["search"]["provider"].get()
     if not provider:
         # If main llm has an api_key, default to OpenAI; otherwise use Ollama
         provider = "openai" if main_api_key else "ollama"
         logger.debug(f"Auto-detected provider: {provider}")
-    
+
     # Get API key - prefer search-specific, fall back to main llm config
     api_key = config["llm"]["search"]["api_key"].get()
     if not api_key:
         api_key = main_api_key
-    
+
     # Get base URL - prefer search-specific, fall back to main llm config
     base_url = config["llm"]["search"]["base_url"].get()
     if not base_url:
         base_url = config["llm"]["base_url"].get()
-    
+
     # Get model configuration - prefer search-specific, fall back to main llm config
     model_id = config["llm"]["search"]["model"].get()
     if not model_id:
         # Fall back to main llm model for OpenAI, or use default for Ollama
         if provider == "openai":
             fallback_model = config["llm"]["model"].get()
-            model_id = fallback_model if fallback_model else "gpt-3.5-turbo"
+            model_id = fallback_model if fallback_model else "gpt-4.1-mini"
         else:
             model_id = "qwen3:latest"
-    
+
     # Get Ollama-specific configuration
     ollama_host = config["llm"]["search"]["ollama_host"].get() or "http://localhost:11434"
-    
+
     # Get search provider API keys
     tavily_api_key = config["llm"]["search"]["tavily_api_key"].get()
     searxng_host = config["llm"]["search"]["searxng_host"].get()
