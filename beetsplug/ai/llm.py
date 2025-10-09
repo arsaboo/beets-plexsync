@@ -23,14 +23,9 @@ OPENAI_MODEL_AVAILABLE = False
 try:
     from agno.agent import Agent
     from agno.models.ollama import Ollama
+    from agno.models.openai.like import OpenAILike
     AGNO_AVAILABLE = True
-
-    # Check for OpenAI model support
-    try:
-        from agno.models.openai.like import OpenAILike
-        OPENAI_MODEL_AVAILABLE = True
-    except ImportError:
-        logger.debug("OpenAI model not available in agno")
+    OPENAI_MODEL_AVAILABLE = True
 
     # Check for individual search providers
     try:
@@ -142,35 +137,42 @@ class MusicSearchTools:
         # Log available search providers
         self._log_available_providers()
 
+    def _create_model(self):
+        """Create a model (Ollama or OpenAI-compatible) based on provider settings.
+        
+        Returns:
+            Model instance (Ollama or OpenAILike) or None if creation fails
+        """
+        # Determine which model to use based on provider
+        if self.provider == 'ollama':
+            # Use Ollama model
+            model = Ollama(id=self.model_id, host=self.ollama_host, timeout=30)
+            logger.debug(f"Initializing Ollama agent with model {self.model_id} at {self.ollama_host}")
+            return model
+        else:
+            # Use OpenAI-compatible model
+            if not OPENAI_MODEL_AVAILABLE:
+                logger.error("OpenAI model not available in agno. Falling back to Ollama.")
+                model = Ollama(id=self.model_id, host=self.ollama_host, timeout=30)
+                return model
+            else:
+                model_args = {"id": self.model_id}
+                if self.api_key:
+                    model_args["api_key"] = self.api_key
+                if self.base_url:
+                    model_args["base_url"] = self.base_url
+                model = OpenAILike(**model_args)
+                logger.debug(f"Initializing OpenAI-compatible agent with model {self.model_id}")
+                return model
+
     def _init_llm_agent(self) -> None:
         """Initialize the LLM agent for text extraction.
 
         Supports both Ollama and OpenAI-compatible models.
         """
         try:
-            model = None
-
-            # Determine which model to use based on provider
-            if self.provider == 'ollama':
-                # Use Ollama model
-                model = Ollama(id=self.model_id, host=self.ollama_host, timeout=30)
-                logger.debug(f"Initializing Ollama agent with model {self.model_id} at {self.ollama_host}")
-            else:
-                # Use OpenAI-compatible model
-                if not OPENAI_MODEL_AVAILABLE:
-                    logger.error("OpenAI model not available in agno. Falling back to Ollama.")
-                    model = Ollama(id=self.model_id, host=self.ollama_host, timeout=30)
-                else:
-                    # Import OpenAILike model class for OpenAI-compatible providers
-                    from agno.models.openai.like import OpenAILike
-                    model_args = {"id": self.model_id}
-                    if self.api_key:
-                        model_args["api_key"] = self.api_key
-                    if self.base_url:
-                        model_args["base_url"] = self.base_url
-                    model = OpenAILike(**model_args)
-                    logger.debug(f"Initializing OpenAI-compatible agent with model {self.model_id}")
-
+            model = self._create_model()
+            
             self.ollama_agent = Agent(
                 model=model,
                 description="You extract structured song information from search results.",
@@ -230,59 +232,16 @@ class MusicSearchTools:
 
         if tools:
             try:
-                # Create model based on provider
-                model = None
-                if self.provider == 'ollama':
-                    model = Ollama(id=self.model_id, host=self.ollama_host, timeout=30)
-                else:
-                    if not OPENAI_MODEL_AVAILABLE:
-                        logger.warning("OpenAI model not available. Falling back to Ollama for search agent.")
-                        model = Ollama(id=self.model_id, host=self.ollama_host, timeout=30)
-                    else:
-                        # Import OpenAILike model class for OpenAI-compatible providers
-                        from agno.models.openai.like import OpenAILike
-                        model_args = {"id": self.model_id}
-                        if self.api_key:
-                            model_args["api_key"] = self.api_key
-                        if self.base_url:
-                            model_args["base_url"] = self.base_url
-                        model = OpenAILike(**model_args)
+                model = self._create_model()
 
-                # Try to create Agent with tools first
+                # Create Agent with tools
                 self.search_agent = Agent(
                     model=model,
                     tools=tools
                 )
             except Exception as e:
                 logger.error(f"Failed to initialize search agent with tools: {e}")
-                logger.info("Creating search agent without tools as fallback...")
-                try:
-                    # Create model based on provider again for fallback
-                    fallback_model = None
-                    if self.provider == 'ollama':
-                        fallback_model = Ollama(id=self.model_id, host=self.ollama_host, timeout=30)
-                    else:
-                        if not OPENAI_MODEL_AVAILABLE:
-                            logger.warning("OpenAI model not available. Falling back to Ollama for search agent.")
-                            fallback_model = Ollama(id=self.model_id, host=self.ollama_host, timeout=30)
-                        else:
-                            # Import OpenAILike model class for OpenAI-compatible providers
-                            from agno.models.openai.like import OpenAILike
-                            model_args = {"id": self.model_id}
-                            if self.api_key:
-                                model_args["api_key"] = self.api_key
-                            if self.base_url:
-                                model_args["base_url"] = self.base_url
-                            fallback_model = OpenAILike(**model_args)
-
-                    # Create search agent without tools for basic functionality
-                    self.search_agent = Agent(
-                        model=fallback_model
-                    )
-                    logger.info(f"Created {self.provider} search agent without tools due to compatibility issues")
-                except Exception as fallback_e:
-                    logger.error(f"Fallback initialization also failed: {fallback_e}")
-                    self.search_agent = None
+                self.search_agent = None
 
     def _log_available_providers(self) -> None:
         """Log which search providers are available."""
