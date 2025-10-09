@@ -18,11 +18,14 @@ TAVILY_AVAILABLE = False
 SEARXNG_AVAILABLE = False
 EXA_AVAILABLE = False
 BRAVE_AVAILABLE = False
+OPENAI_MODEL_AVAILABLE = False
 
 try:
     from agno.agent import Agent
     from agno.models.ollama import Ollama
+    from agno.models.openai.like import OpenAILike
     AGNO_AVAILABLE = True
+    OPENAI_MODEL_AVAILABLE = True
 
     # Check for individual search providers
     try:
@@ -55,8 +58,10 @@ except ImportError:
 # Add default configuration for LLM search
 config['llm'].add({
     'search': {
-        'provider': 'ollama',
-        'model': 'qwen3:latest',
+        'provider': '',  # Auto-detect: uses OpenAI if llm.api_key is set, otherwise Ollama
+        'api_key': '',  # Will fall back to llm.api_key if empty
+        'base_url': '',  # Will fall back to llm.base_url if empty
+        'model': '',  # Will fall back to llm.model if empty (when using OpenAI), or 'qwen3:latest' for Ollama
         'ollama_host': 'http://localhost:11434',
         'tavily_api_key': '',
         'searxng_host': '',
@@ -101,24 +106,30 @@ class MusicSearchTools:
     # Class variable to track last Brave Search request time
     _last_brave_request_time = 0
 
-    def __init__(self, tavily_api_key=None, searxng_host=None, model_id=None, ollama_host=None, exa_api_key=None, brave_api_key=None):
+    def __init__(self, tavily_api_key=None, searxng_host=None, model_id=None, ollama_host=None, exa_api_key=None, brave_api_key=None, provider='ollama', api_key=None, base_url=None):
         """Initialize music search tools with available search providers.
 
         Args:
             tavily_api_key: API key for Tavily search
             searxng_host: Host URL for SearxNG instance
-            model_id: Ollama model ID to use
+            model_id: Model ID to use (Ollama model or OpenAI model name)
             ollama_host: Ollama API host URL
             exa_api_key: API key for Exa search
             brave_api_key: API key for Brave Search
+            provider: LLM provider ('ollama' or 'openai')
+            api_key: API key for OpenAI-compatible providers
+            base_url: Base URL for OpenAI-compatible providers
         """
         self.name = "music_search_tools"
+        self.provider = provider
         self.model_id = model_id or "qwen3:latest"
         self.ollama_host = ollama_host or "http://localhost:11434"
+        self.api_key = api_key
+        self.base_url = base_url
         self.search_agent = None
 
-        # Initialize Ollama agent for extraction (required for all search methods)
-        self._init_ollama_agent()
+        # Initialize LLM agent for extraction (required for all search methods)
+        self._init_llm_agent()
 
         # Initialize a single search agent with all available tools
         self._init_search_agent(tavily_api_key, searxng_host, exa_api_key, brave_api_key)
@@ -126,16 +137,49 @@ class MusicSearchTools:
         # Log available search providers
         self._log_available_providers()
 
-    def _init_ollama_agent(self) -> None:
-        """Initialize the Ollama agent for text extraction."""
+    def _create_model(self):
+        """Create a model (Ollama or OpenAI-compatible) based on provider settings.
+        
+        Returns:
+            Model instance (Ollama or OpenAILike) or None if creation fails
+        """
+        # Determine which model to use based on provider
+        if self.provider == 'ollama':
+            # Use Ollama model
+            model = Ollama(id=self.model_id, host=self.ollama_host, timeout=30)
+            logger.debug(f"Initializing Ollama agent with model {self.model_id} at {self.ollama_host}")
+            return model
+        else:
+            # Use OpenAI-compatible model
+            if not OPENAI_MODEL_AVAILABLE:
+                logger.error("OpenAI model not available in agno. Falling back to Ollama.")
+                model = Ollama(id=self.model_id, host=self.ollama_host, timeout=30)
+                return model
+            else:
+                model_args = {"id": self.model_id}
+                if self.api_key:
+                    model_args["api_key"] = self.api_key
+                if self.base_url:
+                    model_args["base_url"] = self.base_url
+                model = OpenAILike(**model_args)
+                logger.debug(f"Initializing OpenAI-compatible agent with model {self.model_id}")
+                return model
+
+    def _init_llm_agent(self) -> None:
+        """Initialize the LLM agent for text extraction.
+
+        Supports both Ollama and OpenAI-compatible models.
+        """
         try:
+            model = self._create_model()
+            
             self.ollama_agent = Agent(
-                model=Ollama(id=self.model_id, host=self.ollama_host, timeout=30),
+                model=model,
                 description="You extract structured song information from search results.",
                 output_schema=SongBasicInfo,  # Use output_schema for structured output
             )
         except Exception as e:
-            logger.error(f"Failed to initialize Ollama agent: {e}")
+            logger.error(f"Failed to initialize LLM agent: {e}")
             self.ollama_agent = None
 
     def _enforce_brave_rate_limit(self) -> None:
@@ -188,12 +232,15 @@ class MusicSearchTools:
 
         if tools:
             try:
+                model = self._create_model()
+
+                # Create Agent with tools
                 self.search_agent = Agent(
-                    model=Ollama(id=self.model_id, host=self.ollama_host, timeout=30),
+                    model=model,
                     tools=tools
                 )
             except Exception as e:
-                logger.error(f"Failed to initialize search agent: {e}")
+                logger.error(f"Failed to initialize search agent with tools: {e}")
                 self.search_agent = None
 
     def _log_available_providers(self) -> None:
@@ -201,13 +248,14 @@ class MusicSearchTools:
         if not self.search_agent or not self.search_agent.tools:
             logger.warning("No music search providers available!")
             if self.ollama_agent:
-                logger.info("Only Ollama extraction is available, which requires at least one search provider")
+                logger.info("Only LLM extraction is available, which requires at least one search provider")
             return
 
         providers = [tool.name for tool in self.search_agent.tools]
         logger.info("Initialized music search with providers: {0}", ', '.join(providers))
         if self.ollama_agent:
-            logger.info("Using Ollama model '{0}' for result extraction and tool selection", self.model_id)
+            provider_type = "OpenAI-compatible" if self.provider != 'ollama' else "Ollama"
+            logger.info("Using {0} model '{1}' for result extraction and tool selection", provider_type, self.model_id)
 
     def _search(self, song_name: str) -> Optional[str]:
         """Query the search agent for song information.
@@ -396,7 +444,7 @@ class MusicSearchTools:
         Recursively unwraps .content attributes to get to the actual data.
 
         Args:
-            response: Response object from Ollama agent
+            response: Response object from LLM agent
 
         Returns:
             The innermost data, unwrapped from any .content attributes
@@ -482,20 +530,20 @@ class MusicSearchTools:
         logger.debug("First chars of content: {0}...", preview)
 
     def _log_response_preview(self, response, max_chars: int = 300) -> None:
-        """Log a preview of the Ollama response for debugging.
+        """Log a preview of the LLM response for debugging.
 
         Args:
-            response: Response object from Ollama
+            response: Response object from LLM agent
             max_chars: Maximum characters to include in preview
         """
         content_to_log = getattr(response, 'content', str(response)) if hasattr(response, 'content') else str(response)
         preview = content_to_log[:max_chars]
         if len(content_to_log) > max_chars:
             preview += "..."
-        logger.debug("Raw Ollama response content: {0}", preview)
+        logger.debug("Raw LLM response content: {0}", preview)
 
     def _parse_ollama_response(self, response, fallback_title: str) -> SongBasicInfo:
-        """Parse Ollama agent response into SongBasicInfo.
+        """Parse LLM agent response into SongBasicInfo.
 
         Handles multiple response formats from the Agno agent:
         - Direct SongBasicInfo object
@@ -504,7 +552,7 @@ class MusicSearchTools:
         - JSON string that needs parsing
 
         Args:
-            response: Response object from Ollama agent
+            response: Response object from LLM agent (Ollama or OpenAI)
             fallback_title: Title to use if parsing fails
 
         Returns:
@@ -531,14 +579,14 @@ class MusicSearchTools:
         """
         # Check if agent is available
         if not self.ollama_agent:
-            logger.error("Ollama agent not initialized")
+            logger.error("LLM agent not initialized")
             return self._create_fallback_song(song_name)
 
         # Build the extraction prompt
         prompt = self._build_extraction_prompt(content, song_name)
 
         # Log what we're doing
-        logger.debug("Sending to Ollama for parsing - Song: {0}", song_name)
+        logger.debug("Sending to LLM for parsing - Song: {0}", song_name)
         self._log_content_preview(content)
 
         try:
@@ -552,7 +600,7 @@ class MusicSearchTools:
                 # Fallback to parsing if not a SongBasicInfo object
                 return self._parse_ollama_response(response, song_name)
         except Exception as e:
-            logger.error("Ollama extraction failed: {0}", e)
+            logger.error("LLM extraction failed: {0}", e)
             return self._create_fallback_song(song_name)
 
     def search_song_info(self, song_name: str) -> Dict:
@@ -566,7 +614,7 @@ class MusicSearchTools:
         """
         # Check if agent is available
         if not self.ollama_agent:
-            logger.error("Ollama agent not initialized")
+            logger.error("LLM agent not initialized")
             return {
                 "title": song_name,
                 "artist": "",
@@ -601,11 +649,42 @@ def initialize_search_toolkit():
         logger.error("Agno package not available. Please install with: pip install agno")
         return None
 
-    # Get configuration from beets config
+    # Get API key from main config first to determine provider
+    main_api_key = config["llm"]["api_key"].get()
+
+    # Auto-detect provider if not explicitly set
+    provider = config["llm"]["search"]["provider"].get()
+    if not provider:
+        # If main llm has an api_key, default to OpenAI; otherwise use Ollama
+        provider = "openai" if main_api_key else "ollama"
+        logger.debug(f"Auto-detected provider: {provider}")
+
+    # Get API key - prefer search-specific, fall back to main llm config
+    api_key = config["llm"]["search"]["api_key"].get()
+    if not api_key:
+        api_key = main_api_key
+
+    # Get base URL - prefer search-specific, fall back to main llm config
+    base_url = config["llm"]["search"]["base_url"].get()
+    if not base_url:
+        base_url = config["llm"]["base_url"].get()
+
+    # Get model configuration - prefer search-specific, fall back to main llm config
+    model_id = config["llm"]["search"]["model"].get()
+    if not model_id:
+        # Fall back to main llm model for OpenAI, or use default for Ollama
+        if provider == "openai":
+            fallback_model = config["llm"]["model"].get()
+            model_id = fallback_model if fallback_model else "gpt-4.1-mini"
+        else:
+            model_id = "qwen3:latest"
+
+    # Get Ollama-specific configuration
+    ollama_host = config["llm"]["search"]["ollama_host"].get() or "http://localhost:11434"
+
+    # Get search provider API keys
     tavily_api_key = config["llm"]["search"]["tavily_api_key"].get()
     searxng_host = config["llm"]["search"]["searxng_host"].get()
-    model_id = config["llm"]["search"]["model"].get() or "qwen3:latest"
-    ollama_host = config["llm"]["search"]["ollama_host"].get() or "http://localhost:11434"
     exa_api_key = config["llm"]["search"]["exa_api_key"].get()
     brave_api_key = config["llm"]["search"]["brave_api_key"].get()
 
@@ -619,7 +698,10 @@ def initialize_search_toolkit():
             model_id=model_id,
             ollama_host=ollama_host,
             exa_api_key=exa_api_key,
-            brave_api_key=brave_api_key
+            brave_api_key=brave_api_key,
+            provider=provider,
+            api_key=api_key,
+            base_url=base_url
         )
     except Exception as e:
         logger.error(f"Failed to initialize search toolkit: {e}")

@@ -118,16 +118,6 @@ class PlexSync(BeetsPlugin):
         cache_path = os.path.join(self.config_dir, 'plexsync_cache.db')
         self.cache = Cache(cache_path, self)
 
-        # Call the setup methods
-        try:
-            self.setup_llm()
-            if get_plexsync_config("use_llm_search", bool, False):
-                self.search_llm = self.llm_client  # Use llm_client directly
-        except Exception as e:
-            self._log.error("Failed to set up LLM client: {}", e)
-            self.llm_client = None
-            self.search_llm = None
-
         # Adding defaults.
         config["plex"].add(
             {
@@ -162,10 +152,10 @@ class PlexSync(BeetsPlugin):
                 "model": "gpt-3.5-turbo",
                 "base_url": "",  # Optional, for other providers
                 "search": {
-                    "provider": "ollama",
+                    "provider": "",  # Auto-detect: uses OpenAI if llm.api_key is set, otherwise Ollama
                     "api_key": "",  # Will use base key if empty
-                    "base_url": "http://192.168.2.162:3006/api/search",  # Override base_url for search
-                    "model": "qwen2.5:latest",  # Override model for search
+                    "base_url": "",  # Will use base base_url if empty
+                    "model": "",  # Will use base model if empty (for OpenAI) or default (for Ollama)
                     "embedding_model": "snowflake-arctic-embed2:latest"  # Embedding model
                 }
             }
@@ -174,6 +164,17 @@ class PlexSync(BeetsPlugin):
         config["llm"]["api_key"].redact = True
 
         config["plex"]["token"].redact = True
+        
+        # Call the setup methods after defaults are added
+        try:
+            self.setup_llm()
+            if get_plexsync_config("use_llm_search", bool, False):
+                self.search_llm = self.llm_client  # Use llm_client directly
+        except Exception as e:
+            self._log.error("Failed to set up LLM client: {}", e)
+            self.llm_client = None
+            self.search_llm = None
+        
         baseurl = (
             "http://"
             + config["plex"]["host"].get()

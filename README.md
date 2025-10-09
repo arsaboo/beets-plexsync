@@ -216,13 +216,52 @@ spotify:
       model: "gpt-3.5-turbo"
       base_url: "https://api.openai.com/v1"  # Optional, for other providers
       search:
-        provider: "ollama"                                # Search provider (ollama is default)
-        model: "qwen2.5:latest"                           # Model to use for search processing
-        ollama_host: "http://localhost:11434"             # Ollama host address
-        searxng_host: "http://your-searxng-instance.com"  # Optional SearxNG instance.
+        # provider is auto-detected: OpenAI if llm.api_key is set, otherwise Ollama
+        # Explicitly set to "ollama" if you want to use Ollama instead
+        brave_api_key: "your-brave-api-key"               # Optional Brave Search API key
+        searxng_host: "http://your-searxng-instance.com"  # Optional SearxNG instance
         exa_api_key: "your-exa-api-key"                   # Optional Exa search API key
         tavily_api_key: "your-tavily-api-key"             # Optional Tavily API key
-        brave_api_key: "your-brave-api-key"               # Optional Brave Search API key
+        # Advanced: Override settings from main llm config
+        # api_key: ""           # Uses llm.api_key if empty
+        # base_url: ""          # Uses llm.base_url if empty
+        # model: ""             # Uses llm.model if empty (for OpenAI) or "qwen3:latest" (for Ollama)
+        # ollama_host: "http://localhost:11434"  # Only used when provider is "ollama"
+  ```
+
+  **Using OpenAI or OpenAI-compatible APIs for search:**
+  
+  The plugin automatically uses OpenAI-compatible models (via OpenAILike) for LLM search if you have `llm.api_key` configured. No additional configuration needed!
+  
+  **Simple configuration** (auto-detects OpenAI):
+  ```yaml
+  llm:
+    api_key: YOUR_OPENAI_API_KEY
+    model: "gpt-4.1-mini"  # Or your preferred model
+    base_url: "https://api.openai.com/v1"  # Or your preferred endpoint
+    search:
+      brave_api_key: "your-brave-api-key"  # At least one search provider is required
+  ```
+  
+  **Using Ollama instead** (explicit override):
+  ```yaml
+  llm:
+    search:
+      provider: "ollama"  # Explicitly use Ollama
+      model: "qwen3:latest"
+      ollama_host: "http://localhost:11434"
+      brave_api_key: "your-brave-api-key"
+  ```
+  
+  **Advanced: Override search-specific settings**:
+  ```yaml
+  llm:
+    api_key: YOUR_MAIN_API_KEY
+    model: "gpt-4"
+    search:
+      api_key: YOUR_SEARCH_SPECIFIC_KEY  # Use different key for search
+      model: "gpt-3.5-turbo"  # Use cheaper model for search
+      brave_api_key: "your-brave-api-key"
   ```
 
   Note: To enable LLM search, you must also set `use_llm_search: yes` in your `plexsync` configuration (see Advanced Usage section).
