@@ -305,14 +305,14 @@ def calculate_track_score(ps, track, base_time=None, tracks_context=None, playli
                 + (z_popularity * 0.25)
             )
     elif playlist_type == "70s80s_flashback":
-        # For 70s/80s Flashback: emphasize nostalgic value with high rating and age (70s/80s era)
-        # This playlist focuses on well-rated tracks from that era that may not have been played recently
+        # For 70s/80s Flashback: since we already filter for 70s/80s tracks, reduce age weighting
+        # Focus on tracks that are well-rated but not overplayed, with consideration for recency
         if is_rated:
-            # For rated tracks, emphasize age (70s/80s) and rating, but also consider recency (to avoid overplayed tracks)
-            weighted_score = (z_rating * 0.4) + (z_age * 0.3) + (z_recency * 0.2) + (z_play_count * 0.1)
+            # For rated tracks: emphasize rating and recency, negatively weight play count to avoid overplayed tracks
+            weighted_score = (z_rating * 0.4) + (z_recency * 0.3) + (-z_play_count * 0.2) + (z_age * 0.1)  # Reduced age weight since already filtered
         else:
-            # For unrated tracks from 70s/80s, emphasize recency and age (discovering forgotten gems)
-            weighted_score = (z_age * 0.4) + (z_recency * 0.35) + (z_popularity * 0.25)
+            # For unrated tracks: emphasize discovery potential and recency, with negative play count weight
+            weighted_score = (z_recency * 0.4) + (z_popularity * 0.35) + (-z_play_count * 0.25)
     elif playlist_type == "highly_rated":
         # For highly rated tracks: emphasize rating above all else, but add some recency to keep variety
         if is_rated:
