@@ -347,11 +347,22 @@ def select_tracks_weighted(ps, tracks, num_tracks, playlist_type=None):
     if not tracks:
         return []
 
+    # Add randomness to ensure different results each time
+    # Set a time-based seed to ensure different random states on each run
+    np.random.seed(int(time.time() * 1000000) % 2147483647)  # Max int32
+    
     # Standard weighted selection for all playlist types
     base_time = datetime.now()
     track_scores = [(track, calculate_track_score(ps, track, base_time, playlist_type=playlist_type)) for track in tracks]
     scores = np.array([score for _, score in track_scores])
-    probabilities = np.exp(scores / 10) / sum(np.exp(scores / 10))
+    
+    # Add a small amount of random noise to scores to prevent deterministic outcomes
+    # This ensures even tracks with similar scores have variation in selection
+    noise = np.random.normal(0, 1.0, size=len(scores))  # Increased noise for more randomness
+    scores_with_noise = scores + noise
+    
+    # Normalize scores to create probabilities
+    probabilities = np.exp(scores_with_noise / 10) / sum(np.exp(scores_with_noise / 10))
     selected_indices = np.random.choice(
         len(tracks), size=min(num_tracks, len(tracks)), replace=False, p=probabilities
     )
