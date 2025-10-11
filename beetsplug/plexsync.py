@@ -1272,3 +1272,11 @@ class PlexSync(BeetsPlugin):
         """Metadata plugin interface method - PlexSync doesn't provide track distance."""
         return Distance()
 
+    def candidates(self, album, artist, album_name, threshold):
+        """Metadata plugin interface method - PlexSync doesn't provide album candidates."""
+        return []
+
+    def item_candidates(self, item, threshold):
+        """Metadata plugin interface method - PlexSync doesn't provide item candidates."""
+        return []
+
