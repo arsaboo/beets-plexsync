@@ -305,14 +305,14 @@ def calculate_track_score(ps, track, base_time=None, tracks_context=None, playli
                 + (z_popularity * 0.25)
             )
     elif playlist_type == "70s80s_flashback":
-        # For 70s/80s Flashback: emphasize nostalgic value with high rating and age (70s/80s era)
-        # This playlist focuses on well-rated tracks from that era that may not have been played recently
+        # For 70s/80s Flashback: since we already filter for 70s/80s tracks, reduce age weighting
+        # Focus on tracks that are well-rated but not overplayed, with consideration for recency
         if is_rated:
-            # For rated tracks, emphasize age (70s/80s) and rating, but also consider recency (to avoid overplayed tracks)
-            weighted_score = (z_rating * 0.4) + (z_age * 0.3) + (z_recency * 0.2) + (z_play_count * 0.1)
+            # For rated tracks: emphasize rating and recency, negatively weight play count to avoid overplayed tracks
+            weighted_score = (z_rating * 0.4) + (z_recency * 0.3) + (-z_play_count * 0.2) + (z_age * 0.1)  # Reduced age weight since already filtered
         else:
-            # For unrated tracks from 70s/80s, emphasize recency and age (discovering forgotten gems)
-            weighted_score = (z_age * 0.4) + (z_recency * 0.35) + (z_popularity * 0.25)
+            # For unrated tracks: emphasize discovery potential and recency, with negative play count weight
+            weighted_score = (z_recency * 0.4) + (z_popularity * 0.35) + (-z_play_count * 0.25)
     elif playlist_type == "highly_rated":
         # For highly rated tracks: emphasize rating above all else, but add some recency to keep variety
         if is_rated:
@@ -347,11 +347,22 @@ def select_tracks_weighted(ps, tracks, num_tracks, playlist_type=None):
     if not tracks:
         return []
 
+    # Add randomness to ensure different results each time
+    # Set a time-based seed to ensure different random states on each run
+    np.random.seed(int(time.time() * 1000000) % 2147483647)  # Max int32
+    
     # Standard weighted selection for all playlist types
     base_time = datetime.now()
     track_scores = [(track, calculate_track_score(ps, track, base_time, playlist_type=playlist_type)) for track in tracks]
     scores = np.array([score for _, score in track_scores])
-    probabilities = np.exp(scores / 10) / sum(np.exp(scores / 10))
+    
+    # Add a small amount of random noise to scores to prevent deterministic outcomes
+    # This ensures even tracks with similar scores have variation in selection
+    noise = np.random.normal(0, 1.0, size=len(scores))  # Increased noise for more randomness
+    scores_with_noise = scores + noise
+    
+    # Normalize scores to create probabilities
+    probabilities = np.exp(scores_with_noise / 10) / sum(np.exp(scores_with_noise / 10))
     selected_indices = np.random.choice(
         len(tracks), size=min(num_tracks, len(tracks)), replace=False, p=probabilities
     )
