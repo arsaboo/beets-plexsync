@@ -86,7 +86,7 @@ def _log_cache_match_details(plugin, cache_key: str, track) -> None:
         plugin._log.debug("Caching result for key '{}' but failed to collect metadata: {}", cache_key, exc)
 
 
-def search_plex_song(plugin, song, manual_search=None, llm_attempted=False):
+def search_plex_song(plugin, song, manual_search=None, llm_attempted=False, use_local_candidates=True):
     """Fetch a Plex track using multi-strategy search for the given song.
 
     Parameters mirror the original PlexSync.search_plex_song method but
@@ -151,8 +151,95 @@ def search_plex_song(plugin, song, manual_search=None, llm_attempted=False):
                 plugin._log.debug("Failed to fetch legacy cached item {}: {}", cached_result, exc)
                 plugin.cache.set(cache_key, None)
 
+    candidate_variants: list[tuple[dict[str, str], float]] = []
+    local_candidates = []
+    if use_local_candidates and hasattr(plugin, "get_local_beets_candidates"):
+        try:
+            local_candidates = plugin.get_local_beets_candidates(song)
+        except Exception as exc:  # noqa: BLE001
+            plugin._log.debug("Local beets candidate lookup failed for {}: {}", song, exc)
+            local_candidates = []
+
+        if local_candidates:
+            summary = [
+                f"{cand.metadata.get('title', '')} ({cand.score:.2f})"
+                for cand in local_candidates[:3]
+            ]
+            plugin._log.debug(
+                "Local beets candidates for '{}': {}", song.get("title", ""), ", ".join(summary)
+            )
+
+            if hasattr(plugin, "_try_candidate_direct_match"):
+                for candidate in local_candidates[:3]:
+                    direct_match = plugin._try_candidate_direct_match(candidate)
+                    if direct_match is not None:
+                        plugin._log.debug(
+                            "Resolved '{}' via cached Plex ratingKey using beets metadata",
+                            song.get("title", ""),
+                        )
+                        _log_cache_match_details(plugin, cache_key, direct_match)
+                        plugin._cache_result(cache_key, direct_match)
+                        return direct_match
+
+            if hasattr(plugin, "_prepare_candidate_variants"):
+                candidate_variants = plugin._prepare_candidate_variants(local_candidates, song)
+
+    if candidate_variants:
+        variant_attempted = False
+        for variant_metadata, variant_score in candidate_variants[:5]:
+            title = (variant_metadata.get("title") or "").strip()
+            album = (variant_metadata.get("album") or "").strip()
+            artist = (variant_metadata.get("artist") or "").strip()
+
+            # Skip variants that provide no useful metadata
+            if not any((title, album, artist)):
+                continue
+
+            variant_attempted = True
+            plugin._log.debug(
+                "Trying beets vector candidate variant (score {:.2f}): title='{}', album='{}', artist='{}'",
+                variant_score,
+                title or "<unknown>",
+                album or "<unknown>",
+                artist or "<unknown>",
+            )
+
+            # Avoid recursion loops by disabling local candidate lookup in nested calls.
+            variant_song = {"title": title, "album": album, "artist": artist}
+            try:
+                variant_result = search_plex_song(
+                    plugin,
+                    variant_song,
+                    manual_search=False,
+                    llm_attempted=True,
+                    use_local_candidates=False,
+                )
+            except RecursionError as exc:  # pragma: no cover - defensive
+                plugin._log.debug("Variant recursion failed for {}: {}", variant_song, exc)
+                continue
+
+            if variant_result is not None:
+                plugin._log.debug(
+                    "Resolved '{}' via beets candidate variant '{}'",
+                    song.get("title", ""),
+                    title,
+                )
+                _log_cache_match_details(plugin, cache_key, variant_result)
+                plugin._cache_result(cache_key, variant_result)
+                return variant_result
+
+        if variant_attempted:
+            # Record that we attempted local candidate variants for debugging output.
+            search_strategies_marker = "beets_variant"
+        else:
+            search_strategies_marker = None
+    else:
+        search_strategies_marker = None
+
     tracks = []
     search_strategies_tried: list[str] = []
+    if search_strategies_marker:
+        search_strategies_tried.append(search_strategies_marker)
     
     # Store results from Strategy 2 (Title-only) for reuse in other strategies
     title_only_tracks = []
