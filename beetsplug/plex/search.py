@@ -491,9 +491,27 @@ def search_plex_song(plugin, song, manual_search=None, llm_attempted=False, use_
 
     if len(tracks) == 1:
         result = tracks[0]
-        _log_cache_match_details(plugin, cache_key, result)
-        plugin._cache_result(cache_key, result)
-        return result
+        accept_result = True
+        similarity = None
+        if hasattr(plugin, "_match_score_for_query"):
+            similarity = plugin._match_score_for_query(song, result)
+            plugin._log.debug(
+                "Single-track search result similarity for '{}' -> {:.2f}",
+                song.get("title", ""),
+                similarity,
+            )
+            if similarity < 0.8:
+                plugin._log.debug(
+                    "Rejecting single-track result for '{}' due to low similarity ({:.2f})",
+                    song.get("title", ""),
+                    similarity,
+                )
+                accept_result = False
+        if accept_result:
+            _log_cache_match_details(plugin, cache_key, result)
+            plugin._cache_result(cache_key, result)
+            return result
+        tracks = []
     if len(tracks) > 1:
         sorted_tracks = plugin.find_closest_match(song, tracks)
         plugin._log.debug(

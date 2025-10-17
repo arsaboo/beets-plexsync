@@ -254,6 +254,54 @@ class PlexSearchTests(unittest.TestCase):
         cache_keys = list(cache.storage.keys())
         self.assertTrue(any('Original Song' in key for key in cache_keys))
 
+    def test_single_track_low_similarity_rejected(self):
+        track = types.SimpleNamespace(
+            ratingKey=909,
+            title='Mismatch Song',
+            parentTitle='Mismatch Album',
+            artist=lambda: types.SimpleNamespace(title='Mismatch Artist'),
+        )
+
+        class Music:
+            def __init__(self):
+                self.search_calls = []
+
+            def searchTracks(self, **kwargs):
+                self.search_calls.append(kwargs)
+                return [track]
+
+            def fetchItem(self, key):
+                raise AssertionError('fetchItem should not be called without a rating key')
+
+        cache = CacheStub()
+        positive_results = []
+        music = Music()
+
+        plugin = types.SimpleNamespace()
+        plugin._log = DummyLogger()
+        plugin.cache = cache
+        plugin.music = music
+        plugin.search_llm = None
+        plugin.manual_track_search = lambda song: None
+
+        def cache_result(key, result, cleaned=None):
+            if result is not None:
+                positive_results.append(result)
+            cache.set(key, result, cleaned)
+
+        plugin._cache_result = cache_result
+        plugin.find_closest_match = lambda song, tracks: []
+        plugin.get_local_beets_candidates = lambda song: []
+        plugin._try_candidate_direct_match = lambda cand, query: None
+        plugin._prepare_candidate_variants = lambda candidates, song: []
+        plugin._match_score_for_query = lambda song, found: 0.55
+
+        song = {'title': 'Original Song', 'album': 'Original Album', 'artist': 'Original Artist'}
+        result = self.search.search_plex_song(plugin, song, manual_search=False)
+
+        self.assertIsNone(result)
+        self.assertFalse(positive_results)
+
     def test_variant_rejected_when_similarity_low(self):
         variant_track = types.SimpleNamespace(
             ratingKey=512,
