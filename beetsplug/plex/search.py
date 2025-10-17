@@ -98,6 +98,8 @@ def search_plex_song(plugin, song, manual_search=None, llm_attempted=False, use_
 
     cache_key = plugin.cache._make_cache_key(song)
     plugin._log.debug("Generated cache key: '{}' for song: {}", cache_key, song)
+    if hasattr(plugin, "_candidate_confirmations"):
+        plugin._candidate_confirmations = []
 
     cached_result = plugin.cache.get(cache_key)
     if cached_result is not None:
@@ -171,7 +173,7 @@ def search_plex_song(plugin, song, manual_search=None, llm_attempted=False, use_
 
             if hasattr(plugin, "_try_candidate_direct_match"):
                 for candidate in local_candidates[:3]:
-                    direct_match = plugin._try_candidate_direct_match(candidate, song)
+                    direct_match = plugin._try_candidate_direct_match(candidate, song, cache_key)
                     if direct_match is not None:
                         plugin._log.debug(
                             "Resolved '{}' via cached Plex ratingKey using beets metadata",
@@ -234,6 +236,14 @@ def search_plex_song(plugin, song, manual_search=None, llm_attempted=False, use_
                             song.get("title", ""),
                             similarity,
                         )
+                        if hasattr(plugin, "_queue_candidate_confirmation") and cache_key:
+                            plugin._queue_candidate_confirmation(
+                                track=variant_result,
+                                similarity=similarity,
+                                cache_key=cache_key,
+                                source="variant",
+                                original_song=song,
+                            )
                         continue
 
                 plugin._log.debug(
@@ -506,6 +516,14 @@ def search_plex_song(plugin, song, manual_search=None, llm_attempted=False, use_
                     song.get("title", ""),
                     similarity,
                 )
+                if hasattr(plugin, "_queue_candidate_confirmation") and cache_key:
+                    plugin._queue_candidate_confirmation(
+                        track=result,
+                        similarity=similarity,
+                        cache_key=cache_key,
+                        source="single",
+                        original_song=song,
+                    )
                 accept_result = False
         if accept_result:
             _log_cache_match_details(plugin, cache_key, result)
@@ -573,6 +591,45 @@ def search_plex_song(plugin, song, manual_search=None, llm_attempted=False, use_
             cleaned_metadata_for_negative = cleaned_song
 
     if manual_search:
+        if getattr(plugin, "_candidate_confirmations", None):
+            while plugin._candidate_confirmations:
+                candidate = plugin._candidate_confirmations.pop(0)
+                track = candidate.get("track")
+                if track is None:
+                    continue
+                similarity = candidate.get("similarity", 0.0)
+                source = candidate.get("source", "candidate")
+                try:
+                    artist_name = getattr(track, "originalTitle", None) or track.artist().title
+                except Exception:  # noqa: BLE001
+                    artist_name = ""
+                artist_name = artist_name or "<unknown>"
+                title = getattr(track, "title", "") or "<unknown>"
+                prompt_text = (
+                    f"\nUse Plex track '{title}' by {artist_name}? "
+                    f"(match score {similarity:.2f}, source: {source})"
+                )
+                prompt = ui.colorize('text_highlight', prompt_text) + " (Y/n)"
+                if ui.input_yn(prompt):
+                    chosen_cache_key = candidate.get("cache_key", cache_key)
+                    plugin._log.debug(
+                        "User accepted {} candidate '{}' for '{}'",
+                        source,
+                        title,
+                        song.get("title", ""),
+                    )
+                    _log_cache_match_details(plugin, chosen_cache_key, track)
+                    plugin._cache_result(chosen_cache_key, track)
+                    return track
+                plugin._log.debug(
+                    "User rejected {} candidate '{}' (score {:.2f}) for '{}'",
+                    source,
+                    title,
+                    similarity,
+                    song.get("title", ""),
+                )
+        if hasattr(plugin, "_candidate_confirmations"):
+            plugin._candidate_confirmations = []
         plugin._log.info(
             "\nTrack {} - {} - {} not found in Plex (tried strategies: {})",
             song.get("album", "Unknown"),
@@ -598,4 +655,6 @@ def search_plex_song(plugin, song, manual_search=None, llm_attempted=False, use_
         plugin._cache_result(cache_key, None, cleaned_metadata_for_negative)
     else:
         plugin._cache_result(cache_key, None)
+    if hasattr(plugin, "_candidate_confirmations"):
+        plugin._candidate_confirmations = []
     return None

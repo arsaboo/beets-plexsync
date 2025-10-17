@@ -160,7 +160,7 @@ class PlexSearchTests(unittest.TestCase):
                 return None
             return music.fetchItem(rating_key)
 
-        plugin._try_candidate_direct_match = stub_direct_match
+        plugin._try_candidate_direct_match = lambda cand, query, cache_key=None: stub_direct_match(cand, query)
         plugin._prepare_candidate_variants = lambda candidates, song: []
 
         song = {'title': 'Original', 'album': 'Album', 'artist': 'Artist'}
@@ -230,7 +230,7 @@ class PlexSearchTests(unittest.TestCase):
             0.88,
         )
         plugin.get_local_beets_candidates = lambda song: [candidate]
-        plugin._try_candidate_direct_match = lambda cand, query: None
+        plugin._try_candidate_direct_match = lambda cand, query, cache_key=None: None
 
         def prepare_variants(candidates, original_song):
             return [(candidates[0].song_dict(), candidates[0].score)]
@@ -292,7 +292,7 @@ class PlexSearchTests(unittest.TestCase):
         plugin._cache_result = cache_result
         plugin.find_closest_match = lambda song, tracks: []
         plugin.get_local_beets_candidates = lambda song: []
-        plugin._try_candidate_direct_match = lambda cand, query: None
+        plugin._try_candidate_direct_match = lambda cand, query, cache_key=None: None
         plugin._prepare_candidate_variants = lambda candidates, song: []
         plugin._match_score_for_query = lambda song, found: 0.55
 
@@ -301,6 +301,69 @@ class PlexSearchTests(unittest.TestCase):
 
         self.assertIsNone(result)
         self.assertFalse(positive_results)
+
+    def test_user_confirmation_accepts_candidate(self):
+        track = types.SimpleNamespace(
+            ratingKey=111,
+            title='Candidate Song',
+            parentTitle='Candidate Album',
+            artist=lambda: types.SimpleNamespace(title='Candidate Artist'),
+        )
+
+        class Music:
+            def __init__(self):
+                self.search_calls = []
+
+            def searchTracks(self, **kwargs):
+                self.search_calls.append(kwargs)
+                return [track]
+
+            def fetchItem(self, key):
+                raise AssertionError('fetchItem should not be called without a rating key')
+
+        cache = CacheStub()
+        cached_results = []
+        music = Music()
+
+        plugin = types.SimpleNamespace()
+        plugin._log = DummyLogger()
+        plugin.cache = cache
+        plugin.music = music
+        plugin.search_llm = None
+        plugin.manual_track_search_called = False
+
+        def manual_track_search(_song):
+            plugin.manual_track_search_called = True
+            return None
+
+        plugin.manual_track_search = manual_track_search
+        plugin._cache_result = lambda key, result, cleaned=None: cached_results.append((key, result))
+        plugin.find_closest_match = lambda song, tracks: []
+        plugin.get_local_beets_candidates = lambda song: []
+        plugin._try_candidate_direct_match = lambda cand, query, cache_key=None: None
+        plugin._prepare_candidate_variants = lambda candidates, song: []
+        plugin._candidate_confirmations = []
+
+        def queue_candidate_confirmation(**kwargs):
+            plugin._candidate_confirmations.append(kwargs)
+
+        plugin._queue_candidate_confirmation = queue_candidate_confirmation
+        plugin._match_score_for_query = lambda song, found: 0.75
+
+        ui_module = self.search.ui
+        original_input_yn = getattr(ui_module, 'input_yn', lambda prompt, default=True: default)
+        responses = iter([True])
+        ui_module.input_yn = lambda prompt, default=True: next(responses, default)
+        self.addCleanup(lambda: setattr(ui_module, "input_yn", original_input_yn))
+
+        song = {'title': 'Original Song', 'album': 'Original Album', 'artist': 'Original Artist'}
+
+        result = self.search.search_plex_song(plugin, song, manual_search=True)
+
+        self.assertIs(result, track)
+        self.assertTrue(cached_results)
+        self.assertFalse(plugin.manual_track_search_called)
+        self.assertFalse(plugin._candidate_confirmations)
 
     def test_variant_rejected_when_similarity_low(self):
         variant_track = types.SimpleNamespace(
@@ -361,7 +424,7 @@ class PlexSearchTests(unittest.TestCase):
             {'title': 'Variant Song', 'album': 'Variant Album', 'artist': 'Variant Artist'},
             0.88,
         )]
-        plugin._try_candidate_direct_match = lambda cand, query: None
+        plugin._try_candidate_direct_match = lambda cand, query, cache_key=None: None
         plugin._prepare_candidate_variants = lambda candidates, song: [
             (candidates[0].song_dict(), candidates[0].score)
         ]

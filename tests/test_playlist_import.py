@@ -70,6 +70,7 @@ def ensure_stubs(data):
     ui_module.UserError = UserError
     ui_module.colorize = colorize
     ui_module.input_ = lambda prompt='': ''
+    ui_module.input_yn = lambda prompt='', default=True: default
     ui_module.input_options = lambda *args, **kwargs: 0
     ui_module.print_ = print
 

@@ -146,6 +146,7 @@ class PlexSync(BeetsPlugin):
         # Initialize cache with plugin instance reference
         cache_path = os.path.join(self.config_dir, 'plexsync_cache.db')
         self.cache = Cache(cache_path, self)
+        self._candidate_confirmations: List[Dict[str, object]] = []
         self._vector_index: Optional[BeetsVectorIndex] = None
         self._vector_index_info: Dict[str, Optional[float]] = {}
 
@@ -427,10 +428,33 @@ class PlexSync(BeetsPlugin):
         score, _ = plex_track_distance(query_proxy, track)
         return score
 
+    def _queue_candidate_confirmation(
+        self,
+        *,
+        track,
+        similarity: float,
+        cache_key: str,
+        source: str,
+        original_song: Dict[str, str],
+    ) -> None:
+        """Queue a potential match for user confirmation."""
+        if track is None:
+            return
+        self._candidate_confirmations.append(
+            {
+                "track": track,
+                "similarity": similarity,
+                "cache_key": cache_key,
+                "source": source,
+                "song": dict(original_song or {}),
+            }
+        )
+
     def _try_candidate_direct_match(
         self,
         candidate: "PlexSync.LocalCandidate",
         original_song: Dict[str, str],
+        cache_key: Optional[str] = None,
     ):
         rating_key = candidate.metadata.get("plex_ratingkey")
         if not rating_key:
@@ -456,6 +480,14 @@ class PlexSync(BeetsPlugin):
         )
         if query_score >= 0.8:
             return track
+        if cache_key:
+            self._queue_candidate_confirmation(
+                track=track,
+                similarity=query_score,
+                cache_key=cache_key,
+                source="direct",
+                original_song=original_song,
+            )
         return None
 
     def _prepare_candidate_variants(
