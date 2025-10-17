@@ -349,7 +349,11 @@ class PlexSync(BeetsPlugin):
             )
         return candidates
 
-    def _try_candidate_direct_match(self, candidate: "PlexSync.LocalCandidate"):
+    def _try_candidate_direct_match(
+        self,
+        candidate: "PlexSync.LocalCandidate",
+        original_song: Dict[str, str],
+    ):
         rating_key = candidate.metadata.get("plex_ratingkey")
         if not rating_key:
             return None
@@ -361,15 +365,23 @@ class PlexSync(BeetsPlugin):
             )
             return None
 
-        proxy = candidate.as_item_proxy()
-        score, _ = plex_track_distance(proxy, track)
-        self._log.debug(
-            "Beets candidate '{}' direct match score {:.2f} (ratingKey {})",
-            candidate.metadata.get("title", ""),
-            score,
-            rating_key,
+        candidate_proxy = candidate.as_item_proxy()
+        candidate_score, _ = plex_track_distance(candidate_proxy, track)
+
+        query_proxy = SimpleNamespace(
+            title=(original_song.get("title") or ""),
+            album=(original_song.get("album") or ""),
+            artist=(original_song.get("artist") or ""),
         )
-        if score >= 0.8:
+        query_score, _ = plex_track_distance(query_proxy, track)
+        self._log.debug(
+            "Beets candidate '{}' ratingKey {} -> candidate score {:.2f}, query score {:.2f}",
+            candidate.metadata.get("title", ""),
+            rating_key,
+            candidate_score,
+            query_score,
+        )
+        if query_score >= 0.8:
             return track
         return None
 

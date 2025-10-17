@@ -171,7 +171,7 @@ def search_plex_song(plugin, song, manual_search=None, llm_attempted=False, use_
 
             if hasattr(plugin, "_try_candidate_direct_match"):
                 for candidate in local_candidates[:3]:
-                    direct_match = plugin._try_candidate_direct_match(candidate)
+                    direct_match = plugin._try_candidate_direct_match(candidate, song)
                     if direct_match is not None:
                         plugin._log.debug(
                             "Resolved '{}' via cached Plex ratingKey using beets metadata",

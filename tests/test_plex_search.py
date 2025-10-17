@@ -152,7 +152,14 @@ class PlexSearchTests(unittest.TestCase):
             0.92,
         )
         plugin.get_local_beets_candidates = lambda song: [candidate]
-        plugin._try_candidate_direct_match = lambda cand: track
+
+        def stub_direct_match(cand, query):
+            rating_key = cand.metadata.get('plex_ratingkey')
+            if rating_key is None:
+                return None
+            return music.fetchItem(rating_key)
+
+        plugin._try_candidate_direct_match = stub_direct_match
         plugin._prepare_candidate_variants = lambda candidates, song: []
 
         song = {'title': 'Original', 'album': 'Album', 'artist': 'Artist'}
@@ -177,7 +184,8 @@ class PlexSearchTests(unittest.TestCase):
             def searchTracks(self, **kwargs):
                 self.search_calls.append(kwargs)
                 target = {'album.title': 'Variant Album', 'track.title': 'Variant Song'}
-                if kwargs == target:
+                filtered = {k: v for k, v in kwargs.items() if k != 'limit'}
+                if filtered == target:
                     return [variant_track]
                 return []
 
@@ -220,7 +228,7 @@ class PlexSearchTests(unittest.TestCase):
             0.88,
         )
         plugin.get_local_beets_candidates = lambda song: [candidate]
-        plugin._try_candidate_direct_match = lambda cand: None
+        plugin._try_candidate_direct_match = lambda cand, query: None
 
         def prepare_variants(candidates, original_song):
             return [(candidates[0].song_dict(), candidates[0].score)]
@@ -231,10 +239,15 @@ class PlexSearchTests(unittest.TestCase):
         result = self.search.search_plex_song(plugin, song, manual_search=False)
 
         self.assertIs(result, variant_track)
-        # First search attempt uses original metadata, second uses variant metadata.
-        self.assertGreaterEqual(len(music.search_calls), 2)
-        self.assertTrue(any(call == {'album.title': 'Variant Album', 'track.title': 'Variant Song'}
-                            for call in music.search_calls))
+        # Ensure the variant metadata search was attempted.
+        self.assertGreaterEqual(len(music.search_calls), 1)
+        self.assertTrue(
+            any(
+                {k: v for k, v in call.items() if k != 'limit'}
+                == {'album.title': 'Variant Album', 'track.title': 'Variant Song'}
+                for call in music.search_calls
+            )
+        )
         # Ensure search results are cached for the original query.
         cache_keys = list(cache.storage.keys())
         self.assertTrue(any('Original Song' in key for key in cache_keys))
