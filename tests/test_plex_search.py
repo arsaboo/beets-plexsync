@@ -146,6 +146,7 @@ class PlexSearchTests(unittest.TestCase):
         plugin.search_llm = None
         plugin.manual_track_search = lambda song: None
         plugin._cache_result = lambda *args, **kwargs: None
+        plugin._match_score_for_query = lambda song, track: 0.95
 
         candidate = Candidate(
             {'title': 'Vector Match', 'album': 'Album', 'artist': 'Artist', 'plex_ratingkey': 303},
@@ -222,6 +223,7 @@ class PlexSearchTests(unittest.TestCase):
             cache.set(key, result, cleaned)
         plugin._cache_result = cache_result
         plugin.find_closest_match = lambda song, tracks: [(variant_track, 0.95)]
+        plugin._match_score_for_query = lambda song, track: 0.92
 
         candidate = Candidate(
             {'title': 'Variant Song', 'album': 'Variant Album', 'artist': 'Variant Artist'},
@@ -251,6 +253,84 @@ class PlexSearchTests(unittest.TestCase):
         # Ensure search results are cached for the original query.
         cache_keys = list(cache.storage.keys())
         self.assertTrue(any('Original Song' in key for key in cache_keys))
+
+    def test_variant_rejected_when_similarity_low(self):
+        variant_track = types.SimpleNamespace(
+            ratingKey=512,
+            title='Variant Song',
+            parentTitle='Variant Album',
+            artist=lambda: types.SimpleNamespace(title='Variant Artist'),
+        )
+
+        class Music:
+            def __init__(self):
+                self.search_calls = []
+
+            def searchTracks(self, **kwargs):
+                self.search_calls.append(kwargs)
+                filtered = {k: v for k, v in kwargs.items() if k != 'limit'}
+                target = {'album.title': 'Variant Album', 'track.title': 'Variant Song'}
+                if filtered == target:
+                    return [variant_track]
+                return []
+
+            def fetchItem(self, key):
+                raise AssertionError('fetchItem should not be called without a rating key')
+
+        class Candidate:
+            def __init__(self, metadata, score):
+                self.metadata = metadata
+                self.score = score
+
+            def song_dict(self):
+                return {
+                    'title': self.metadata.get('title', ''),
+                    'album': self.metadata.get('album', ''),
+                    'artist': self.metadata.get('artist', ''),
+                }
+
+            def overlap_tokens(self, counts):
+                return []
+
+        cache = CacheStub()
+        cached_results = []
+        music = Music()
+
+        plugin = types.SimpleNamespace()
+        plugin._log = DummyLogger()
+        plugin.cache = cache
+        plugin.music = music
+        plugin.search_llm = None
+        plugin.manual_track_search = lambda song: None
+        def cache_result(key, result, cleaned=None):
+            key_str = str(key)
+            if result is not None and 'Original Song' in key_str:
+                cached_results.append(result)
+            cache.set(key, result, cleaned)
+        plugin._cache_result = cache_result
+        plugin.find_closest_match = lambda song, tracks: []
+        plugin.get_local_beets_candidates = lambda song: [Candidate(
+            {'title': 'Variant Song', 'album': 'Variant Album', 'artist': 'Variant Artist'},
+            0.88,
+        )]
+        plugin._try_candidate_direct_match = lambda cand, query: None
+        plugin._prepare_candidate_variants = lambda candidates, song: [
+            (candidates[0].song_dict(), candidates[0].score)
+        ]
+
+        def match_score(song, track):
+            if song.get('title') == 'Original Song':
+                return 0.5
+            return 0.95
+
+        plugin._match_score_for_query = match_score
+
+        song = {'title': 'Original Song', 'album': 'Original Album', 'artist': 'Original Artist'}
+        result = self.search.search_plex_song(plugin, song, manual_search=False)
+
+        self.assertIsNone(result)
+        # Ensure no positive cache entry was written.
+        self.assertFalse(cached_results)
 
 
 if __name__ == '__main__':

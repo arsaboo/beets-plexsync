@@ -219,6 +219,23 @@ def search_plex_song(plugin, song, manual_search=None, llm_attempted=False, use_
                 continue
 
             if variant_result is not None:
+                if hasattr(plugin, "_match_score_for_query"):
+                    similarity = plugin._match_score_for_query(song, variant_result)
+                    plugin._log.debug(
+                        "Variant '{}' similarity to query '{}' -> {:.2f}",
+                        title or "<unknown>",
+                        song.get("title", ""),
+                        similarity,
+                    )
+                    if similarity < 0.8:
+                        plugin._log.debug(
+                            "Rejecting variant '{}' for '{}' due to low similarity ({:.2f})",
+                            title or "<unknown>",
+                            song.get("title", ""),
+                            similarity,
+                        )
+                        continue
+
                 plugin._log.debug(
                     "Resolved '{}' via beets candidate variant '{}'",
                     song.get("title", ""),

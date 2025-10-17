@@ -346,8 +346,25 @@ class PlexSync(BeetsPlugin):
                     score=score,
                     overlap_tokens=entry.overlap_tokens(query_counts),
                 )
-            )
+        )
         return candidates
+
+    def _match_score_for_query(
+        self,
+        song: Dict[str, str],
+        track,
+    ) -> float:
+        """Evaluate similarity between the requested song and a Plex track."""
+        if track is None:
+            return 0.0
+
+        query_proxy = SimpleNamespace(
+            title=(song.get("title") or ""),
+            album=(song.get("album") or ""),
+            artist=(song.get("artist") or ""),
+        )
+        score, _ = plex_track_distance(query_proxy, track)
+        return score
 
     def _try_candidate_direct_match(
         self,
@@ -368,12 +385,7 @@ class PlexSync(BeetsPlugin):
         candidate_proxy = candidate.as_item_proxy()
         candidate_score, _ = plex_track_distance(candidate_proxy, track)
 
-        query_proxy = SimpleNamespace(
-            title=(original_song.get("title") or ""),
-            album=(original_song.get("album") or ""),
-            artist=(original_song.get("artist") or ""),
-        )
-        query_score, _ = plex_track_distance(query_proxy, track)
+        query_score = self._match_score_for_query(original_song, track)
         self._log.debug(
             "Beets candidate '{}' ratingKey {} -> candidate score {:.2f}, query score {:.2f}",
             candidate.metadata.get("title", ""),
