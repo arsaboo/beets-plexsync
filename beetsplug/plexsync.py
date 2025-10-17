@@ -66,6 +66,12 @@ from beetsplug.plex import spotify_transfer
 from beetsplug.plex import collage as collage_mod
 from beetsplug.plex import smartplaylists as sp_mod
 
+_QUERY_TITLE_BY_FROM_RE = re.compile(
+    r'^(?P<title>.+?)\s+by\s+(?P<artist>.+?)\s+from\s+(?P<album>.+)$',
+    re.IGNORECASE,
+)
+_FROM_CLAUSE_RE = re.compile(r'\(from\s+"?([^")]+)"?\)', re.IGNORECASE)
+
 
 class PlexSync(BeetsPlugin):
     """Define plexsync class."""
@@ -349,6 +355,60 @@ class PlexSync(BeetsPlugin):
         )
         return candidates
 
+    @staticmethod
+    def _strip_from_clause(value: str) -> Tuple[str, Optional[str]]:
+        """Remove (From "...") clauses and return cleaned value and extracted album."""
+        if not value:
+            return "", None
+        extracted = None
+        cleaned = value
+        match = _FROM_CLAUSE_RE.search(value)
+        if match:
+            extracted = match.group(1).strip().strip('"').strip("'")
+            cleaned = _FROM_CLAUSE_RE.sub("", value).strip()
+        cleaned = " ".join(cleaned.split())
+        return cleaned, extracted
+
+    def _normalize_query_metadata(self, song: Dict[str, str]) -> Dict[str, str]:
+        """Normalize user query metadata for similarity comparisons."""
+        if not song:
+            return {"title": "", "album": "", "artist": ""}
+
+        def _clean_field(value: Optional[str]) -> str:
+            if value is None:
+                return ""
+            cleaned_value = value.strip()
+            if cleaned_value.lower() in {"none", "null"}:
+                return ""
+            return cleaned_value
+
+        normalized = {
+            "title": _clean_field(song.get("title")),
+            "album": _clean_field(song.get("album")),
+            "artist": _clean_field(song.get("artist")),
+        }
+
+        match = _QUERY_TITLE_BY_FROM_RE.match(normalized["title"])
+        if match:
+            normalized["title"] = match.group("title").strip().strip('"').strip("'")
+            artist_from_title = match.group("artist").strip().strip('"').strip("'")
+            album_from_title = match.group("album").strip().strip('"').strip("'")
+            if not normalized["artist"]:
+                normalized["artist"] = artist_from_title
+            if not normalized["album"]:
+                normalized["album"] = album_from_title
+
+        normalized["title"], extracted_album = self._strip_from_clause(normalized["title"])
+        if extracted_album and not normalized["album"]:
+            normalized["album"] = extracted_album
+
+        if normalized["album"]:
+            normalized["album"], extracted_album = self._strip_from_clause(normalized["album"])
+            if extracted_album and not normalized["album"]:
+                normalized["album"] = extracted_album
+
+        return normalized
+
     def _match_score_for_query(
         self,
         song: Dict[str, str],
@@ -358,10 +418,11 @@ class PlexSync(BeetsPlugin):
         if track is None:
             return 0.0
 
+        normalized = self._normalize_query_metadata(song or {})
         query_proxy = SimpleNamespace(
-            title=(song.get("title") or ""),
-            album=(song.get("album") or ""),
-            artist=(song.get("artist") or ""),
+            title=normalized.get("title", ""),
+            album=normalized.get("album", ""),
+            artist=normalized.get("artist", ""),
         )
         score, _ = plex_track_distance(query_proxy, track)
         return score
