@@ -582,8 +582,38 @@ class PlexSync(BeetsPlugin):
     def listen_for_db_change(self, lib, model):
         """Listens for beets db change and register the update for the end."""
         self.register_listener("cli_exit", self._plexupdate)
-        self._vector_index = None
-        self._vector_index_info = {}
+
+        index = getattr(self, "_vector_index", None)
+        if index is None:
+            # Allow the next lookup to rebuild lazily if needed.
+            self._vector_index_info = {}
+            return
+
+        item_id = getattr(model, "id", None)
+        if item_id is None:
+            return
+
+        metadata = self._extract_vector_metadata(model)
+        if not index.upsert_item(item_id, metadata):
+            # No meaningful tokens; still ensure metadata bookkeeping stays fresh.
+            pass
+
+        info = dict(self._vector_index_info or {})
+        info["size"] = len(index)
+
+        db_path = info.get("db_path")
+        if not db_path and lib is not None:
+            db_path = getattr(lib, "path", None)
+            if db_path:
+                info["db_path"] = db_path
+
+        if db_path:
+            try:
+                info["mtime"] = os.path.getmtime(db_path)
+            except OSError:
+                info["mtime"] = None
+
+        self._vector_index_info = info
 
     def commands(self):
         """Add beet UI commands to interact with Plex."""

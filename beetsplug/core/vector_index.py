@@ -108,6 +108,26 @@ class BeetsVectorIndex:
             self._token_index[token].add(item_id)
         return True
 
+    def remove_item(self, item_id: int) -> bool:
+        """Remove an item from the index if present."""
+        entry = self._entries.pop(item_id, None)
+        if entry is None:
+            return False
+
+        for token in entry.counts:
+            bucket = self._token_index.get(token)
+            if not bucket:
+                continue
+            bucket.discard(item_id)
+            if not bucket:
+                self._token_index.pop(token, None)
+        return True
+
+    def upsert_item(self, item_id: int, metadata: Mapping[str, str]) -> bool:
+        """Add or replace an item in the index."""
+        self.remove_item(item_id)
+        return self.add_item(item_id, metadata)
+
     def iter_entries(self) -> Iterator[VectorEntry]:
         return iter(self._entries.values())
 
