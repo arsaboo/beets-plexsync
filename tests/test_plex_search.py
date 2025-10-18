@@ -21,10 +21,8 @@ class CacheStub:
 
     def set(self, query, value, cleaned_metadata=None):
         key = self._make_cache_key(query)
-        if cleaned_metadata is None or isinstance(value, tuple):
-            self.storage[key] = value
-        else:
-            self.storage[key] = (value, cleaned_metadata)
+        rating_key = -1 if value is None else value
+        self.storage[key] = (rating_key, cleaned_metadata)
 
     def debug_cache_keys(self, song):  # pragma: no cover
         pass
@@ -364,6 +362,103 @@ class PlexSearchTests(unittest.TestCase):
         self.assertTrue(cached_results)
         self.assertFalse(plugin.manual_track_search_called)
         self.assertFalse(plugin._candidate_confirmations)
+
+    def test_confirmation_survives_nested_call(self):
+        variant_track = types.SimpleNamespace(
+            ratingKey=222,
+            title='Variant Track',
+            parentTitle='Variant Album',
+            artist=lambda: types.SimpleNamespace(title='Variant Artist'),
+        )
+
+        class Music:
+            def __init__(self):
+                self.search_calls = []
+
+            def searchTracks(self, **kwargs):
+                self.search_calls.append(kwargs)
+                if kwargs.get('track.title') == 'Variant Track':
+                    return [variant_track]
+                return []
+
+            def fetchItem(self, key):
+                if key == variant_track.ratingKey:
+                    return variant_track
+                raise AssertionError(f'unexpected fetchItem call for {key}')
+
+        class Candidate:
+            def __init__(self, metadata, score):
+                self.metadata = metadata
+                self.score = score
+
+            def song_dict(self):
+                return {
+                    'title': self.metadata.get('title', ''),
+                    'album': self.metadata.get('album', ''),
+                    'artist': self.metadata.get('artist', ''),
+                }
+
+            def overlap_tokens(self, counts):
+                return []
+
+        cache = CacheStub()
+        cached_results = []
+        music = Music()
+
+        plugin = types.SimpleNamespace()
+        plugin._log = DummyLogger()
+        plugin.cache = cache
+        plugin.music = music
+        plugin.search_llm = None
+        plugin.manual_track_search_called = False
+
+        def manual_track_search(_song):
+            plugin.manual_track_search_called = True
+            return None
+
+        plugin.manual_track_search = manual_track_search
+        plugin._cache_result = lambda key, result, cleaned=None: cached_results.append((key, result))
+        plugin.find_closest_match = lambda song, tracks: [(variant_track, 0.95)]
+
+        candidate = Candidate(
+            {'title': 'Original Candidate', 'album': 'Original Album', 'artist': 'Original Artist'},
+            0.72,
+        )
+        plugin.get_local_beets_candidates = lambda song: [candidate]
+        plugin._try_candidate_direct_match = lambda cand, query, cache_key=None: None
+
+        def prepare_variants(_candidates, _song):
+            return [(
+                {'title': 'Variant Track', 'album': 'Variant Album', 'artist': 'Variant Artist'},
+                0.82,
+            )]
+
+        plugin._prepare_candidate_variants = prepare_variants
+        plugin._candidate_confirmations = []
+        plugin._queue_candidate_confirmation = lambda **kwargs: plugin._candidate_confirmations.append(kwargs)
+
+        def match_score(query, track):
+            if query.get('title') == 'Variant Track':
+                return 0.95
+            return 0.55
+
+        plugin._match_score_for_query = match_score
+
+        ui_module = self.search.ui
+        original_input_yn = getattr(ui_module, 'input_yn', lambda prompt, default=True: default)
+        responses = iter([True])
+        ui_module.input_yn = lambda prompt, default=True: next(responses, default)
+        self.addCleanup(lambda: setattr(ui_module, "input_yn", original_input_yn))
+
+        song = {'title': 'Original Song', 'album': 'Original Album', 'artist': 'Original Artist'}
+
+        result = self.search.search_plex_song(plugin, song, manual_search=True)
+
+        self.assertIs(result, variant_track)
+        self.assertTrue(cached_results)
+        self.assertFalse(plugin.manual_track_search_called)
+        self.assertFalse(plugin._candidate_confirmations)
+        self.assertGreaterEqual(len(music.search_calls), 1)
 
     def test_variant_rejected_when_similarity_low(self):
         variant_track = types.SimpleNamespace(

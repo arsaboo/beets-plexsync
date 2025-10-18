@@ -147,6 +147,7 @@ class PlexSync(BeetsPlugin):
         cache_path = os.path.join(self.config_dir, 'plexsync_cache.db')
         self.cache = Cache(cache_path, self)
         self._candidate_confirmations: List[Dict[str, object]] = []
+        self._candidate_confirmation_depth: int = 0
         self._vector_index: Optional[BeetsVectorIndex] = None
         self._vector_index_info: Dict[str, Optional[float]] = {}
 
