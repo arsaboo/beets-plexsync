@@ -8,6 +8,7 @@ from beets import ui
 from beetsplug.core.config import get_plexsync_config
 from beetsplug.ai.llm import search_track_info
 from beetsplug.core.matching import clean_text_for_matching, get_fuzzy_score
+from beetsplug.plex import manual_search as manual_search_ui
 
 
 _ARTIST_JOINER_RE = re.compile(r"\s*(?:,|;|&| and |\+|/)\s*")
@@ -603,58 +604,72 @@ def search_plex_song(plugin, song, manual_search=None, llm_attempted=False, use_
             cleaned_metadata_for_negative = cleaned_song
 
     if manual_search:
-        if getattr(plugin, "_candidate_confirmations", None):
-            while plugin._candidate_confirmations:
-                candidate = plugin._candidate_confirmations.pop(0)
-                track = candidate.get("track")
-                if track is None:
-                    continue
-                similarity = candidate.get("similarity", 0.0)
-                source = candidate.get("source", "candidate")
-                try:
-                    artist_name = getattr(track, "originalTitle", None) or track.artist().title
-                except Exception:  # noqa: BLE001
-                    artist_name = ""
-                artist_name = artist_name or "<unknown>"
-                title = getattr(track, "title", "") or "<unknown>"
-                prompt_text = (
-                    f"\nUse Plex track '{title}' by {artist_name}? "
-                    f"(match score {similarity:.2f}, source: {source})"
-                )
-                prompt = ui.colorize('text_highlight', prompt_text) + " (Y/n)"
-                if ui.input_yn(prompt):
-                    chosen_cache_key = candidate.get("cache_key", cache_key)
+        manual_prompt_needed = True
+        candidate_queue = getattr(plugin, "_candidate_confirmations", None)
+        if candidate_queue:
+            selection = manual_search_ui.review_candidate_confirmations(
+                plugin,
+                list(candidate_queue),
+                song,
+                current_cache_key=cache_key,
+            )
+            if hasattr(plugin, "_candidate_confirmations"):
+                plugin._candidate_confirmations = []
+
+            action = selection.get("action")
+            if action == "selected":
+                track = selection.get("track")
+                if track is not None:
+                    chosen_cache_key = selection.get("cache_key") or cache_key
+                    sources = selection.get("sources") or []
+                    original_song = selection.get("original_song") or song
+                    title = getattr(track, "title", "") or "<unknown>"
                     plugin._log.debug(
-                        "User accepted {} candidate '{}' for '{}'",
-                        source,
+                        "User accepted queued candidate '{}' (sources: {}) for '{}'",
                         title,
-                        song.get("title", ""),
+                        ", ".join(sources) if sources else "candidate",
+                        original_song.get("title", ""),
                     )
                     _log_cache_match_details(plugin, chosen_cache_key, track)
                     plugin._cache_result(chosen_cache_key, track)
                     return _finish(track)
-                plugin._log.debug(
-                    "User rejected {} candidate '{}' (score {:.2f}) for '{}'",
-                    source,
-                    title,
-                    similarity,
-                    song.get("title", ""),
-                )
-        plugin._log.info(
-            "\nTrack {} - {} - {} not found in Plex (tried strategies: {})",
-            song.get("album", "Unknown"),
-            song.get("artist", "Unknown"),
-            song["title"],
-            ", ".join(search_strategies_tried) if search_strategies_tried else "none",
-        )
-        prompt = ui.colorize('text_highlight', "\nSearch manually?") + " (Y/n)"
-        if ui.input_yn(prompt):
-            result = plugin.manual_track_search(song)
-            if result is not None:
-                plugin._log.debug("Manual search succeeded, caching for original query: {}", song)
-                _log_cache_match_details(plugin, cache_key, result)
-                plugin._cache_result(cache_key, result)
-                return _finish(result)
+            elif action == "manual":
+                manual_prompt_needed = False
+                manual_query = selection.get("original_song") or song
+                result = plugin.manual_track_search(manual_query)
+                if result is not None:
+                    plugin._log.debug(
+                        "Manual search succeeded, caching for original query: {}", manual_query
+                    )
+                    _log_cache_match_details(plugin, cache_key, result)
+                    plugin._cache_result(cache_key, result)
+                    return _finish(result)
+            elif action == "abort":
+                return _finish(None)
+            else:
+                manual_prompt_needed = True
+        else:
+            if hasattr(plugin, "_candidate_confirmations"):
+                plugin._candidate_confirmations = []
+
+        if manual_prompt_needed:
+            plugin._log.info(
+                "\nTrack {} - {} - {} not found in Plex (tried strategies: {})",
+                song.get("album", "Unknown"),
+                song.get("artist", "Unknown"),
+                song["title"],
+                ", ".join(search_strategies_tried) if search_strategies_tried else "none",
+            )
+            prompt = ui.colorize('text_highlight', "\nSearch manually?") + " (Y/n)"
+            if ui.input_yn(prompt):
+                result = plugin.manual_track_search(song)
+                if result is not None:
+                    plugin._log.debug(
+                        "Manual search succeeded, caching for original query: {}", song
+                    )
+                    _log_cache_match_details(plugin, cache_key, result)
+                    plugin._cache_result(cache_key, result)
+                    return _finish(result)
 
     plugin._log.debug(
         "All search strategies failed for: {} (tried: {})",

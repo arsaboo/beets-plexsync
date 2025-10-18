@@ -348,11 +348,19 @@ class PlexSearchTests(unittest.TestCase):
         plugin._queue_candidate_confirmation = queue_candidate_confirmation
         plugin._match_score_for_query = lambda song, found: 0.75
 
-        ui_module = self.search.ui
-        original_input_yn = getattr(ui_module, 'input_yn', lambda prompt, default=True: default)
-        responses = iter([True])
-        ui_module.input_yn = lambda prompt, default=True: next(responses, default)
-        self.addCleanup(lambda: setattr(ui_module, "input_yn", original_input_yn))
+        review_module = self.search.manual_search_ui
+        original_review = review_module.review_candidate_confirmations
+        def fake_review(_plugin, queued, _song, current_cache_key=None):
+            candidate = queued[0] if queued else {}
+            return {
+                "action": "selected",
+                "track": candidate.get("track", track),
+                "cache_key": candidate.get("cache_key", current_cache_key),
+                "sources": ["direct"],
+                "original_song": candidate.get("song"),
+            }
+        review_module.review_candidate_confirmations = fake_review
+        self.addCleanup(lambda: setattr(review_module, "review_candidate_confirmations", original_review))
 
         song = {'title': 'Original Song', 'album': 'Original Album', 'artist': 'Original Artist'}
 
@@ -444,11 +452,19 @@ class PlexSearchTests(unittest.TestCase):
 
         plugin._match_score_for_query = match_score
 
-        ui_module = self.search.ui
-        original_input_yn = getattr(ui_module, 'input_yn', lambda prompt, default=True: default)
-        responses = iter([True])
-        ui_module.input_yn = lambda prompt, default=True: next(responses, default)
-        self.addCleanup(lambda: setattr(ui_module, "input_yn", original_input_yn))
+        review_module = self.search.manual_search_ui
+        original_review = review_module.review_candidate_confirmations
+        def fake_review(_plugin, queued, _song, current_cache_key=None):
+            candidate = queued[0] if queued else {}
+            return {
+                "action": "selected",
+                "track": candidate.get("track", variant_track),
+                "cache_key": candidate.get("cache_key", current_cache_key),
+                "sources": ["variant"],
+                "original_song": candidate.get("song"),
+            }
+        review_module.review_candidate_confirmations = fake_review
+        self.addCleanup(lambda: setattr(review_module, "review_candidate_confirmations", original_review))
 
         song = {'title': 'Original Song', 'album': 'Original Album', 'artist': 'Original Artist'}
 
