@@ -278,13 +278,7 @@ class PlexSync(BeetsPlugin):
 
         current_index = self._vector_index
         if current_index is not None:
-            expected_mtime = self._vector_index_info.get("mtime") if self._vector_index_info else None
-            try:
-                current_mtime = os.path.getmtime(db_path) if db_path else None
-            except OSError:
-                current_mtime = None
-            if expected_mtime == current_mtime or current_mtime is None:
-                return current_index
+            return current_index
 
         source_lib = lib
         close_after = False
