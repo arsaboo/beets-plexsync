@@ -24,9 +24,6 @@ class CacheStub:
         rating_key = -1 if value is None else value
         self.storage[key] = (rating_key, cleaned_metadata)
 
-    def debug_cache_keys(self, song):  # pragma: no cover
-        pass
-
 
 class PlexSearchTests(unittest.TestCase):
     def setUp(self):

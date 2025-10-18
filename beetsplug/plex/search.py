@@ -119,7 +119,6 @@ def search_plex_song(plugin, song, manual_search=None, llm_attempted=False, use_
         plugin._log.debug("Cache HIT for key: '{}' -> result: {}", cache_key, cached_result)
     else:
         plugin._log.debug("Cache MISS for key: '{}'", cache_key)
-        plugin.cache.debug_cache_keys(song)
 
     if cached_result is not None:
         if isinstance(cached_result, tuple):
