@@ -640,8 +640,6 @@ def search_plex_song(plugin, song, manual_search=None, llm_attempted=False, use_
                     similarity,
                     song.get("title", ""),
                 )
-        if hasattr(plugin, "_candidate_confirmations"):
-            plugin._candidate_confirmations = []
         plugin._log.info(
             "\nTrack {} - {} - {} not found in Plex (tried strategies: {})",
             song.get("album", "Unknown"),
@@ -667,6 +665,4 @@ def search_plex_song(plugin, song, manual_search=None, llm_attempted=False, use_
         plugin._cache_result(cache_key, None, cleaned_metadata_for_negative)
     else:
         plugin._cache_result(cache_key, None)
-    if hasattr(plugin, "_candidate_confirmations"):
-        plugin._candidate_confirmations = []
     return _finish(None)
