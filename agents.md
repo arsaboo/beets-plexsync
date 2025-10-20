@@ -16,106 +16,87 @@ The plugin is written in Python and leverages several libraries including `plexa
 
 ## Implementation Guidelines for Coding Assistants
 
-### Before Coding
-- **Ask clarifying questions** when requirements are ambiguous or incomplete
-- **Draft and confirm approach** for complex features or significant changes
-- **List pros and cons** when multiple implementation approaches exist (≥2 options)
-- Understand the existing codebase structure and patterns before making changes
+- Ask clarifying questions for ambiguous changes
+- Draft and confirm approach for non-trivial features
+- List trade-offs when multiple approaches exist
+- Follow existing patterns and module boundaries below
 
 ### Critical Constraints
-- **NEVER modify cache keys** - Cache keys are stored in the database and changes will invalidate existing cached data
-- Preserve existing API interfaces and method signatures when possible
-- Maintain compatibility with beets plugin architecture
+- NEVER modify cache keys (stored in SQLite via core/cache.py)
+- Keep public APIs and method signatures stable when possible
+- Maintain compatibility with beets plugin architecture and CLI
+- Preserve vector index behavior (core/vector_index.py) to avoid regressions
 
 ### Development Patterns
-- Follow existing error handling patterns using Python's `logging` module and the `beets.plexsync` logger namespace
-- Use Pydantic models for data validation and structured data
-- Implement caching for external API calls to improve performance
-- Follow beets plugin conventions and use beets' library/UI components
-- Use the `agno` framework for LLM-related features
+- Use logging with namespace beets.plexsync
+- Prefer Pydantic v2 models for structured data
+- Cache expensive operations (Plex calls, providers, LLM)
+- Keep LLM tooling behind config flags and degrade gracefully
 
-### Code Organization
-- Keep the core plugin entry point in `beetsplug/plexsync.py`
-- Shared infrastructure such as caching, matching, and config helpers lives under `beetsplug/core/`
-- Plex-specific operations (playlist import, manual search UI, smart playlists, collage, Spotify transfer, search/operations shims) are in `beetsplug/plex/`
-- Provider integrations are grouped in `beetsplug/providers/` (Apple, Spotify, YouTube, Tidal, JioSaavn, Gaana, M3U8, HTTP POST)
-- LLM tooling resides in `beetsplug/ai/`, while lightweight presentation helpers live in `beetsplug/utils/`
-- Continue using the shared `Cache` class for persistence without altering existing cache keys
+## Code Organization
+- Entry point: beetsplug/plexsync.py
+- AI: beetsplug/ai/llm.py (Agno-based; OpenAI-like or Ollama)
+- Core: beetsplug/core/{cache.py, config.py, matching.py, vector_index.py}
+- Plex: beetsplug/plex/{search.py, manual_search.py, playlist_import.py, smartplaylists.py, operations.py, spotify_transfer.py, collage.py}
+- Providers: beetsplug/providers/{apple.py, spotify.py, youtube.py, tidal.py, jiosaavn.py, gaana.py, m3u8.py, post.py}
+- Utils: beetsplug/utils/helpers.py
 
-## Key Technologies and Dependencies
+## Search Pipeline Overview (beetsplug/plex/search.py)
+When PlexSync.search_plex_song(...) is called, the pipeline should proceed:
+1. Cache check
+   - Return cached ratingKey via plugin.music.fetchItem when present
+2. Local beets candidates
+   - Use core/vector_index.py to surface LocalCandidate entries
+   - Try direct match via cached plex_ratingkey if present
+     - Accept immediately if similarity >= 0.8
+     - Otherwise queue for manual confirmation
+   - Prepare variant queries from candidates and try Plex music.searchTracks
+3. Single/multiple track search
+   - If tracks found, score with core/matching.plex_track_distance
+   - Accept when similarity threshold is met; else queue for review
+4. Manual search UI (manual_search.py)
+   - review_candidate_confirmations(…) queues and deduplicates options
+   - handle_manual_search(…) supports actions:
+     - a: Abort, s: Skip (store negative cache), e: Enter manual search
+     - Numeric selection caches positive result against the original query only
+   - _store_negative_cache(plugin, song, original_query)
+     - Writes None to cache when there is a valid title in the chosen query
+   - _cache_selection(plugin, song, track, original_query)
+     - Caches ONLY the original query key (not the manual entry), matching tests
+5. LLM search fallback (optional)
+   - If enabled via plexsync.use_llm_search, use ai/llm.py
+   - Provider priority in toolkit: SearxNG > Exa > Brave > Tavily
+   - Brave Search is rate-limited to ~1 request/second
 
-- **Python**: The core language of the plugin.
-- **Beets**: The music library manager it extends.
-- **PlexAPI**: Python library for interacting with the Plex Media Server.
-- **Spotipy**: Library for interacting with the Spotify Web API.
-- **OpenAI**: Library for interacting with OpenAI-compatible LLMs.
-- **Pydantic**: Used for data validation and settings management.
-- **Agno**: A framework for building LLM agents, used for AI features and metadata search.
-- **SQLite**: Used for local caching of API responses and search results.
-- **LLM Search Providers**: Integrates with SearxNG, Exa, Tavily, and Brave Search for enhanced metadata search capabilities (when configured).
+## Smart Playlists
+- Built in PlexSync.plex_smartplaylists command supports:
+  - System playlists: daily_discovery, forgotten_gems, recent_hits, fresh_favorites, 70s80s_flashback, highly_rated, most_played
+  - Imported playlists from providers and M3U8 files
+  - Flags:
+    - --only: restrict to a comma-separated list of playlist IDs
+    - --import-failed/--log-file: retry manual imports using generated logs
 
-## Project Structure
+## Testing
+- Run unit tests:
+  ```bash
+  python3 -m unittest discover -s ./tests -p "test_*.py" -v
+  ```
+- Compile modules quickly:
+  ```bash
+  python3 - << 'PY'
+import os, py_compile
+for root, _, files in os.walk('beetsplug'):
+    for f in files:
+        if f.endswith('.py'):
+            py_compile.compile(os.path.join(root, f))
+print('OK')
+PY
+  ```
 
-- `setup.py`: Python package setup file.
-- `README.md`: Main documentation.
-- `beetsplug/`: Directory containing the plugin modules.
-  - `plexsync.py`: The main plugin class and beets integrations.
-  - `core/`: Shared infrastructure (`cache.py`, `config.py`, `matching.py`).
-  - `plex/`: Plex-facing helpers (playlist import, manual search UI, smart playlists, collage, Spotify transfer, search/operations).
-  - `providers/`: Source-specific playlist importers (Apple, Spotify, YouTube, Tidal, JioSaavn, Gaana, M3U8, HTTP POST).
-  - `ai/`: LLM tooling (`llm.py`) for metadata search and playlist suggestions.
-  - `utils/`: Lightweight presentation helpers.
-- `collage.png`: Example output of the album collage feature.
-
-## Configuration
-
-The plugin is configured via beets' `config.yaml` file. Key sections include:
-- `plex`: Plex server connection details (host, port, token, library name).
-- `spotify`: Spotify API credentials (if importing from Spotify).
-- `llm`: LLM API key and model settings, plus configuration for search providers (Ollama, SearxNG, Exa, Tavily, Brave Search).
-- `plexsync`: Plugin-specific settings like `manual_search`, `use_llm_search`, and playlist definitions.
-
-## Key Classes and Concepts
-
-- `PlexSync`: The main plugin class inheriting from `beets.plugins.BeetsPlugin`.
-- `Song`, `SongRecommendations`: Pydantic models for LLM-generated playlist data (`beetsplug/ai/llm.py`).
-- `Cache`: SQLite-backed cache utilities in `beetsplug/core/cache.py`; cache keys must remain unchanged.
-- `MusicSearchTools`: Agno-powered search helpers in `beetsplug/ai/llm.py`.
-- Provider modules (`beetsplug/providers/*.py`): Import playlists from external sources (Spotify, Apple, YouTube, Tidal, JioSaavn, Gaana, M3U8, HTTP POST).
-- `plex_track_distance`: Distance helpers in `beetsplug/core/matching.py` used for accurate item matching.
-- Plex-facing helpers in `beetsplug/plex/` (manual search, playlist import, smart playlists, collage, Spotify transfer) provide reusable logic consumed by the main plugin.
-
-## Development Conventions
-
-- The code is written in Python, following standard Python conventions.
-- Pydantic is used for data modeling and configuration validation.
-- The plugin extensively uses beets' library and UI components.
-- Logging is done using Python's `logging` module with the `beets` logger namespace.
-- Caching is implemented to minimize redundant API calls and improve performance.
-- LLM features are implemented using the `agno` framework for building agents. Manual search prompts are controlled via `plexsync.manual_search` in config (there is no CLI flag).
-
-## Building, Running, and Testing
-
-This is a Python package plugin for beets.
-
-**Installation:**
-```bash
-pip install git+https://github.com/arsaboo/beets-plexsync.git
-```
-
-**Configuration:**
-Add `plexsync` to your beets `plugins` list in `config.yaml` and configure the `plex`, `spotify`, and `llm` sections as needed.
-
-**Usage:**
-Commands are run via the beets CLI (`beet`). For example:
-```bash
-beet plexsync
-beet plex_smartplaylists
-beet plexsonic -p "mellow jazz from the 90s"
-beet plexplaylistimport -m "My Playlist" -u "https://open.spotify.com/playlist/..."
-```
-
-Refer to `README.md` for a full list of commands and configuration options.
-
-**Testing:**
-Basic unit coverage exists in `tests/test_cache.py`, `tests/test_playlist_import.py`, and `tests/test_spotify_transfer.py`. For end-to-end validation, run the beets CLI commands against a test Plex server/library.
+## LLM Configuration Notes
+- Auto-detect provider:
+  - If llm.api_key is set: OpenAI-compatible via agno.models.openai.like.OpenAILike
+  - Else: Ollama via agno.models.ollama.Ollama
+- Search toolkit keys under llm.search:
+  - searxng_host, exa_api_key, brave_api_key, tavily_api_key
+- Brave Search requests are rate-limited in code
