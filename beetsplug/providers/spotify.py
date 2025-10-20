@@ -51,7 +51,7 @@ def authenticate(plugin) -> None:
     """Authenticate Spotify, storing `sp` on the plugin identical to before."""
     ID = config["spotify"]["client_id"].get()
     SECRET = config["spotify"]["client_secret"].get()
-    redirect_uri = "http://localhost/"
+    redirect_uri = "http://127.0.0.1/"
     scope = (
         "user-read-private user-read-email playlist-modify-public "
         "playlist-modify-private playlist-read-private"
