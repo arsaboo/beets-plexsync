@@ -12,8 +12,9 @@ from collections import Counter
 import dateutil.parser
 import requests
 from bs4 import BeautifulSoup
-from spotipy.oauth2 import SpotifyOAuth
 import spotipy
+from spotipy.oauth2 import SpotifyOAuth
+from spotipy.exceptions import SpotifyOauthError
 
 from beetsplug.utils.helpers import parse_title, clean_album_name
 from beets import config
@@ -37,15 +38,40 @@ def authenticate(plugin) -> None:
         open_browser=False,
         cache_path=plugin.plexsync_token,
     )
-    plugin.token_info = plugin.auth_manager.get_cached_token()
-    if plugin.token_info is None:
-        plugin.auth_manager.get_access_token(as_dict=True)
-    need_token = plugin.auth_manager.is_token_expired(plugin.token_info)
-    if need_token:
-        new_token = plugin.auth_manager.refresh_access_token(
-            plugin.token_info["refresh_token"]
-        )
-        plugin.token_info = new_token
+    try:
+        plugin.token_info = plugin.auth_manager.get_cached_token()
+    except SpotifyOauthError as exc:
+        plugin._log.debug("Failed to load cached Spotify token: {}", exc)
+        plugin.auth_manager.cache_handler.delete_cached_token()
+        plugin.token_info = None
+
+    if not plugin.token_info:
+        plugin.token_info = plugin.auth_manager.get_access_token(as_dict=True)
+    else:
+        try:
+            need_token = plugin.auth_manager.is_token_expired(plugin.token_info)
+        except (SpotifyOauthError, KeyError, TypeError) as exc:
+            plugin._log.debug("Cached Spotify token missing metadata: {}", exc)
+            need_token = True
+
+        if need_token:
+            try:
+                plugin.token_info = plugin.auth_manager.refresh_access_token(
+                    plugin.token_info["refresh_token"]
+                )
+            except SpotifyOauthError as exc:
+                message = str(exc).lower()
+                if "invalid_grant" in message:
+                    plugin._log.info(
+                        "Spotify refresh token revoked; requesting new authorization."
+                    )
+                    plugin.auth_manager.cache_handler.delete_cached_token()
+                    plugin.token_info = plugin.auth_manager.get_access_token(
+                        as_dict=True
+                    )
+                else:
+                    raise
+
     plugin.sp = spotipy.Spotify(auth=plugin.token_info.get("access_token"))
 
 
