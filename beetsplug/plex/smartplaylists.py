@@ -213,7 +213,7 @@ def get_preferred_attributes(ps) -> Tuple[list, list]:
 #   Effect: Positive weights favor highly-rated tracks
 #
 # - z_recency: Standardized recency score (time since last played); positive = longer since played
-#   Computed as: -(days_since_played - days_mean) / days_std  
+#   Computed as: (days_since_played - days_mean) / days_std  
 #   Effect: Positive weights favor tracks not played recently (good for "forgotten" playlists)
 #           Negative weights favor recently played tracks (good for "fresh" playlists)
 #
@@ -399,7 +399,9 @@ def calculate_track_score(ps, track, base_time=None, tracks_context=None, playli
         age_mean, age_std = 30, 10
 
     z_rating = (rating - rating_mean) / rating_std if rating > 0 else -2.0
-    z_recency = -(days_since_played - days_mean) / days_std
+    # FIXED: Corrected z_recency calculation - positive value means longer since played
+    # Previously was: -(days_since_played - days_mean) / days_std
+    z_recency = (days_since_played - days_mean) / days_std
     z_play_count = (play_count - play_count_mean) / play_count_std
     z_popularity = (popularity - popularity_mean) / popularity_std
     z_age = -(age - age_mean) / age_std
@@ -443,7 +445,8 @@ def select_tracks_weighted(ps, tracks, num_tracks, playlist_type=None):
     
     # Standard weighted selection for all playlist types
     base_time = datetime.now()
-    track_scores = [(track, calculate_track_score(ps, track, base_time, playlist_type=playlist_type)) for track in tracks]
+    # Pass the tracks as context for proper normalization statistics
+    track_scores = [(track, calculate_track_score(ps, track, base_time, tracks_context=tracks, playlist_type=playlist_type)) for track in tracks]
     scores = np.array([score for _, score in track_scores])
     
     # Add a small amount of random noise to scores to prevent deterministic outcomes
