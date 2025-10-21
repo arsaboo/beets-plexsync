@@ -720,7 +720,13 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
             # Apply min rating filter
             if include_item and 'min_rating' in filters:
                 rating = getattr(item, 'rating', 0) or getattr(item, 'plex_userrating', 0) or 0
-                if rating < filters['min_rating']:
+                # Ensure both values are numeric for comparison
+                try:
+                    rating = float(rating) if rating is not None else 0
+                except (ValueError, TypeError):
+                    rating = 0
+                min_rating = filters['min_rating']
+                if rating < min_rating:
                     include_item = False
 
             # Special handling for 70s80s_flashback - only include tracks from 1970-1989
@@ -737,6 +743,11 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
             highly_rated_items = []
             for item in filtered_items:
                 rating = getattr(item, 'plex_userrating', 0) or 0
+                # Ensure rating is numeric for comparison
+                try:
+                    rating = float(rating) if rating is not None else 0
+                except (ValueError, TypeError):
+                    rating = 0
                 if rating >= 7.0:  # High rating threshold
                     highly_rated_items.append(item)
             filtered_items = highly_rated_items
@@ -862,11 +873,18 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
             elif playlist_type == "fresh_favorites":
                 min_year, _ = _apply_recency_guard(ps, playlist_config, filters, playlist_name, default_max_age_years=7)
                 unique_tracks = _filter_tracks_by_min_year(ps, unique_tracks, min_year, playlist_name)
-                # Apply min rating filter for fresh favorites
+                # Apply min rating filter for fresh favorites - keep tracks with rating >= min_rating AND unrated tracks
+                def _safe_float_rating(track):
+                    rating = getattr(track, 'plex_userrating', 0) or 0
+                    try:
+                        return float(rating) if rating is not None else 0
+                    except (ValueError, TypeError):
+                        return 0
+                
                 min_rating = get_config_value(playlist_config, defaults_cfg, "min_rating", 6)
                 unique_tracks = [t for t in unique_tracks if 
-                                (getattr(t, 'plex_userrating', 0) or 0) < min_rating or 
-                                (getattr(t, 'plex_userrating', 0) or 0) >= min_rating]
+                                _safe_float_rating(t) == 0 or  # Keep unrated tracks
+                                _safe_float_rating(t) >= min_rating]  # Keep rated tracks that meet min rating
 
         # Separate rated and unrated tracks
         rated_tracks = []
