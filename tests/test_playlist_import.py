@@ -70,11 +70,78 @@ def ensure_stubs(data):
     ui_module.UserError = UserError
     ui_module.colorize = colorize
     ui_module.input_ = lambda prompt='': ''
+    ui_module.input_yn = lambda prompt='', default=True: default
     ui_module.input_options = lambda *args, **kwargs: 0
     ui_module.print_ = print
 
     beets.ui = ui_module
     beets.config = config
+
+    # Minimal beets.library stub used by matching helpers during tests.
+    library_module = types.ModuleType('beets.library')
+
+    class LibraryItem:
+        """Lightweight stand-in for beets.library.Item."""
+
+        def __init__(self, **fields):
+            for key, value in fields.items():
+                setattr(self, key, value)
+
+    library_module.Item = LibraryItem
+    beets.library = library_module
+
+    # Provide beets.autotag.distance with the API expected by matching.py.
+    autotag_module = types.ModuleType('beets.autotag')
+    distance_module = types.ModuleType('beets.autotag.distance')
+
+    class Distance:
+        def __init__(self):
+            self._weights = {}
+            self._components = {}
+
+        def add_ratio(self, key, value, weight):
+            self._components[key] = abs(value)
+
+        def add_string(self, key, left, right):
+            self._components[key] = 0.0 if (left or "") == (right or "") else 1.0
+
+        @property
+        def distance(self):
+            if not self._components:
+                return 0.0
+            return sum(self._components.values()) / len(self._components)
+
+    def string_dist(left, right):
+        left = left or ""
+        right = right or ""
+        if left == right:
+            return 0.0
+        if left in right or right in left:
+            return 0.25
+        return 0.75
+
+    autotag_module.distance = distance_module
+    distance_module.Distance = Distance
+    distance_module.string_dist = string_dist
+    beets.autotag = autotag_module
+
+    plexapi_module = types.ModuleType('plexapi')
+    plexapi_audio_module = types.ModuleType('plexapi.audio')
+
+    class TrackStub:
+        """Minimal plexapi.audio.Track replacement for tests."""
+
+        def __init__(self, title="", parentTitle="", originalTitle="", artist_title=""):
+            self.title = title
+            self.parentTitle = parentTitle
+            self.originalTitle = originalTitle
+            self._artist_title = artist_title
+
+        def artist(self):
+            return types.SimpleNamespace(title=self._artist_title or self.originalTitle or "")
+
+    plexapi_audio_module.Track = TrackStub
+    plexapi_module.audio = plexapi_audio_module
 
     confuse = types.ModuleType('confuse')
     confuse.NotFoundError = NotFoundError
@@ -82,6 +149,11 @@ def ensure_stubs(data):
 
     sys.modules['beets'] = beets
     sys.modules['beets.ui'] = ui_module
+    sys.modules['beets.library'] = library_module
+    sys.modules['beets.autotag'] = autotag_module
+    sys.modules['beets.autotag.distance'] = distance_module
+    sys.modules['plexapi'] = plexapi_module
+    sys.modules['plexapi.audio'] = plexapi_audio_module
     sys.modules['confuse'] = confuse
 
     return config, UserError

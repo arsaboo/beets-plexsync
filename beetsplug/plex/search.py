@@ -8,6 +8,7 @@ from beets import ui
 from beetsplug.core.config import get_plexsync_config
 from beetsplug.ai.llm import search_track_info
 from beetsplug.core.matching import clean_text_for_matching, get_fuzzy_score
+from beetsplug.plex import manual_search as manual_search_ui
 
 
 _ARTIST_JOINER_RE = re.compile(r"\s*(?:,|;|&| and |\+|/)\s*")
@@ -86,7 +87,7 @@ def _log_cache_match_details(plugin, cache_key: str, track) -> None:
         plugin._log.debug("Caching result for key '{}' but failed to collect metadata: {}", cache_key, exc)
 
 
-def search_plex_song(plugin, song, manual_search=None, llm_attempted=False):
+def search_plex_song(plugin, song, manual_search=None, llm_attempted=False, use_local_candidates=True):
     """Fetch a Plex track using multi-strategy search for the given song.
 
     Parameters mirror the original PlexSync.search_plex_song method but
@@ -98,13 +99,26 @@ def search_plex_song(plugin, song, manual_search=None, llm_attempted=False):
 
     cache_key = plugin.cache._make_cache_key(song)
     plugin._log.debug("Generated cache key: '{}' for song: {}", cache_key, song)
+    if not hasattr(plugin, "_candidate_confirmations"):
+        plugin._candidate_confirmations = []
+    depth = getattr(plugin, "_candidate_confirmation_depth", 0)
+    if depth == 0:
+        plugin._candidate_confirmations = []
+    plugin._candidate_confirmation_depth = depth + 1
+
+    def _finish(result=None):
+        plugin._candidate_confirmation_depth -= 1
+        if plugin._candidate_confirmation_depth <= 0:
+            plugin._candidate_confirmation_depth = 0
+            if hasattr(plugin, "_candidate_confirmations"):
+                plugin._candidate_confirmations = []
+        return result
 
     cached_result = plugin.cache.get(cache_key)
     if cached_result is not None:
         plugin._log.debug("Cache HIT for key: '{}' -> result: {}", cache_key, cached_result)
     else:
         plugin._log.debug("Cache MISS for key: '{}'", cache_key)
-        plugin.cache.debug_cache_keys(song)
 
     if cached_result is not None:
         if isinstance(cached_result, tuple):
@@ -119,40 +133,152 @@ def search_plex_song(plugin, song, manual_search=None, llm_attempted=False):
                             song,
                         )
                         plugin._cache_result(cache_key, result)
-                        return result
+                        return _finish(result)
                     plugin._log.debug(
                         "Cached cleaned metadata search also failed, respecting original skip for: {}",
                         song,
                     )
-                    return None
+                    return _finish(None)
                 plugin._log.debug("Found cached skip result for: {}", song)
-                return None
+                return _finish(None)
 
             try:
                 if rating_key:
                     cached_track = plugin.music.fetchItem(rating_key)
                     plugin._log.debug("Found cached match for: {} -> {}", song, cached_track.title)
-                    return cached_track
+                    return _finish(cached_track)
             except Exception as exc:  # noqa: BLE001 - want to log original cache issue
                 plugin._log.debug("Failed to fetch cached item {}: {}", rating_key, exc)
                 plugin.cache.set(cache_key, None)
         else:
-            if cached_result == -1 or cached_result is None:
+            if cached_result == -1:
                 plugin._log.debug("Found legacy cached skip result for: {}", song)
-                return None
+                return _finish(None)
             try:
                 if cached_result:
                     cached_track = plugin.music.fetchItem(cached_result)
                     plugin._log.debug(
                         "Found legacy cached match for: {} -> {}", song, cached_track.title
                     )
-                    return cached_track
+                    return _finish(cached_track)
             except Exception as exc:  # noqa: BLE001 - log for debugging
                 plugin._log.debug("Failed to fetch legacy cached item {}: {}", cached_result, exc)
                 plugin.cache.set(cache_key, None)
 
+    candidate_variants: list[tuple[dict[str, str], float]] = []
+    local_candidates = []
+    if use_local_candidates and hasattr(plugin, "get_local_beets_candidates"):
+        try:
+            local_candidates = plugin.get_local_beets_candidates(song)
+        except Exception as exc:  # noqa: BLE001
+            plugin._log.debug("Local beets candidate lookup failed for {}: {}", song, exc)
+            local_candidates = []
+
+        if local_candidates:
+            summary = [
+                f"{cand.metadata.get('title', '')} ({cand.score:.2f})"
+                for cand in local_candidates[:3]
+            ]
+            plugin._log.debug(
+                "Local beets candidates for '{}': {}", song.get("title", ""), ", ".join(summary)
+            )
+
+            if hasattr(plugin, "_try_candidate_direct_match"):
+                for candidate in local_candidates[:3]:
+                    direct_match = plugin._try_candidate_direct_match(candidate, song, cache_key)
+                    if direct_match is not None:
+                        plugin._log.debug(
+                            "Resolved '{}' via cached Plex ratingKey using beets metadata",
+                            song.get("title", ""),
+                        )
+                        _log_cache_match_details(plugin, cache_key, direct_match)
+                        plugin._cache_result(cache_key, direct_match)
+                        return _finish(direct_match)
+
+            if hasattr(plugin, "_prepare_candidate_variants"):
+                candidate_variants = plugin._prepare_candidate_variants(local_candidates, song)
+
+    if candidate_variants:
+        variant_attempted = False
+        for variant_metadata, variant_score in candidate_variants[:5]:
+            title = (variant_metadata.get("title") or "").strip()
+            album = (variant_metadata.get("album") or "").strip()
+            artist = (variant_metadata.get("artist") or "").strip()
+
+            # Skip variants that provide no useful metadata
+            if not any((title, album, artist)):
+                continue
+
+            variant_attempted = True
+            plugin._log.debug(
+                "Trying beets vector candidate variant (score {:.2f}): title='{}', album='{}', artist='{}'",
+                variant_score,
+                title or "<unknown>",
+                album or "<unknown>",
+                artist or "<unknown>",
+            )
+
+            # Avoid recursion loops by disabling local candidate lookup in nested calls.
+            variant_song = {"title": title, "album": album, "artist": artist}
+            try:
+                variant_result = search_plex_song(
+                    plugin,
+                    variant_song,
+                    manual_search=False,
+                    llm_attempted=True,
+                    use_local_candidates=False,
+                )
+            except RecursionError as exc:  # pragma: no cover - defensive
+                plugin._log.debug("Variant recursion failed for {}: {}", variant_song, exc)
+                continue
+
+            if variant_result is not None:
+                if hasattr(plugin, "_match_score_for_query"):
+                    similarity = plugin._match_score_for_query(song, variant_result)
+                    plugin._log.debug(
+                        "Variant '{}' similarity to query '{}' -> {:.2f}",
+                        title or "<unknown>",
+                        song.get("title", ""),
+                        similarity,
+                    )
+                    if similarity < 0.8:
+                        plugin._log.debug(
+                            "Rejecting variant '{}' for '{}' due to low similarity ({:.2f})",
+                            title or "<unknown>",
+                            song.get("title", ""),
+                            similarity,
+                        )
+                        if hasattr(plugin, "_queue_candidate_confirmation") and cache_key:
+                            plugin._queue_candidate_confirmation(
+                                track=variant_result,
+                                similarity=similarity,
+                                cache_key=cache_key,
+                                source="variant",
+                                original_song=song,
+                            )
+                        continue
+
+                plugin._log.debug(
+                    "Resolved '{}' via beets candidate variant '{}'",
+                    song.get("title", ""),
+                    title,
+                )
+                _log_cache_match_details(plugin, cache_key, variant_result)
+                plugin._cache_result(cache_key, variant_result)
+                return _finish(variant_result)
+
+        if variant_attempted:
+            # Record that we attempted local candidate variants for debugging output.
+            search_strategies_marker = "beets_variant"
+        else:
+            search_strategies_marker = None
+    else:
+        search_strategies_marker = None
+
     tracks = []
     search_strategies_tried: list[str] = []
+    if search_strategies_marker:
+        search_strategies_tried.append(search_strategies_marker)
     
     # Store results from Strategy 2 (Title-only) for reuse in other strategies
     title_only_tracks = []
@@ -383,13 +509,39 @@ def search_plex_song(plugin, song, manual_search=None, llm_attempted=False):
             song.get("title", ""),
             exc,
         )
-        return None
+        return _finish(None)
 
     if len(tracks) == 1:
         result = tracks[0]
-        _log_cache_match_details(plugin, cache_key, result)
-        plugin._cache_result(cache_key, result)
-        return result
+        accept_result = True
+        similarity = None
+        if hasattr(plugin, "_match_score_for_query"):
+            similarity = plugin._match_score_for_query(song, result)
+            plugin._log.debug(
+                "Single-track search result similarity for '{}' -> {:.2f}",
+                song.get("title", ""),
+                similarity,
+            )
+            if similarity < 0.8:
+                plugin._log.debug(
+                    "Rejecting single-track result for '{}' due to low similarity ({:.2f})",
+                    song.get("title", ""),
+                    similarity,
+                )
+                if hasattr(plugin, "_queue_candidate_confirmation") and cache_key:
+                    plugin._queue_candidate_confirmation(
+                        track=result,
+                        similarity=similarity,
+                        cache_key=cache_key,
+                        source="single",
+                        original_song=song,
+                    )
+                accept_result = False
+        if accept_result:
+            _log_cache_match_details(plugin, cache_key, result)
+            plugin._cache_result(cache_key, result)
+            return _finish(result)
+        tracks = []
     if len(tracks) > 1:
         sorted_tracks = plugin.find_closest_match(song, tracks)
         plugin._log.debug(
@@ -404,13 +556,13 @@ def search_plex_song(plugin, song, manual_search=None, llm_attempted=False):
             if result is not None:
                 _log_cache_match_details(plugin, cache_key, result)
                 plugin._cache_result(cache_key, result)
-            return result
+            return _finish(result)
 
         best_match = sorted_tracks[0]
         if best_match[1] >= 0.7:
             _log_cache_match_details(plugin, cache_key, best_match[0])
             plugin._cache_result(cache_key, best_match[0])
-            return best_match[0]
+            return _finish(best_match[0])
         plugin._log.debug(
             "Best match score {} below threshold for: {}", best_match[1], song["title"]
         )
@@ -447,25 +599,76 @@ def search_plex_song(plugin, song, manual_search=None, llm_attempted=False):
                 )
                 _log_cache_match_details(plugin, cache_key, result)
                 plugin._cache_result(cache_key, result)
-                return result
+                return _finish(result)
             cleaned_metadata_for_negative = cleaned_song
 
     if manual_search:
-        plugin._log.info(
-            "\nTrack {} - {} - {} not found in Plex (tried strategies: {})",
-            song.get("album", "Unknown"),
-            song.get("artist", "Unknown"),
-            song["title"],
-            ", ".join(search_strategies_tried) if search_strategies_tried else "none",
-        )
-        prompt = ui.colorize('text_highlight', "\nSearch manually?") + " (Y/n)"
-        if ui.input_yn(prompt):
-            result = plugin.manual_track_search(song)
-            if result is not None:
-                plugin._log.debug("Manual search succeeded, caching for original query: {}", song)
-                _log_cache_match_details(plugin, cache_key, result)
-                plugin._cache_result(cache_key, result)
-                return result
+        manual_prompt_needed = True
+        candidate_queue = getattr(plugin, "_candidate_confirmations", None)
+        if candidate_queue:
+            selection = manual_search_ui.review_candidate_confirmations(
+                plugin,
+                list(candidate_queue),
+                song,
+                current_cache_key=cache_key,
+            )
+            if hasattr(plugin, "_candidate_confirmations"):
+                plugin._candidate_confirmations = []
+
+            action = selection.get("action")
+            if action == "selected":
+                track = selection.get("track")
+                if track is not None:
+                    chosen_cache_key = selection.get("cache_key") or cache_key
+                    sources = selection.get("sources") or []
+                    original_song = selection.get("original_song") or song
+                    title = getattr(track, "title", "") or "<unknown>"
+                    plugin._log.debug(
+                        "User accepted queued candidate '{}' (sources: {}) for '{}'",
+                        title,
+                        ", ".join(sources) if sources else "candidate",
+                        original_song.get("title", ""),
+                    )
+                    _log_cache_match_details(plugin, chosen_cache_key, track)
+                    plugin._cache_result(chosen_cache_key, track)
+                    return _finish(track)
+            elif action == "manual":
+                manual_prompt_needed = False
+                manual_query = selection.get("original_song") or song
+                result = plugin.manual_track_search(manual_query)
+                if result is not None:
+                    plugin._log.debug(
+                        "Manual search succeeded, caching for original query: {}", manual_query
+                    )
+                    _log_cache_match_details(plugin, cache_key, result)
+                    plugin._cache_result(cache_key, result)
+                    return _finish(result)
+            elif action == "abort":
+                return _finish(None)
+            else:
+                manual_prompt_needed = True
+        else:
+            if hasattr(plugin, "_candidate_confirmations"):
+                plugin._candidate_confirmations = []
+
+        if manual_prompt_needed:
+            plugin._log.info(
+                "\nTrack {} - {} - {} not found in Plex (tried strategies: {})",
+                song.get("album", "Unknown"),
+                song.get("artist", "Unknown"),
+                song["title"],
+                ", ".join(search_strategies_tried) if search_strategies_tried else "none",
+            )
+            prompt = ui.colorize('text_highlight', "\nSearch manually?") + " (Y/n)"
+            if ui.input_yn(prompt):
+                result = plugin.manual_track_search(song)
+                if result is not None:
+                    plugin._log.debug(
+                        "Manual search succeeded, caching for original query: {}", song
+                    )
+                    _log_cache_match_details(plugin, cache_key, result)
+                    plugin._cache_result(cache_key, result)
+                    return _finish(result)
 
     plugin._log.debug(
         "All search strategies failed for: {} (tried: {})",
@@ -476,4 +679,4 @@ def search_plex_song(plugin, song, manual_search=None, llm_attempted=False):
         plugin._cache_result(cache_key, None, cleaned_metadata_for_negative)
     else:
         plugin._cache_result(cache_key, None)
-    return None
+    return _finish(None)

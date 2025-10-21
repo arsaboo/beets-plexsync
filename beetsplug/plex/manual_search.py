@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """Shared helpers for interactive manual Plex searches."""
 
-from typing import Iterable
+from typing import Iterable, Dict, List, Optional
 
 from beets import ui
 from beets.ui import input_, print_
@@ -17,6 +17,175 @@ def _render_actions() -> str:
         + ui.colorize('action', 's') + ui.colorize('text_highlight_minor', ': Skip') + '   '
         + ui.colorize('action', 'e') + ui.colorize('text_highlight_minor', ': Enter manual search') + '\n'
     )
+
+
+def review_candidate_confirmations(
+    plugin,
+    queued_candidates: List[Dict[str, object]],
+    fallback_song: Optional[Dict[str, str]] = None,
+    *,
+    current_cache_key: Optional[str] = None,
+) -> Dict[str, object]:
+    """Present queued confirmation candidates and return the user's choice."""
+    if not queued_candidates:
+        return {"action": "skip"}
+
+    aggregated: List[Dict[str, object]] = []
+    dedupe_map: Dict[object, Dict[str, object]] = {}
+
+    for candidate in queued_candidates:
+        track = candidate.get("track")
+        if track is None:
+            continue
+
+        try:
+            rating_key = getattr(track, "ratingKey", None)
+        except Exception:  # noqa: BLE001 - tolerate unexpected track objects
+            rating_key = None
+        dedupe_key = rating_key if rating_key is not None else id(track)
+
+        similarity = float(candidate.get("similarity", 0.0) or 0.0)
+        cache_key = candidate.get("cache_key")
+        source = candidate.get("source") or "candidate"
+
+        entry = dedupe_map.get(dedupe_key)
+        if entry is None:
+            entry = {
+                "track": track,
+                "similarity": similarity,
+                "sources": {source},
+                "cache_keys": {cache_key} if cache_key else set(),
+                "candidates": [candidate],
+                "original_songs": [],
+            }
+            dedupe_map[dedupe_key] = entry
+            aggregated.append(entry)
+        else:
+            entry["similarity"] = max(entry["similarity"], similarity)
+            entry["sources"].add(source)
+            if cache_key:
+                entry["cache_keys"].add(cache_key)
+            entry["candidates"].append(candidate)
+
+        original_song = candidate.get("song")
+        if isinstance(original_song, dict):
+            entry["original_songs"].append(original_song)
+
+    if not aggregated:
+        return {"action": "skip"}
+
+    aggregated.sort(key=lambda item: item.get("similarity", 0.0), reverse=True)
+
+    reference_song = fallback_song or {}
+    ref_title = reference_song.get("title", "")
+    ref_album = reference_song.get("album", "Unknown")
+    ref_artist = reference_song.get("artist", "")
+
+    header = (
+        ui.colorize('text_highlight', '\nReview candidate matches for: ')
+        + ui.colorize('text_highlight_minor', f"{ref_album} - {ref_title} - {ref_artist}")
+    )
+    print_(header)
+
+    for index, entry in enumerate(aggregated, start=1):
+        track = entry["track"]
+        try:
+            track_title = getattr(track, "title", "") or "<unknown>"
+            track_album = getattr(track, "parentTitle", "") or "<unknown>"
+            track_artist = getattr(track, "originalTitle", None) or track.artist().title
+        except Exception:  # noqa: BLE001 - tolerate Plex quirks
+            track_title = getattr(track, "title", "") or "<unknown>"
+            track_album = getattr(track, "parentTitle", "") or "<unknown>"
+            track_artist = "<unknown>"
+
+        query_song = entry["original_songs"][0] if entry["original_songs"] else reference_song
+        query_title = (query_song or {}).get("title", "")
+        query_album = (query_song or {}).get("album", "")
+        query_artist = (query_song or {}).get("artist", "")
+
+        highlighted_title = highlight_matches(query_title, track_title)
+        highlighted_album = highlight_matches(query_album or ref_album, track_album)
+        highlighted_artist = highlight_matches(query_artist or ref_artist, track_artist)
+
+        similarity = entry.get("similarity", 0.0) or 0.0
+        if similarity >= 0.8:
+            score_color = 'text_success'
+        elif similarity >= 0.5:
+            score_color = 'text_warning'
+        else:
+            score_color = 'text_error'
+
+        sources = ", ".join(sorted(entry.get("sources", []))) or "candidate"
+        print_(
+            f"{ui.colorize('action', str(index))}. {highlighted_album} - {highlighted_title} - "
+            f"{highlighted_artist} (Match: {ui.colorize(score_color, f'{similarity:.2f}')}, "
+            f"Sources: {ui.colorize('text_highlight_minor', sources)})"
+        )
+
+        if query_song and (
+            query_title != ref_title or query_album != ref_album or query_artist != ref_artist
+        ):
+            print_(
+                ui.colorize(
+                    'text_highlight_minor',
+                    f"   Based on query: {query_album or 'Unknown'} - {query_title} - {query_artist}",
+                )
+            )
+
+    print_(ui.colorize('text_highlight', '\nActions:'))
+    print_(ui.colorize('text_highlight_minor', '  #: Select match by number'))
+    print_(_render_actions())
+
+    selection = ui.input_options(
+        ("aBort", "Skip", "Enter manual search"),
+        numrange=(1, len(aggregated)),
+        default=1,
+    )
+
+    if isinstance(selection, int) and selection > 0:
+        entry = aggregated[selection - 1]
+        cache_keys = entry.get("cache_keys") or set()
+        chosen_cache_key = None
+        if current_cache_key and current_cache_key in cache_keys:
+            chosen_cache_key = current_cache_key
+        elif cache_keys:
+            # Stable choice: prefer cache key from first candidate appended.
+            for candidate in entry.get("candidates", []):
+                candidate_cache_key = candidate.get("cache_key")
+                if candidate_cache_key:
+                    chosen_cache_key = candidate_cache_key
+                    break
+        if not chosen_cache_key:
+            chosen_cache_key = current_cache_key
+
+        chosen_candidate = None
+        for candidate in entry.get("candidates", []):
+            candidate_cache_key = candidate.get("cache_key")
+            if candidate_cache_key == chosen_cache_key:
+                chosen_candidate = candidate
+                break
+        if chosen_candidate is None and entry.get("candidates"):
+            chosen_candidate = entry["candidates"][0]
+
+        return {
+            "action": "selected",
+            "track": entry["track"],
+            "cache_key": chosen_cache_key,
+            "similarity": entry.get("similarity", 0.0),
+            "sources": sorted(entry.get("sources", [])),
+            "original_song": (chosen_candidate or {}).get("song")
+            if isinstance(chosen_candidate, dict)
+            else None,
+        }
+
+    if selection in ("b", "B"):
+        return {"action": "abort"}
+    if selection in ("s", "S"):
+        return {"action": "skip"}
+    if selection in ("e", "E"):
+        return {"action": "manual"}
+
+    return {"action": "skip"}
 
 
 def handle_manual_search(plugin, sorted_tracks, song, original_query=None):

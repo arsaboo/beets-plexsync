@@ -22,11 +22,11 @@ beets-plexsync is a Python plugin for [beets](https://github.com/beetbox/beets),
 
 - Python formatting: ms-python.black-formatter is the default. Do not change provider; "python.formatting.provider" is intentionally set to "none".
 - Tests: VS Code is configured for unittest discovery with:
-  - Start dir: ./beetsplug
+  - Start dir: ./tests
   - Pattern: test_*.py
 - Keep tests compatible with unittest discovery or run the CLI snippets below.
 
-### Prerequisites and Environment Setup
+## Prerequisites and Environment Setup
 
 **CRITICAL**: This environment has significant network limitations that prevent pip installations from PyPI due to timeout issues. Use system packages wherever possible.
 
@@ -87,35 +87,42 @@ pip install git+https://github.com/arsaboo/beets-plexsync.git
 
 ### Code Validation
 
-**NEVER CANCEL**: All validation steps complete in under 5 seconds total but are essential.
+NEVER CANCEL: All validation steps complete in under 5 seconds total but are essential.
 
-1. **Python syntax check** (<1 second):
+1. Python syntax check (<1 second):
    ```bash
    cd /home/runner/work/beets-plexsync/beets-plexsync
-   python3 -m py_compile beetsplug/*.py
+   python3 - << 'PY'
+import os, py_compile
+for root, _, files in os.walk('beetsplug'):
+    for f in files:
+        if f.endswith('.py'):
+            py_compile.compile(os.path.join(root, f))
+print('All modules compiled')
+PY
    ```
 
-2. **Basic import test** (<1 second):
+2. Basic import test (<1 second):
    ```bash
    PYTHONPATH=/home/runner/work/beets-plexsync/beets-plexsync python3 -c "
-   import sys
-   sys.path.insert(0, '/home/runner/work/beets-plexsync/beets-plexsync')
-   from beetsplug.helpers import parse_title, clean_album_name
-   print('Core helper functions import successfully')
-   "
+import sys
+sys.path.insert(0, '/home/runner/work/beets-plexsync/beets-plexsync')
+from beetsplug.utils.helpers import parse_title, clean_album_name
+print('Core helper functions import successfully')
+"
    ```
 
-3. **Configuration validation**:
+3. Configuration validation:
    ```bash
    cd /home/runner/work/beets-plexsync/beets-plexsync
    python3 -c "
-   with open('setup.py', 'r') as f:
-       content = f.read()
-       print('setup.py loads correctly')
-       print('Content length:', len(content), 'characters')
-       if 'install_requires' in content:
-           print('Has install_requires section')
-   "
+with open('setup.py', 'r') as f:
+    content = f.read()
+    print('setup.py loads correctly')
+    print('Content length:', len(content), 'characters')
+    if 'install_requires' in content:
+        print('Has install_requires section')
+"
    ```
 
 ### Manual Validation Scenarios
@@ -149,190 +156,34 @@ PY
 VS Code unittest discovery parity (<1 second):
 ```bash
 cd /home/runner/work/beets-plexsync/beets-plexsync
-python3 -m unittest discover -s ./beetsplug -p "test_*.py" -v
+python3 -m unittest discover -s ./tests -p "test_*.py" -v
 ```
 
-**Provider module validation** (<1 second):
+Provider module validation (<1 second):
 ```bash
 cd /home/runner/work/beets-plexsync/beets-plexsync
-python3 -m py_compile beetsplug/provider_*.py
+python3 -m py_compile beetsplug/providers/*.py
 echo "All provider modules compile successfully"
 ```
 
-**Core module validation** (<1 second):
+Core module validation (<1 second):
 ```bash
 cd /home/runner/work/beets-plexsync/beets-plexsync
-python3 -m py_compile beetsplug/matching.py beetsplug/caching.py
+python3 -m py_compile beetsplug/core/matching.py beetsplug/core/cache.py beetsplug/core/config.py
 echo "Core modules compile successfully"
 ```
 
-**Helper functions test** (<1 second):
+Helper functions test (<1 second):
 ```bash
 PYTHONPATH=/home/runner/work/beets-plexsync/beets-plexsync python3 -c "
-from beetsplug.helpers import parse_title, clean_album_name
+from beetsplug.utils.helpers import parse_title, clean_album_name
 print('Helper functions import successfully')
 "
 ```
 
-**Plugin structure validation**:
+Plugin structure validation:
 ```bash
 cd /home/runner/work/beets-plexsync/beets-plexsync
-echo 'Plugin files:' $(ls beetsplug/*.py | wc -l)
-echo 'Provider files:' $(ls beetsplug/provider_*.py | wc -l)
-echo 'Total LOC:' $(cat beetsplug/*.py | wc -l)
+echo 'Plugin files:' $(find beetsplug -name "*.py" | wc -l)
+echo 'Provider files:' $(ls beetsplug/providers/*.py | wc -l)
 ```
-
-## Project Structure and Navigation
-
-### Key Files and Directories
-
-**Repository root**: `/home/runner/work/beets-plexsync/beets-plexsync/`
-
-```
-├── README.md           # Comprehensive documentation (17KB)
-├── agents.md           # AI agent context documentation
-├── setup.py            # Package configuration
-├── beetsplug/          # Main plugin directory
-│   ├── plexsync.py     # Core plugin (154KB) - main entry point
-│   ├── llm.py          # LLM/AI integration (17KB)
-│   ├── matching.py     # Music matching utilities (5KB)
-│   ├── caching.py      # SQLite caching system (21KB)
-│   ├── helpers.py      # Utility functions (1KB)
-│   ├── provider_*.py   # External service integrations:
-│   │   ├── provider_apple.py     # Apple Music
-│   │   ├── provider_gaana.py     # Gaana.com
-│   │   ├── provider_jiosaavn.py  # JioSaavn
-│   │   ├── provider_m3u8.py      # M3U8 playlists
-│   │   ├── provider_post.py      # Custom HTTP POST
-│   │   ├── provider_tidal.py     # Tidal
-│   │   └── provider_youtube.py   # YouTube
-│   └── __init__.py     # Package initialization
-└── collage.png         # Example album collage output (3.5MB)
-```
-
-### Core Components
-
-1. **PlexSync class** (`plexsync.py`): Main plugin class inheriting from `BeetsPlugin`
-2. **Smart playlist algorithms**: Daily Discovery, Forgotten Gems, Recent Hits
-3. **AI integration**: OpenAI-compatible LLM for playlist generation
-4. **External importers**: 7 different music service providers
-5. **Caching system**: SQLite-based performance optimization
-
-## Common Development Tasks
-
-### Code Modification Guidelines
-
-1. **Always run syntax validation** after any changes:
-   ```bash
-   python3 -m py_compile beetsplug/plexsync.py
-   ```
-
-2. **Plugin command structure** - all commands start with `beet`:
-   - `beet plexsync` - Library sync
-   - `beet plex_smartplaylists` - Generate smart playlists
-   - `beet plexsonic -p "prompt"` - AI playlist generation
-   - `beet plexplaylistimport -m "name" -u "url"` - Import playlists
-
-3. **Configuration location**: Plugin reads from beets `config.yaml`
-   - Plex server settings under `plex:` section
-   - Plugin settings under `plexsync:` section
-   - LLM settings under `llm:` section
-
-### Debugging and Troubleshooting
-
-1. **Import errors**: Usually indicate missing dependencies
-   ```bash
-   PYTHONPATH=/home/runner/work/beets-plexsync/beets-plexsync python3 -c "
-   try:
-       from beetsplug.plexsync import PlexSync
-       print('Success')
-   except ImportError as e:
-       print('Missing dependency:', e)
-   "
-   ```
-
-2. **Configuration issues**: Check beets config path
-   ```bash
-   beet config -p  # Shows config file location
-   ```
-
-3. **Network timeouts**: This environment has significant network limitations
-   - PyPI installations fail with ReadTimeoutError
-   - Use system packages when possible
-   - Document network-dependent features as "requires external network access"
-
-## Timing Expectations and Limitations
-
-### Expected Command Times
-- **Syntax validation**: <1 second - NEVER CANCEL (actually ~0.07s)
-- **Basic imports**: <1 second - NEVER CANCEL (actually ~0.03s)
-- **Full dependency installation**: 5+ minutes - WILL FAIL due to network timeouts
-- **Plugin loading with beets**: 10 seconds (requires full dependencies)
-- **All validation steps combined**: <5 seconds total
-
-### Known Limitations in This Environment
-
-**CRITICAL**: Network connectivity issues prevent:
-1. **PyPI package installation** - pip commands timeout after 2-5 minutes
-2. **External API testing** - Cannot reach Spotify, Plex, or other services
-3. **Full functional validation** - Limited to syntax and import testing
-
-**Working validation approaches**:
-1. Python syntax compilation ✓
-2. Import structure verification ✓
-3. Configuration file parsing ✓
-4. Code review and static analysis ✓
-
-## Development Workflow
-
-### Making Changes
-
-1. **Before coding**: Always run initial validation
-   ```bash
-   cd /home/runner/work/beets-plexsync/beets-plexsync
-   python3 -m py_compile beetsplug/*.py
-   ```
-
-2. **After changes**: Validate immediately
-   ```bash
-   python3 -m py_compile beetsplug/[modified_file].py
-   ```
-
-3. **Test imports**: Ensure module loading works
-   ```bash
-   PYTHONPATH=/home/runner/work/beets-plexsync/beets-plexsync python3 -c "from beetsplug.plexsync import [your_changes]"
-   ```
-
-### Plugin Architecture Understanding
-
-- **BeetsPlugin inheritance**: Core plugin follows beets plugin architecture
-- **Command registration**: Commands registered in plugin's `commands()` method
-- **Database integration**: Uses beets' database for music metadata
-- **External API caching**: Uses SQLite for performance optimization
-- **Configuration management**: Uses beets' confuse library
-
-## Quick Reference Commands
-
-```bash
-# Repository validation
-cd /home/runner/work/beets-plexsync/beets-plexsync && python3 -m py_compile beetsplug/*.py
-
-# MCP config check
-cd /home/runner/work/beets-plexsync/beets-plexsync && python3 - << 'PY'
-import json; json.load(open('.vscode/mcp.json')); json.load(open('.vscode/settings.json')); print('MCP OK')
-PY
-
-# Basic functionality test
-PYTHONPATH=/home/runner/work/beets-plexsync/beets-plexsync python3 -c "from beetsplug.helpers import parse_title; print('OK')"
-
-# Project structure overview
-ls -la beetsplug/
-
-# Documentation review
-head -50 README.md
-
-# Setup configuration review
-cat setup.py
-```
-
-**Remember**: This environment cannot perform full installation or external service testing due to network limitations. Focus on code quality, structure, and syntax validation.

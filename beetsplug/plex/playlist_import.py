@@ -8,6 +8,7 @@ from beetsplug.core.config import get_plexsync_config
 from beetsplug.providers.gaana import import_gaana_playlist
 from beetsplug.providers.youtube import import_yt_playlist, import_yt_search
 from beetsplug.providers.tidal import import_tidal_playlist
+from beetsplug.plex import smartplaylists
 
 
 def import_playlist(plugin, playlist, playlist_url=None, listenbrainz=False):
@@ -296,6 +297,11 @@ def generate_imported_playlist(plugin, lib, playlist_config, plex_lookup=None):
     if max_tracks:
         matched_songs = matched_songs[:max_tracks]
     
+    # Apply filters to matched songs if filters are defined in the playlist config
+    filters = playlist_config.get("filters", {})
+    if filters:
+        matched_songs = smartplaylists.apply_playlist_filters(plugin, matched_songs, filters)
+        
     unique_matched = []
     seen_keys = set()
     for track in matched_songs:
@@ -308,6 +314,8 @@ def generate_imported_playlist(plugin, lib, playlist_config, plex_lookup=None):
         f.write("\nImport Summary:\n")
         f.write(f"Total tracks fetched from sources: {len(all_tracks)}\n")
         f.write(f"Unique tracks after de-duplication: {len(unique_tracks)}\n")
+        if filters:
+            f.write(f"Tracks after applying filters: {len(matched_songs)}\n")
         f.write(f"Tracks matched and added: {len(unique_matched)}\n")
         f.write(f"\nImport completed at: {_dt.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
     

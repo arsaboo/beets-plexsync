@@ -19,9 +19,11 @@ import numpy as np
 import confuse
 import enlighten
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List
+from types import SimpleNamespace
+from typing import Dict, List, Optional, Tuple
 
 import dateutil.parser
 import requests
@@ -44,6 +46,7 @@ from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
 from beetsplug.core.cache import Cache
 from beetsplug.ai.llm import search_track_info, Song, SongRecommendations
 from beetsplug.core.matching import clean_string, plex_track_distance, get_fuzzy_score
+from beetsplug.core.vector_index import BeetsVectorIndex
 from beetsplug.providers.apple import import_apple_playlist
 from beetsplug.providers.jiosaavn import import_jiosaavn_playlist
 from beetsplug.utils.helpers import (
@@ -63,6 +66,12 @@ from beetsplug.plex import spotify_transfer
 from beetsplug.plex import collage as collage_mod
 from beetsplug.plex import smartplaylists as sp_mod
 
+_QUERY_TITLE_BY_FROM_RE = re.compile(
+    r'^(?P<title>.+?)\s+by\s+(?P<artist>.+?)\s+from\s+(?P<album>.+)$',
+    re.IGNORECASE,
+)
+_FROM_CLAUSE_RE = re.compile(r'\(from\s+"?([^")]+)"?\)', re.IGNORECASE)
+
 
 class PlexSync(BeetsPlugin):
     """Define plexsync class."""
@@ -79,6 +88,26 @@ class PlexSync(BeetsPlugin):
         "plex_lastratedat": DateType(),
         "plex_updated": DateType(),
     }
+
+    @dataclass
+    class LocalCandidate:
+        metadata: Dict[str, str]
+        score: float
+        overlap_tokens: List[str]
+
+        def song_dict(self) -> Dict[str, str]:
+            return {
+                "title": self.metadata.get("title", "") or "",
+                "album": self.metadata.get("album", "") or "",
+                "artist": self.metadata.get("artist", "") or "",
+            }
+
+        def as_item_proxy(self) -> SimpleNamespace:
+            return SimpleNamespace(
+                title=self.metadata.get("title", "") or "",
+                album=self.metadata.get("album", "") or "",
+                artist=self.metadata.get("artist", "") or "",
+            )
 
     class dotdict(dict):
         """dot.notation access to dictionary attributes"""
@@ -117,6 +146,10 @@ class PlexSync(BeetsPlugin):
         # Initialize cache with plugin instance reference
         cache_path = os.path.join(self.config_dir, 'plexsync_cache.db')
         self.cache = Cache(cache_path, self)
+        self._candidate_confirmations: List[Dict[str, object]] = []
+        self._candidate_confirmation_depth: int = 0
+        self._vector_index: Optional[BeetsVectorIndex] = None
+        self._vector_index_info: Dict[str, Optional[float]] = {}
 
         # Adding defaults.
         config["plex"].add(
@@ -194,6 +227,296 @@ class PlexSync(BeetsPlugin):
             )
         self.register_listener("database_change", self.listen_for_db_change)
 
+    def _extract_vector_metadata(self, item) -> Dict[str, Optional[str]]:
+        return {
+            "id": getattr(item, "id", None),
+            "title": getattr(item, "title", "") or "",
+            "album": getattr(item, "album", "") or "",
+            "artist": getattr(item, "artist", "") or "",
+            "plex_ratingkey": getattr(item, "plex_ratingkey", None),
+        }
+
+    def _update_vector_index(
+        self,
+        vector_index: BeetsVectorIndex,
+        db_path: Optional[str] = None,
+    ) -> None:
+        mtime = None
+        if db_path:
+            try:
+                mtime = os.path.getmtime(db_path)
+            except OSError:
+                mtime = None
+
+        self._vector_index = vector_index
+        self._vector_index_info = {
+            "db_path": db_path,
+            "mtime": mtime,
+            "size": len(vector_index),
+        }
+
+        self._log.debug(
+            "Indexed {} beets tracks for local matching (db: {}, mtime: {})",
+            len(vector_index),
+            db_path,
+            mtime,
+        )
+
+    def _ensure_vector_index(self, lib=None) -> Optional[BeetsVectorIndex]:
+        db_path = None
+        if lib is not None:
+            db_path = getattr(lib, "path", None)
+        if not db_path:
+            existing_path = self._vector_index_info.get("db_path") if self._vector_index_info else None
+            if existing_path:
+                db_path = existing_path
+            else:
+                try:
+                    db_path = config["library"].as_filename()
+                except Exception:
+                    db_path = None
+
+        current_index = self._vector_index
+        if current_index is not None:
+            return current_index
+
+        source_lib = lib
+        close_after = False
+        if source_lib is None:
+            if not db_path:
+                self._log.debug("Unable to determine beets library path for vector index")
+                return None
+            try:
+                from beets.library import Library
+
+                source_lib = Library(db_path)
+                close_after = True
+            except Exception as exc:  # noqa: BLE001
+                self._log.debug("Failed to open beets library at {}: {}", db_path, exc)
+                return None
+
+        try:
+            vector_index = BeetsVectorIndex()
+            for item in source_lib.items():
+                metadata = self._extract_vector_metadata(item)
+                item_id = metadata.get("id")
+                if item_id is None:
+                    continue
+                vector_index.add_item(item_id, metadata)
+            self._update_vector_index(vector_index, db_path=db_path)
+            return vector_index
+        finally:
+            if close_after:
+                try:
+                    source_lib._close()
+                except Exception:  # noqa: BLE001
+                    pass
+
+    def get_local_beets_candidates(
+        self,
+        song: Dict[str, str],
+        limit: int = 25,
+        min_score: float = 0.35,
+        lib=None,
+    ) -> List["PlexSync.LocalCandidate"]:
+        vector_index = self._ensure_vector_index(lib)
+        if not vector_index:
+            return []
+
+        query_metadata = {
+            "title": song.get("title") or "",
+            "album": song.get("album") or "",
+            "artist": song.get("artist") or "",
+        }
+        query_counts, query_norm = vector_index.build_query_vector(query_metadata)
+        scored = vector_index.candidate_scores(
+            query_counts,
+            query_norm,
+            limit=limit,
+            min_score=min_score,
+        )
+
+        candidates: List[PlexSync.LocalCandidate] = []
+        for entry, score in scored:
+            metadata = dict(entry.metadata)
+            metadata.setdefault("title", "")
+            metadata.setdefault("album", "")
+            metadata.setdefault("artist", "")
+            candidates.append(
+                PlexSync.LocalCandidate(
+                    metadata=metadata,
+                    score=score,
+                    overlap_tokens=entry.overlap_tokens(query_counts),
+                )
+        )
+        return candidates
+
+    @staticmethod
+    def _strip_from_clause(value: str) -> Tuple[str, Optional[str]]:
+        """Remove (From "...") clauses and return cleaned value and extracted album."""
+        if not value:
+            return "", None
+        extracted = None
+        cleaned = value
+        match = _FROM_CLAUSE_RE.search(value)
+        if match:
+            extracted = match.group(1).strip().strip('"').strip("'")
+            cleaned = _FROM_CLAUSE_RE.sub("", value).strip()
+        cleaned = " ".join(cleaned.split())
+        return cleaned, extracted
+
+    def _normalize_query_metadata(self, song: Dict[str, str]) -> Dict[str, str]:
+        """Normalize user query metadata for similarity comparisons."""
+        if not song:
+            return {"title": "", "album": "", "artist": ""}
+
+        def _clean_field(value: Optional[str]) -> str:
+            if value is None:
+                return ""
+            cleaned_value = value.strip()
+            if cleaned_value.lower() in {"none", "null"}:
+                return ""
+            return cleaned_value
+
+        normalized = {
+            "title": _clean_field(song.get("title")),
+            "album": _clean_field(song.get("album")),
+            "artist": _clean_field(song.get("artist")),
+        }
+
+        match = _QUERY_TITLE_BY_FROM_RE.match(normalized["title"])
+        if match:
+            normalized["title"] = match.group("title").strip().strip('"').strip("'")
+            artist_from_title = match.group("artist").strip().strip('"').strip("'")
+            album_from_title = match.group("album").strip().strip('"').strip("'")
+            if not normalized["artist"]:
+                normalized["artist"] = artist_from_title
+            if not normalized["album"]:
+                normalized["album"] = album_from_title
+
+        normalized["title"], extracted_album = self._strip_from_clause(normalized["title"])
+        if extracted_album and not normalized["album"]:
+            normalized["album"] = extracted_album
+
+        if normalized["album"]:
+            normalized["album"], extracted_album = self._strip_from_clause(normalized["album"])
+            if extracted_album and not normalized["album"]:
+                normalized["album"] = extracted_album
+
+        return normalized
+
+    def _match_score_for_query(
+        self,
+        song: Dict[str, str],
+        track,
+    ) -> float:
+        """Evaluate similarity between the requested song and a Plex track."""
+        if track is None:
+            return 0.0
+
+        normalized = self._normalize_query_metadata(song or {})
+        query_proxy = SimpleNamespace(
+            title=normalized.get("title", ""),
+            album=normalized.get("album", ""),
+            artist=normalized.get("artist", ""),
+        )
+        score, _ = plex_track_distance(query_proxy, track)
+        return score
+
+    def _queue_candidate_confirmation(
+        self,
+        *,
+        track,
+        similarity: float,
+        cache_key: str,
+        source: str,
+        original_song: Dict[str, str],
+    ) -> None:
+        """Queue a potential match for user confirmation."""
+        if track is None:
+            return
+        self._candidate_confirmations.append(
+            {
+                "track": track,
+                "similarity": similarity,
+                "cache_key": cache_key,
+                "source": source,
+                "song": dict(original_song or {}),
+            }
+        )
+
+    def _try_candidate_direct_match(
+        self,
+        candidate: "PlexSync.LocalCandidate",
+        original_song: Dict[str, str],
+        cache_key: Optional[str] = None,
+    ):
+        rating_key = candidate.metadata.get("plex_ratingkey")
+        if not rating_key:
+            return None
+        try:
+            track = self.music.fetchItem(rating_key)
+        except Exception as exc:  # noqa: BLE001
+            self._log.debug(
+                "Failed to fetch Plex item for cached ratingKey {}: {}", rating_key, exc
+            )
+            return None
+
+        candidate_proxy = candidate.as_item_proxy()
+        candidate_score, _ = plex_track_distance(candidate_proxy, track)
+
+        query_score = self._match_score_for_query(original_song, track)
+        self._log.debug(
+            "Beets candidate '{}' ratingKey {} -> candidate score {:.2f}, query score {:.2f}",
+            candidate.metadata.get("title", ""),
+            rating_key,
+            candidate_score,
+            query_score,
+        )
+        if query_score >= 0.8:
+            return track
+        if cache_key:
+            self._queue_candidate_confirmation(
+                track=track,
+                similarity=query_score,
+                cache_key=cache_key,
+                source="direct",
+                original_song=original_song,
+            )
+        return None
+
+    def _prepare_candidate_variants(
+        self,
+        candidates: List["PlexSync.LocalCandidate"],
+        song: Dict[str, str],
+        max_variants: int = 3,
+    ) -> List[Tuple[Dict[str, str], float]]:
+        variants: List[Tuple[Dict[str, str], float]] = []
+        seen = set()
+
+        original_tuple = (
+            (song.get("title") or "").strip().lower(),
+            (song.get("album") or "").strip().lower(),
+            (song.get("artist") or "").strip().lower(),
+        )
+
+        for candidate in candidates:
+            variant = candidate.song_dict()
+            variant_tuple = (
+                variant["title"].strip().lower(),
+                variant["album"].strip().lower(),
+                variant["artist"].strip().lower(),
+            )
+            if variant_tuple == original_tuple:
+                continue
+            if variant_tuple in seen:
+                continue
+            seen.add(variant_tuple)
+            variants.append((variant, candidate.score))
+            if len(variants) >= max_variants:
+                break
+        return variants
+
     def _get_progress_manager(self):
         """Create or return a cached enlighten manager for progress bars."""
         if self._progress_disabled:
@@ -253,6 +576,38 @@ class PlexSync(BeetsPlugin):
     def listen_for_db_change(self, lib, model):
         """Listens for beets db change and register the update for the end."""
         self.register_listener("cli_exit", self._plexupdate)
+
+        index = getattr(self, "_vector_index", None)
+        if index is None:
+            # Allow the next lookup to rebuild lazily if needed.
+            self._vector_index_info = {}
+            return
+
+        item_id = getattr(model, "id", None)
+        if item_id is None:
+            return
+
+        metadata = self._extract_vector_metadata(model)
+        if not index.upsert_item(item_id, metadata):
+            # No meaningful tokens; still ensure metadata bookkeeping stays fresh.
+            pass
+
+        info = dict(self._vector_index_info or {})
+        info["size"] = len(index)
+
+        db_path = info.get("db_path")
+        if not db_path and lib is not None:
+            db_path = getattr(lib, "path", None)
+            if db_path:
+                info["db_path"] = db_path
+
+        if db_path:
+            try:
+                info["mtime"] = os.path.getmtime(db_path)
+            except OSError:
+                info["mtime"] = None
+
+        self._vector_index_info = info
 
     def commands(self):
         """Add beet UI commands to interact with Plex."""
@@ -719,8 +1074,20 @@ class PlexSync(BeetsPlugin):
         return manual_search.manual_track_search(self, original_query)
 
 
-    def search_plex_song(self, song, manual_search=None, llm_attempted=False):
-        return plex_search.search_plex_song(self, song, manual_search, llm_attempted)
+    def search_plex_song(
+        self,
+        song,
+        manual_search=None,
+        llm_attempted=False,
+        use_local_candidates=True,
+    ):
+        return plex_search.search_plex_song(
+            self,
+            song,
+            manual_search,
+            llm_attempted,
+            use_local_candidates=use_local_candidates,
+        )
 
     def _process_matches(self, tracks, song, manual_search):
         """Helper function to process multiple track matches."""

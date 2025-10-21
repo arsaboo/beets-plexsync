@@ -13,6 +13,7 @@ import copy
 
 from beets import config
 from beetsplug.core.config import get_config_value, get_plexsync_config
+from beetsplug.core.vector_index import BeetsVectorIndex
 from beetsplug.providers.gaana import import_gaana_playlist
 from beetsplug.providers.tidal import import_tidal_playlist
 from beetsplug.providers.youtube import import_yt_playlist
@@ -23,9 +24,25 @@ from beetsplug.providers.http_post import import_post_playlist
 def build_plex_lookup(ps, lib):
     ps._log.debug("Building lookup dictionary for Plex rating keys")
     plex_lookup = {}
+    vector_index = BeetsVectorIndex()
+
     for item in lib.items():
         if hasattr(item, "plex_ratingkey"):
             plex_lookup[item.plex_ratingkey] = item
+
+        metadata = ps._extract_vector_metadata(item)
+        item_id = metadata["id"]
+        if item_id is None:
+            continue
+        vector_index.add_item(item_id, metadata)
+
+    if len(vector_index):
+        try:
+            db_path = getattr(lib, "path", None)
+        except AttributeError:
+            db_path = None
+        ps._update_vector_index(vector_index, db_path=db_path)
+
     return plex_lookup
 
 def _resolve_min_year(ps, playlist_config, default_max_age_years, playlist_label):

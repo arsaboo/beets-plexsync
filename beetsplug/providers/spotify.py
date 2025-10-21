@@ -4,6 +4,7 @@ These functions operate on the plugin instance to keep behavior identical.
 They do not change cache key formats or returned structures.
 """
 
+import os
 import re
 import json
 from typing import Any, Dict, List, Optional
@@ -12,18 +13,45 @@ from collections import Counter
 import dateutil.parser
 import requests
 from bs4 import BeautifulSoup
-from spotipy.oauth2 import SpotifyOAuth
 import spotipy
+from spotipy.oauth2 import SpotifyOAuth
+from spotipy.exceptions import SpotifyOauthError
 
-from beetsplug.utils.helpers import parse_title, clean_album_name
 from beets import config
+from beetsplug.utils.helpers import parse_title, clean_album_name
+
+
+def _clear_cached_token(plugin) -> None:
+    """Remove any cached Spotify token file."""
+    handler = getattr(plugin, "auth_manager", None)
+    if handler is None:
+        return
+
+    cache_handler = handler.cache_handler
+    if hasattr(cache_handler, "delete_cached_token"):
+        cache_handler.delete_cached_token()
+        return
+
+    cache_path = getattr(cache_handler, "cache_path", None) or getattr(
+        plugin, "plexsync_token", None
+    )
+    if not cache_path:
+        return
+
+    try:
+        os.remove(cache_path)
+        plugin._log.debug("Deleted Spotify cache file {}", cache_path)
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        plugin._log.debug("Failed to delete Spotify cache file {}: {}", cache_path, exc)
 
 
 def authenticate(plugin) -> None:
     """Authenticate Spotify, storing `sp` on the plugin identical to before."""
     ID = config["spotify"]["client_id"].get()
     SECRET = config["spotify"]["client_secret"].get()
-    redirect_uri = "http://localhost/"
+    redirect_uri = "http://127.0.0.1/"
     scope = (
         "user-read-private user-read-email playlist-modify-public "
         "playlist-modify-private playlist-read-private"
@@ -37,15 +65,40 @@ def authenticate(plugin) -> None:
         open_browser=False,
         cache_path=plugin.plexsync_token,
     )
-    plugin.token_info = plugin.auth_manager.get_cached_token()
-    if plugin.token_info is None:
-        plugin.auth_manager.get_access_token(as_dict=True)
-    need_token = plugin.auth_manager.is_token_expired(plugin.token_info)
-    if need_token:
-        new_token = plugin.auth_manager.refresh_access_token(
-            plugin.token_info["refresh_token"]
-        )
-        plugin.token_info = new_token
+    try:
+        plugin.token_info = plugin.auth_manager.get_cached_token()
+    except SpotifyOauthError as exc:
+        plugin._log.debug("Failed to load cached Spotify token: {}", exc)
+        _clear_cached_token(plugin)
+        plugin.token_info = None
+
+    if not plugin.token_info:
+        plugin.token_info = plugin.auth_manager.get_access_token(as_dict=True)
+    else:
+        try:
+            need_token = plugin.auth_manager.is_token_expired(plugin.token_info)
+        except (SpotifyOauthError, KeyError, TypeError) as exc:
+            plugin._log.debug("Cached Spotify token missing metadata: {}", exc)
+            need_token = True
+
+        if need_token:
+            try:
+                plugin.token_info = plugin.auth_manager.refresh_access_token(
+                    plugin.token_info["refresh_token"]
+                )
+            except SpotifyOauthError as exc:
+                message = str(exc).lower()
+                if "invalid_grant" in message:
+                    plugin._log.info(
+                        "Spotify refresh token revoked; requesting new authorization."
+                    )
+                    _clear_cached_token(plugin)
+                    plugin.token_info = plugin.auth_manager.get_access_token(
+                        as_dict=True
+                    )
+                else:
+                    raise
+
     plugin.sp = spotipy.Spotify(auth=plugin.token_info.get("access_token"))
 
 
