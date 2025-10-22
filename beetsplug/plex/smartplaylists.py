@@ -1137,6 +1137,9 @@ def apply_playlist_filters(ps, tracks, filter_config):
     
 
 
+def generate_daily_discovery(ps, lib, dd_config, plex_lookup, preferred_genres, similar_tracks):
+    generate_unified_playlist(ps, lib, dd_config, plex_lookup, preferred_genres, similar_tracks, "daily_discovery")
+
 def generate_forgotten_gems(ps, lib, fg_config, plex_lookup, preferred_genres, similar_tracks):
     generate_unified_playlist(ps, lib, fg_config, plex_lookup, preferred_genres, similar_tracks, "forgotten_gems")
 
@@ -1159,6 +1162,3 @@ def generate_highly_rated_tracks(ps, lib, hr_config, plex_lookup, preferred_genr
 
 def generate_most_played_tracks(ps, lib, mp_config, plex_lookup, preferred_genres, similar_tracks):
     generate_unified_playlist(ps, lib, mp_config, plex_lookup, preferred_genres, similar_tracks, "most_played")
-
-
-
