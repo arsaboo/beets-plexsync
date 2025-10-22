@@ -4,12 +4,15 @@ These functions use the plugin instance (`ps`) to access logging, config,
 and Plex/beets objects. Behavior preserved.
 """
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from typing import Tuple
 import time
 import os
 import copy
 import copy
+
+import json
 
 from beets import config
 from beetsplug.core.config import get_config_value, get_plexsync_config
@@ -21,29 +24,7 @@ from beetsplug.providers.m3u8 import import_m3u8_playlist
 from beetsplug.providers.http_post import import_post_playlist
 
 
-def build_plex_lookup(ps, lib):
-    ps._log.debug("Building lookup dictionary for Plex rating keys")
-    plex_lookup = {}
-    vector_index = BeetsVectorIndex()
 
-    for item in lib.items():
-        if hasattr(item, "plex_ratingkey"):
-            plex_lookup[item.plex_ratingkey] = item
-
-        metadata = ps._extract_vector_metadata(item)
-        item_id = metadata["id"]
-        if item_id is None:
-            continue
-        vector_index.add_item(item_id, metadata)
-
-    if len(vector_index):
-        try:
-            db_path = getattr(lib, "path", None)
-        except AttributeError:
-            db_path = None
-        ps._update_vector_index(vector_index, db_path=db_path)
-
-    return plex_lookup
 
 def _resolve_min_year(ps, playlist_config, default_max_age_years, playlist_label):
     now_year = datetime.now().year
@@ -168,24 +149,29 @@ def get_preferred_attributes(ps) -> Tuple[list, list]:
     history_days = get_config_value(config["plexsync"], defaults_cfg, "history_days", 15)
     exclusion_days = get_config_value(config["plexsync"], defaults_cfg, "exclusion_days", 30)
 
-    tracks = ps.music.search(filters={"track.lastViewedAt>>": f"{history_days}d"}, libtype="track")
+    # Fetch tracks for the longer period (exclusion_days)
+    all_tracks = ps.music.search(filters={"track.lastViewedAt>>": f"{exclusion_days}d"}, libtype="track")
+
+    now = datetime.now()
+    history_cutoff = now - timedelta(days=history_days)
+
+    history_tracks = [
+        track for track in all_tracks if track.lastViewedAt and track.lastViewedAt > history_cutoff
+    ]
+    
+    recently_played = {track.ratingKey for track in all_tracks}
 
     genre_counts = {}
     similar_tracks = set()
 
-    recently_played = set(
-        track.ratingKey
-        for track in ps.music.search(filters={"track.lastViewedAt>>": f"{exclusion_days}d"}, libtype="track")
-    )
-
-    for track in tracks:
+    def get_sonic_matches(track):
         track_genres = set()
         for genre in track.genres:
             if genre:
                 genre_str = str(genre.tag).lower()
-                genre_counts[genre_str] = genre_counts.get(genre_str, 0) + 1
                 track_genres.add(genre_str)
-
+        
+        local_similar_tracks = set()
         try:
             sonic_matches = track.sonicallySimilar()
             for match in sonic_matches:
@@ -195,9 +181,18 @@ def get_preferred_attributes(ps) -> Tuple[list, list]:
                     and any(g.tag.lower() in track_genres for g in match.genres)
                     and (rating is None or rating == -1 or rating >= 4)
                 ):
-                    similar_tracks.add(match)
+                    local_similar_tracks.add(match)
         except Exception as e:
             ps._log.debug("Error getting similar tracks for {}: {}", track.title, e)
+        return local_similar_tracks, track_genres
+
+    with ThreadPoolExecutor() as executor:
+        results = executor.map(get_sonic_matches, history_tracks)
+
+    for local_similar_tracks, track_genres in results:
+        similar_tracks.update(local_similar_tracks)
+        for genre in track_genres:
+            genre_counts[genre] = genre_counts.get(genre, 0) + 1
 
     sorted_genres = sorted(genre_counts, key=genre_counts.get, reverse=True)[:5]
     ps._log.debug("Top genres: {}", sorted_genres)
@@ -592,13 +587,28 @@ def build_advanced_filters(filter_config, exclusion_days, preferred_genres=None)
     return adv
 
 
+def _get_with_cache(ps, cache_key, func):
+    """Helper to cache results of a function call."""
+    if cache_key in ps._server_query_cache:
+        ps._log.debug("Using cached results for key: {}", cache_key)
+        return ps._server_query_cache[cache_key]
+
+    results = func()
+    ps._server_query_cache[cache_key] = results
+    return results
+
+
 def _get_library_tracks(ps, preferred_genres, filters, exclusion_days):
+
     adv_filters = build_advanced_filters(filters, exclusion_days, preferred_genres)
     if adv_filters:
+        cache_key = json.dumps(adv_filters, sort_keys=True)
         try:
             ps._log.debug("Using server-side filters: {}", adv_filters)
             _t0 = time.time()
-            tracks = ps.music.searchTracks(filters=adv_filters)
+            
+            tracks = _get_with_cache(ps, cache_key, lambda: ps.music.searchTracks(filters=adv_filters))
+
             ps._log.debug(
                 "Server-side filter fetched {} tracks in {:.2f}s",
                 len(tracks), time.time() - _t0,
@@ -1124,99 +1134,7 @@ def apply_playlist_filters(ps, tracks, filter_config):
         "Filter application complete: {} -> {} tracks in {:.2f}s",
         len(tracks), len(filtered_tracks), time.time() - total_start,
     )
-    return filtered_tracks
-
-
-def generate_daily_discovery(ps, lib, dd_config, plex_lookup, preferred_genres, similar_tracks):
-    generate_unified_playlist(ps, lib, dd_config, plex_lookup, preferred_genres, similar_tracks, "daily_discovery")
-
-
-def build_advanced_filters(filter_config, exclusion_days, preferred_genres=None):
-    adv = {'and': []}
-    if filter_config:
-        include = filter_config.get('include', {}) or {}
-        exclude = filter_config.get('exclude', {}) or {}
-        # Combine preferred and included genres for a single OR query
-        all_genres = set(g.lower() for g in (preferred_genres or []))
-        inc_genres = include.get('genres')
-        if inc_genres:
-            all_genres.update(g.lower() for g in inc_genres)
-        if all_genres:
-            adv['and'].append({'or': [{'genre': g} for g in all_genres]})
-        # Exclude genres
-        exc_genres = exclude.get('genres')
-        if exc_genres:
-            adv['and'].append({'genre!': list(exc_genres)})
-        # Include years
-        inc_years = include.get('years') or {}
-        if 'between' in inc_years and isinstance(inc_years['between'], list) and len(inc_years['between']) == 2:
-            start_year, end_year = inc_years['between']
-            adv['and'].append({'and': [{'year>>': start_year}, {'year<<': end_year}]})
-        if 'after' in inc_years:
-            adv['and'].append({'year>>': inc_years['after']})
-        if 'before' in inc_years:
-            adv['and'].append({'year<<': inc_years['before']})
-        # Exclude years (translate to constraints)
-        exc_years = exclude.get('years') or {}
-        if 'before' in exc_years:
-            # Exclude anything strictly before X => require year >= X
-            adv['and'].append({'year>>': exc_years['before']})
-        if 'after' in exc_years:
-            # Exclude anything strictly after Y => require year <= Y
-            adv['and'].append({'year<<': exc_years['after']})
-        # Rating filter at top-level of filter_config
-        if 'min_rating' in filter_config:
-            mr = filter_config['min_rating']
-            adv['and'].append({'or': [{'userRating': 0}, {'userRating>>': mr}]})
-    # Exclude recent plays
-    if exclusion_days and exclusion_days > 0:
-        adv['and'].append({'lastViewedAt<<': f'-{exclusion_days}d'})
-    # Clean up if empty
-    if not adv['and']:
-        return None
-    return adv
-
-def _get_library_tracks(ps, preferred_genres, filters, exclusion_days):
-    adv_filters = build_advanced_filters(filters, exclusion_days, preferred_genres)
-    if adv_filters:
-        try:
-            ps._log.debug("Using server-side filters: {}", adv_filters)
-            _t0 = time.time()
-            tracks = ps.music.searchTracks(filters=adv_filters)
-            ps._log.debug(
-                "Server-side filter fetched {} tracks in {:.2f}s",
-                len(tracks), time.time() - _t0,
-            )
-        except Exception as e:
-            ps._log.debug("Server-side filter failed (falling back to client filter): {}", e)
-            _t0 = time.time()
-            tracks = ps.music.search(libtype="track")
-            ps._log.debug(
-                "Client-side fetch (no server filters) returned {} tracks in {:.2f}s",
-                len(tracks), time.time() - _t0,
-            )
-    else:
-        # No filters specified; fetch all tracks (may be large)
-        _t0 = time.time()
-        tracks = ps.music.search(libtype="track")
-        ps._log.debug(
-            "Fetched all tracks (no filters) -> {} in {:.2f}s",
-            len(tracks), time.time() - _t0,
-        )
-
-    # Optional candidate pool cap to avoid huge post-filtering work
-    try:
-        defaults_cfg = get_plexsync_config(["playlists", "defaults"], dict, {})
-        max_pool = get_config_value(defaults_cfg, defaults_cfg, "max_candidate_pool", None)
-        if max_pool:
-            import random
-            if len(tracks) > int(max_pool):
-                tracks = random.sample(tracks, int(max_pool))
-                ps._log.debug("Capped candidate pool to {} tracks", max_pool)
-    except Exception:
-        pass
-
-    return tracks
+    
 
 
 def generate_forgotten_gems(ps, lib, fg_config, plex_lookup, preferred_genres, similar_tracks):

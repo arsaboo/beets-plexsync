@@ -11,7 +11,7 @@ def plex_to_spotify(plugin, lib, playlist, query_args=None):
     plex_playlist_items = list(plex_playlist.items())
     plugin._log.debug("Total items in Plex playlist: {}", len(plex_playlist_items))
 
-    plex_lookup = sp_mod.build_plex_lookup(plugin, lib)
+    plex_lookup = plugin._build_plex_lookup_and_vector_index(lib)
     spotify_tracks = []
 
     query_rating_keys = None
