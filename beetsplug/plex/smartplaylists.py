@@ -158,7 +158,7 @@ def get_preferred_attributes(ps) -> Tuple[list, list]:
     history_tracks = [
         track for track in all_tracks if track.lastViewedAt and track.lastViewedAt > history_cutoff
     ]
-    
+
     recently_played = {track.ratingKey for track in all_tracks}
 
     genre_counts = {}
@@ -170,7 +170,7 @@ def get_preferred_attributes(ps) -> Tuple[list, list]:
             if genre:
                 genre_str = str(genre.tag).lower()
                 track_genres.add(genre_str)
-        
+
         local_similar_tracks = set()
         try:
             sonic_matches = track.sonicallySimilar()
@@ -201,14 +201,14 @@ def get_preferred_attributes(ps) -> Tuple[list, list]:
 
 
 # Define default scoring weights for each playlist type
-# 
+#
 # Metric explanations:
 # - z_rating: Standardized rating score (user rating); positive = higher rating than average
 #   Computed as: (rating - rating_mean) / rating_std
 #   Effect: Positive weights favor highly-rated tracks
 #
 # - z_recency: Standardized recency score (time since last played); positive = longer since played
-#   Computed as: (days_since_played - days_mean) / days_std  
+#   Computed as: (days_since_played - days_mean) / days_std
 #   Effect: Positive weights favor tracks not played recently (good for "forgotten" playlists)
 #           Negative weights favor recently played tracks (good for "fresh" playlists)
 #
@@ -223,7 +223,7 @@ def get_preferred_attributes(ps) -> Tuple[list, list]:
 #
 # - z_age: Standardized age (years since release); positive = newer than average tracks
 #   Computed as: -(age - age_mean) / age_std
-#   Effect: Positive weights favor newer tracks (good for "recent hits", "fresh favorites")  
+#   Effect: Positive weights favor newer tracks (good for "recent hits", "fresh favorites")
 #           Negative weights favor older tracks (good for "forgotten gems" to find old overlooked tracks)
 #
 DEFAULT_SCORING_WEIGHTS = {
@@ -343,7 +343,74 @@ def get_scoring_weights(playlist_type):
     return DEFAULT_SCORING_WEIGHTS.get(playlist_type, DEFAULT_SCORING_WEIGHTS["default"])
 
 
-def calculate_track_score(ps, track, base_time=None, tracks_context=None, playlist_type=None):
+def _compute_context_stats(tracks, base_time):
+    """Compute normalization stats once for a track pool."""
+    import numpy as _np
+    ratings = []
+    days_since = []
+    play_counts = []
+    popularities = []
+    ages = []
+
+    for t in tracks:
+        # Ratings
+        try:
+            ratings.append(float(getattr(t, 'plex_userrating', 0) or 0))
+        except (TypeError, ValueError):
+            ratings.append(0.0)
+
+        # Days since played
+        ts = getattr(t, 'plex_lastviewedat', None)
+        if ts is None:
+            # Assume not played in last year for normalization default
+            days_since.append(365)
+        else:
+            try:
+                dt = datetime.fromtimestamp(float(ts))
+                days = max((base_time - dt).days, 0)
+                days_since.append(min(days, 1095))
+            except (ValueError, TypeError, OSError, OverflowError):
+                days_since.append(365)
+
+        # Play count
+        try:
+            play_counts.append(int(getattr(t, 'plex_viewcount', 0) or 0))
+        except (TypeError, ValueError):
+            play_counts.append(0)
+
+        # Popularity
+        try:
+            popularities.append(float(getattr(t, 'spotify_track_popularity', 0) or 0))
+        except (TypeError, ValueError):
+            popularities.append(0.0)
+
+        # Age
+        y = getattr(t, 'year', None)
+        try:
+            y = int(y)
+            ages.append(max(base_time.year - y, 0))
+        except (TypeError, ValueError):
+            ages.append(0)
+
+    arr = lambda x: _np.array(x, dtype=float)
+    r, d, pc, pop, ag = arr(ratings), arr(days_since), arr(play_counts), arr(popularities), arr(ages)
+
+    stats = {
+        'rating_mean': float(r.mean()) if r.size else 0.0,
+        'rating_std': float(r.std()) or 1.0,
+        'days_mean': float(d.mean()) if d.size else 365.0,
+        'days_std': float(d.std()) or 1.0,
+        'play_count_mean': float(pc.mean()) if pc.size else 0.0,
+        'play_count_std': float(pc.std()) or 1.0,
+        'popularity_mean': float(pop.mean()) if pop.size else 0.0,
+        'popularity_std': float(pop.std()) or 1.0,
+        'age_mean': float(ag.mean()) if ag.size else 0.0,
+        'age_std': float(ag.std()) or 1.0,
+    }
+    return stats
+
+
+def calculate_track_score(ps, track, base_time=None, tracks_context=None, playlist_type=None, tracks_context_stats=None):
     import numpy as np
     from scipy import stats
 
@@ -368,18 +435,47 @@ def calculate_track_score(ps, track, base_time=None, tracks_context=None, playli
     if last_played is None:
         days_since_played = np.random.exponential(365)
     else:
-        days = (base_time - datetime.fromtimestamp(last_played)).days
-        days_since_played = min(days, 1095)
+        try:
+            days = (base_time - datetime.fromtimestamp(float(last_played))).days
+            days_since_played = min(days, 1095)
+        except (ValueError, TypeError, OSError, OverflowError):
+            days_since_played = 365
 
-    if tracks_context:
-        all_ratings = [float(getattr(t, 'plex_userrating', 0)) for t in tracks_context]
-        all_days = [
-            (base_time - datetime.fromtimestamp(getattr(t, 'plex_lastviewedat', base_time - timedelta(days=365)))).days
-            for t in tracks_context
-        ]
-        all_play_counts = [getattr(t, 'plex_viewcount', 0) for t in tracks_context]
-        all_popularity = [float(getattr(t, 'spotify_track_popularity', 0)) for t in tracks_context]
-        all_ages = [base_time.year - int(getattr(t, 'year', base_time.year)) for t in tracks_context]
+    if tracks_context_stats is not None:
+        rating_mean = tracks_context_stats['rating_mean']
+        rating_std = tracks_context_stats['rating_std'] or 1
+        days_mean = tracks_context_stats['days_mean']
+        days_std = tracks_context_stats['days_std'] or 1
+        play_count_mean = tracks_context_stats['play_count_mean']
+        play_count_std = tracks_context_stats['play_count_std'] or 1
+        popularity_mean = tracks_context_stats['popularity_mean']
+        popularity_std = tracks_context_stats['popularity_std'] or 1
+        age_mean = tracks_context_stats['age_mean']
+        age_std = tracks_context_stats['age_std'] or 1
+    elif tracks_context:
+        all_ratings = [float(getattr(t, 'plex_userrating', 0) or 0) for t in tracks_context]
+        # Safe days computation for context
+        all_days = []
+        for t in tracks_context:
+            ts = getattr(t, 'plex_lastviewedat', None)
+            if ts is None:
+                all_days.append(365)
+            else:
+                try:
+                    dt = datetime.fromtimestamp(float(ts))
+                    all_days.append(min((base_time - dt).days, 1095))
+                except (ValueError, TypeError, OSError, OverflowError):
+                    all_days.append(365)
+        all_play_counts = [int(getattr(t, 'plex_viewcount', 0) or 0) for t in tracks_context]
+        all_popularity = [float(getattr(t, 'spotify_track_popularity', 0) or 0) for t in tracks_context]
+        all_ages = []
+        for t in tracks_context:
+            y = getattr(t, 'year', None)
+            try:
+                y = int(y)
+                all_ages.append(max(base_time.year - y, 0))
+            except (TypeError, ValueError):
+                all_ages.append(0)
 
         rating_mean, rating_std = np.mean(all_ratings), np.std(all_ratings) or 1
         days_mean, days_std = np.mean(all_days), np.std(all_days) or 1
@@ -389,13 +485,11 @@ def calculate_track_score(ps, track, base_time=None, tracks_context=None, playli
     else:
         rating_mean, rating_std = 5, 2.5
         days_mean, days_std = 365, 180
-        play_count_mean, play_count_std = 10, 15  # Default mean for play count
+        play_count_mean, play_count_std = 10, 15
         popularity_mean, popularity_std = 30, 20
         age_mean, age_std = 30, 10
 
     z_rating = (rating - rating_mean) / rating_std if rating > 0 else -2.0
-    # FIXED: Corrected z_recency calculation - positive value means longer since played
-    # Previously was: -(days_since_played - days_mean) / days_std
     z_recency = (days_since_played - days_mean) / days_std
     z_play_count = (play_count - play_count_mean) / play_count_std
     z_popularity = (popularity - popularity_mean) / popularity_std
@@ -437,20 +531,31 @@ def select_tracks_weighted(ps, tracks, num_tracks, playlist_type=None):
     # Add randomness to ensure different results each time
     # Set a time-based seed to ensure different random states on each run
     np.random.seed(int(time.time() * 1000000) % 2147483647)  # Max int32
-    
+
     # Standard weighted selection for all playlist types
     base_time = datetime.now()
-    # Pass the tracks as context for proper normalization statistics
-    track_scores = [(track, calculate_track_score(ps, track, base_time, tracks_context=tracks, playlist_type=playlist_type)) for track in tracks]
+
+    # Precompute stats once to avoid O(n^2) behavior on large pools
+    context_stats = _compute_context_stats(tracks, base_time)
+
+    # Compute scores using precomputed stats
+    track_scores = [
+        (track, calculate_track_score(ps, track, base_time, tracks_context_stats=context_stats, playlist_type=playlist_type))
+        for track in tracks
+    ]
     scores = np.array([score for _, score in track_scores])
-    
+
     # Add a small amount of random noise to scores to prevent deterministic outcomes
     # This ensures even tracks with similar scores have variation in selection
-    noise = np.random.normal(0, 1.0, size=len(scores))  # Increased noise for more randomness
+    noise = np.random.normal(0, 1.0, size=len(scores))
     scores_with_noise = scores + noise
-    
-    # Normalize scores to create probabilities
-    probabilities = np.exp(scores_with_noise / 10) / sum(np.exp(scores_with_noise / 10))
+
+    # Stable softmax
+    x = scores_with_noise / 10.0
+    x = x - x.max()
+    exp_x = np.exp(x)
+    probabilities = exp_x / exp_x.sum()
+
     selected_indices = np.random.choice(
         len(tracks), size=min(num_tracks, len(tracks)), replace=False, p=probabilities
     )
@@ -606,7 +711,7 @@ def _get_library_tracks(ps, preferred_genres, filters, exclusion_days):
         try:
             ps._log.debug("Using server-side filters: {}", adv_filters)
             _t0 = time.time()
-            
+
             tracks = _get_with_cache(ps, cache_key, lambda: ps.music.searchTracks(filters=adv_filters))
 
             ps._log.debug(
@@ -648,7 +753,7 @@ def _get_library_tracks(ps, preferred_genres, filters, exclusion_days):
 def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_genres, similar_tracks, playlist_type):
     """
     Unified function to generate different types of smart playlists.
-    
+
     Args:
         ps: Plugin instance
         lib: Beets library instance
@@ -660,30 +765,30 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
     """
     playlist_name = playlist_config.get("name", f"{playlist_type.replace('_', ' ').title()}")
     ps._log.info("Generating {} playlist", playlist_name)
-    
+
     defaults_cfg = get_plexsync_config(["playlists", "defaults"], dict, {})
     max_tracks = get_config_value(playlist_config, defaults_cfg, "max_tracks", 20)
     discovery_ratio = get_config_value(playlist_config, defaults_cfg, "discovery_ratio", 30)
     exclusion_days = get_config_value(playlist_config, defaults_cfg, "exclusion_days", 30)
     filters = playlist_config.get("filters", {})
-    
+
     # Special handling for certain playlist types
     special_handling = playlist_type in ["70s80s_flashback", "highly_rated", "most_played"]
-    
+
     if special_handling:
         # For special playlist types that work with beets items instead of Plex tracks
         all_beets_items = []
         for item in lib.items():
             if hasattr(item, "plex_ratingkey") and item.plex_ratingkey:
                 all_beets_items.append(item)
-        
+
         ps._log.debug("Found {} tracks with Plex sync data", len(all_beets_items))
-        
+
         # Apply filters to beets items
         filtered_items = []
         for item in all_beets_items:
             include_item = True
-            
+
             # Apply year filters if they exist in config
             if filters.get('include', {}).get('years'):
                 years_config = filters['include']['years']
@@ -750,7 +855,7 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
 
             if include_item:
                 filtered_items.append(item)
-        
+
         # For highly_rated playlist, further filter for ratings >= 7
         if playlist_type == "highly_rated":
             highly_rated_items = []
@@ -765,7 +870,7 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
                     highly_rated_items.append(item)
             filtered_items = highly_rated_items
             ps._log.debug("Filtered to {} highly rated tracks (rating >= 7.0)", len(filtered_items))
-        
+
         # For most_played playlist, sort by play count
         if playlist_type == "most_played":
             def get_play_count(item):
@@ -774,7 +879,7 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
             sorted_items = sorted(filtered_items, key=get_play_count, reverse=True)
             filtered_items = sorted_items
             ps._log.debug("Sorted {} tracks by play count for Most Played playlist", len(filtered_items))
-        
+
         # Separate rated and unrated tracks
         rated_items = []
         unrated_items = []
@@ -786,7 +891,7 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
                 unrated_items.append(item)
 
         ps._log.debug("Split into {} rated and {} unrated tracks", len(rated_items), len(unrated_items))
-        
+
         # Select tracks using weighted scoring
         if playlist_type == "most_played":
             # For most played, use the sorted list directly but apply weighted selection for variety
@@ -794,13 +899,13 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
         else:
             rated_tracks_count = int(max_tracks * (1 - discovery_ratio / 100))
             unrated_tracks_count = int(max_tracks * (discovery_ratio / 100))
-            
+
             selected_rated = select_tracks_weighted(ps, rated_items, rated_tracks_count, playlist_type=playlist_type)
             selected_unrated = select_tracks_weighted(ps, unrated_items, unrated_tracks_count, playlist_type=playlist_type)
 
             # Fill remaining slots if needed
             if len(selected_unrated) < unrated_tracks_count:
-                additional_count = min(unrated_tracks_count - len(selected_unrated), 
+                additional_count = min(unrated_tracks_count - len(selected_unrated),
                                       max_tracks - len(selected_rated) - len(selected_unrated))
                 remaining_rated = [t for t in rated_items if t not in selected_rated]
                 additional_rated = select_tracks_weighted(ps, remaining_rated, additional_count, playlist_type=playlist_type)
@@ -860,7 +965,7 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
         else:
             # For other playlist types, use standard library tracks
             all_library_tracks = _get_library_tracks(ps, preferred_genres, filters, exclusion_days)
-            
+
             # Skip redundant client-side filtering when server-side filters fully covered them
             if filters:
                 try:
@@ -869,7 +974,7 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
                     adv = None
                 if not adv:
                     all_library_tracks = apply_playlist_filters(ps, all_library_tracks, filters)
-            
+
             unique_tracks = []
             for track in all_library_tracks:
                 try:
@@ -893,9 +998,9 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
                         return float(rating) if rating is not None else 0
                     except (ValueError, TypeError):
                         return 0
-                
+
                 min_rating = get_config_value(playlist_config, defaults_cfg, "min_rating", 6)
-                unique_tracks = [t for t in unique_tracks if 
+                unique_tracks = [t for t in unique_tracks if
                                 _safe_float_rating(t) == 0 or  # Keep unrated tracks
                                 _safe_float_rating(t) >= min_rating]  # Keep rated tracks that meet min rating
 
@@ -921,7 +1026,7 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
 
         # Fill remaining slots if needed
         if len(selected_unrated) < unrated_tracks_count:
-            additional_count = min(unrated_tracks_count - len(selected_unrated), 
+            additional_count = min(unrated_tracks_count - len(selected_unrated),
                                   max_tracks - len(selected_rated) - len(selected_unrated))
             remaining_rated = [t for t in rated_tracks if t not in selected_rated]
             additional_rated = select_tracks_weighted(ps, remaining_rated, additional_count, playlist_type=playlist_type)
@@ -935,7 +1040,7 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
 
     import random
     random.shuffle(selected_items)
-    
+
     if not selected_items:
         ps._log.warning("No tracks matched criteria for {} playlist", playlist_name)
         return
@@ -952,8 +1057,8 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
                     ps._log.debug("Could not fetch Plex track for item: {} - Error: {}", item, e)
                     # Fallback: try to find by metadata
                     try:
-                        tracks = ps.music.searchTracks(title=getattr(item, 'title', ''), 
-                                                      artist=getattr(item, 'artist', ''), 
+                        tracks = ps.music.searchTracks(title=getattr(item, 'title', ''),
+                                                      artist=getattr(item, 'artist', ''),
                                                       album=getattr(item, 'album', ''))
                         if tracks:
                             plex_tracks.append(tracks[0])
@@ -963,7 +1068,7 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
         if not plex_tracks:
             ps._log.warning("Could not find any Plex tracks for {} playlist", playlist_name)
             return
-        
+
         selected_tracks = plex_tracks
     else:
         selected_tracks = selected_items
@@ -973,7 +1078,7 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
         ps._log.info("Cleared existing {} playlist", playlist_name)
     except Exception:
         ps._log.debug("No existing {} playlist found", playlist_name)
-    
+
     ps._plex_add_playlist_item(selected_tracks, playlist_name)
     ps._log.info("Successfully updated {} playlist with {} tracks", playlist_name, len(selected_tracks))
 
@@ -1134,7 +1239,7 @@ def apply_playlist_filters(ps, tracks, filter_config):
         "Filter application complete: {} -> {} tracks in {:.2f}s",
         len(tracks), len(filtered_tracks), time.time() - total_start,
     )
-    
+    return filtered_tracks
 
 
 def generate_daily_discovery(ps, lib, dd_config, plex_lookup, preferred_genres, similar_tracks):
