@@ -843,9 +843,11 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
                     rating = float(rating) if rating is not None else 0
                 except (ValueError, TypeError):
                     rating = 0
-                min_rating = filters['min_rating']
-                if rating < min_rating:
-                    include_item = False
+                
+                if rating > 0: # Only apply min_rating to rated tracks
+                    min_rating = filters['min_rating']
+                    if rating < min_rating:
+                        include_item = False
 
             # Special handling for 70s80s_flashback - only include tracks from 1970-1989
             if playlist_type == "70s80s_flashback":
