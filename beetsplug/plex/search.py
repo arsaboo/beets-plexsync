@@ -645,6 +645,8 @@ def search_plex_song(plugin, song, manual_search=None, llm_attempted=False, use_
                     return _finish(result)
             elif action == "abort":
                 return _finish(None)
+            elif action == "skip":
+                manual_prompt_needed = False
             else:
                 manual_prompt_needed = True
         else:
