@@ -150,6 +150,7 @@ class PlexSync(BeetsPlugin):
         self._candidate_confirmation_depth: int = 0
         self._vector_index: Optional[BeetsVectorIndex] = None
         self._vector_index_info: Dict[str, Optional[float]] = {}
+        self._server_query_cache: Dict[str, list] = {}
 
         # Adding defaults.
         config["plex"].add(
@@ -1566,11 +1567,35 @@ class PlexSync(BeetsPlugin):
 
         return total_imported, total_failed
 
+    def _build_plex_lookup_and_vector_index(self, lib):
+        self._log.debug("Building lookup dictionary for Plex rating keys and vector index")
+        plex_lookup = {}
+        vector_index = BeetsVectorIndex()
+
+        for item in lib.items():
+            if hasattr(item, "plex_ratingkey"):
+                plex_lookup[item.plex_ratingkey] = item
+
+            metadata = self._extract_vector_metadata(item)
+            item_id = metadata.get("id")
+            if item_id is None:
+                continue
+            vector_index.add_item(item_id, metadata)
+
+        if len(vector_index):
+            try:
+                db_path = getattr(lib, "path", None)
+            except AttributeError:
+                db_path = None
+            self._update_vector_index(vector_index, db_path=db_path)
+
+        return plex_lookup
+
     def _plex_smartplaylists(self, lib, playlists_config):
         """Process all playlists at once with a single lookup dictionary."""
         # Build lookup once for all playlists
         self._log.info("Building Plex lookup dictionary...")
-        plex_lookup = sp_mod.build_plex_lookup(self, lib)
+        plex_lookup = self._build_plex_lookup_and_vector_index(lib)
         self._log.debug("Found {} tracks in lookup dictionary", len(plex_lookup))
 
         # Get preferred attributes once if needed for smart playlists
