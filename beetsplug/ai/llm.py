@@ -252,10 +252,10 @@ class MusicSearchTools:
             return
 
         providers = [tool.name for tool in self.search_agent.tools]
-        logger.info(f"Initialized music search with providers: {', '.join(providers)}")
+        logger.info("Initialized music search with providers: {}", ', '.join(providers))
         if self.ollama_agent:
             provider_type = "OpenAI-compatible" if self.provider != 'ollama' else "Ollama"
-            logger.info(f"Using {provider_type} model '{self.model_id}' for result extraction and tool selection")
+            logger.info("Using {} model '{}' for result extraction and tool selection", provider_type, self.model_id)
 
     def _search(self, song_name: str) -> Optional[str]:
         """Query the search agent for song information.
@@ -275,7 +275,7 @@ class MusicSearchTools:
             self._enforce_brave_rate_limit()
 
         query = f"{song_name} song album, title, and artist. Please respond in English only."
-        logger.debug(f"Unified search querying: {query}")
+        logger.debug("Unified search querying: {}", query)
         try:
             response = self.search_agent.run(query, timeout=30)  # Increased timeout from 20 to 30 seconds
             content = getattr(response, 'content', str(response))
@@ -293,7 +293,7 @@ class MusicSearchTools:
 
             return content
         except Exception as e:
-            logger.warning(f"Unified search failed: {e}")
+            logger.warning("Unified search failed: {}", e)
             return None
 
     def _get_search_results(self, song_name: str) -> Dict[str, str]:
@@ -740,7 +740,7 @@ def search_track_info(query: str) -> Dict:
         return {"title": query, "artist": "", "album": None}
 
     try:
-        logger.info(f"Searching for track info: {query}")
+        logger.info("Searching for track info: {}", query)
         song_info = toolkit.search_song_info(query)
 
         # Format response: Use extracted title if available, otherwise fallback to original query.
@@ -752,8 +752,8 @@ def search_track_info(query: str) -> Dict:
             "artist": song_info.get("artist") or ""  # Default to empty string to avoid None
         }
 
-        logger.info(f"Found track info: {result}")
+        logger.info("Found track info: %s", result)
         return result
     except Exception as e:
-        logger.error(f"Error in agent-based search: {e}")
+        logger.error("Error in agent-based search: %s", e)
         return {"title": query, "artist": "", "album": None}
