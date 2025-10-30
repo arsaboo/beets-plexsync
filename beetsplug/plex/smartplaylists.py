@@ -23,6 +23,10 @@ from beetsplug.providers.youtube import import_yt_playlist
 from beetsplug.providers.m3u8 import import_m3u8_playlist
 from beetsplug.providers.http_post import import_post_playlist
 
+# Module-level random number generator to avoid global seeding
+import numpy as np
+_module_rng = np.random.default_rng()
+
 
 
 
@@ -400,6 +404,7 @@ def _compute_context_stats(tracks, base_time):
         'rating_std': float(r.std()) or 1.0,
         'days_mean': float(d.mean()) if d.size else 365.0,
         'days_std': float(d.std()) or 1.0,
+        'days_90th_percentile': float(np.percentile(d, 90)) if d.size else 365.0,  # 90th percentile for unrated track fallback
         'play_count_mean': float(pc.mean()) if pc.size else 0.0,
         'play_count_std': float(pc.std()) or 1.0,
         'popularity_mean': float(pop.mean()) if pop.size else 0.0,
@@ -433,7 +438,13 @@ def calculate_track_score(ps, track, base_time=None, tracks_context=None, playli
         age = 0
 
     if last_played is None:
-        days_since_played = np.random.exponential(365)
+        # Use a deterministic fallback instead of exponential randomness to avoid
+        # wildly different rankings for otherwise identical unrated tracks
+        # Use the 90th percentile from library distribution if available, otherwise default to 365 days
+        if tracks_context_stats and 'days_90th_percentile' in tracks_context_stats:
+            days_since_played = tracks_context_stats['days_90th_percentile']
+        else:
+            days_since_played = 365  # Default to one year ago
     else:
         try:
             days = (base_time - datetime.fromtimestamp(float(last_played))).days
@@ -525,12 +536,9 @@ def calculate_track_score(ps, track, base_time=None, tracks_context=None, playli
 
 def select_tracks_weighted(ps, tracks, num_tracks, playlist_type=None):
     import numpy as np
+    global _module_rng
     if not tracks:
         return []
-
-    # Add randomness to ensure different results each time
-    # Set a time-based seed to ensure different random states on each run
-    np.random.seed(int(time.time() * 1000000) % 2147483647)  # Max int32
 
     # Standard weighted selection for all playlist types
     base_time = datetime.now()
@@ -547,7 +555,7 @@ def select_tracks_weighted(ps, tracks, num_tracks, playlist_type=None):
 
     # Add a small amount of random noise to scores to prevent deterministic outcomes
     # This ensures even tracks with similar scores have variation in selection
-    noise = np.random.normal(0, 1.0, size=len(scores))
+    noise = _module_rng.normal(0, 1.0, size=len(scores))
     scores_with_noise = scores + noise
 
     # Stable softmax
@@ -556,7 +564,7 @@ def select_tracks_weighted(ps, tracks, num_tracks, playlist_type=None):
     exp_x = np.exp(x)
     probabilities = exp_x / exp_x.sum()
 
-    selected_indices = np.random.choice(
+    selected_indices = _module_rng.choice(
         len(tracks), size=min(num_tracks, len(tracks)), replace=False, p=probabilities
     )
     selected_tracks = [tracks[i] for i in selected_indices]
