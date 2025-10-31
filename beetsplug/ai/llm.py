@@ -139,7 +139,7 @@ class MusicSearchTools:
 
     def _create_model(self):
         """Create a model (Ollama or OpenAI-compatible) based on provider settings.
-        
+
         Returns:
             Model instance (Ollama or OpenAILike) or None if creation fails
         """
@@ -172,7 +172,7 @@ class MusicSearchTools:
         """
         try:
             model = self._create_model()
-            
+
             self.ollama_agent = Agent(
                 model=model,
                 description="You extract structured song information from search results.",
@@ -752,7 +752,7 @@ def search_track_info(query: str) -> Dict:
             "artist": song_info.get("artist") or ""  # Default to empty string to avoid None
         }
 
-        logger.info("Found track info: %s", result)
+        logger.info("Found track info: {}", result)
         return result
     except Exception as e:
         logger.error("Error in agent-based search: %s", e)
