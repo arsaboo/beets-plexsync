@@ -139,7 +139,7 @@ class MusicSearchTools:
 
     def _create_model(self):
         """Create a model (Ollama or OpenAI-compatible) based on provider settings.
-        
+
         Returns:
             Model instance (Ollama or OpenAILike) or None if creation fails
         """
@@ -172,7 +172,7 @@ class MusicSearchTools:
         """
         try:
             model = self._create_model()
-            
+
             self.ollama_agent = Agent(
                 model=model,
                 description="You extract structured song information from search results.",
@@ -252,10 +252,10 @@ class MusicSearchTools:
             return
 
         providers = [tool.name for tool in self.search_agent.tools]
-        logger.info("Initialized music search with providers: {0}", ', '.join(providers))
+        logger.info("Initialized music search with providers: {}", ', '.join(providers))
         if self.ollama_agent:
             provider_type = "OpenAI-compatible" if self.provider != 'ollama' else "Ollama"
-            logger.info("Using {0} model '{1}' for result extraction and tool selection", provider_type, self.model_id)
+            logger.info("Using {} model '{}' for result extraction and tool selection", provider_type, self.model_id)
 
     def _search(self, song_name: str) -> Optional[str]:
         """Query the search agent for song information.
@@ -275,7 +275,7 @@ class MusicSearchTools:
             self._enforce_brave_rate_limit()
 
         query = f"{song_name} song album, title, and artist. Please respond in English only."
-        logger.debug("Unified search querying: {0}", query)
+        logger.debug("Unified search querying: {}", query)
         try:
             response = self.search_agent.run(query, timeout=30)  # Increased timeout from 20 to 30 seconds
             content = getattr(response, 'content', str(response))
@@ -293,7 +293,7 @@ class MusicSearchTools:
 
             return content
         except Exception as e:
-            logger.warning("Unified search failed: {0}", e)
+            logger.warning("Unified search failed: {}", e)
             return None
 
     def _get_search_results(self, song_name: str) -> Dict[str, str]:
@@ -740,7 +740,7 @@ def search_track_info(query: str) -> Dict:
         return {"title": query, "artist": "", "album": None}
 
     try:
-        logger.info("Searching for track info: {0}", query)
+        logger.info("Searching for track info: {}", query)
         song_info = toolkit.search_song_info(query)
 
         # Format response: Use extracted title if available, otherwise fallback to original query.
@@ -752,8 +752,8 @@ def search_track_info(query: str) -> Dict:
             "artist": song_info.get("artist") or ""  # Default to empty string to avoid None
         }
 
-        logger.info("Found track info: {0}", result)
+        logger.info("Found track info: {}", result)
         return result
     except Exception as e:
-        logger.error("Error in agent-based search: {0}", e)
+        logger.error("Error in agent-based search: %s", e)
         return {"title": query, "artist": "", "album": None}
