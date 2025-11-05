@@ -1375,11 +1375,14 @@ class PlexSync(BeetsPlugin):
             "{} songs to be added in Plex library: {}", len(song_list), song_list
         )
         
-        # Pre-queue background searches for all songs
+        # Pre-queue background searches for all songs that are not in cache
         for i, song in enumerate(song_list):
-            # Queue background search for this song
-            if hasattr(self, 'queue_background_search'):
-                self.queue_background_search(song)
+            cache_key = self.cache._make_cache_key(song)
+            # Only queue background processing if not in cache
+            if self.cache.get(cache_key) is None:
+                # Queue background search for this song
+                if hasattr(self, 'queue_background_search'):
+                    self.queue_background_search(song)
         
         # Now process the songs, taking advantage of any completed background searches
         matched_songs = []
@@ -1615,11 +1618,14 @@ class PlexSync(BeetsPlugin):
                 self._log.info("Attempting to manually import {} tracks for {}",
                              len(tracks_to_import), playlist_name)
 
-                # Pre-queue background searches for all tracks
+                # Pre-queue background searches for all tracks that are not in cache
                 for track in tracks_to_import:
-                    # Queue background search for this track
-                    if hasattr(self, 'queue_background_search'):
-                        self.queue_background_search(track)
+                    cache_key = self.cache._make_cache_key(track)
+                    # Only queue background processing if not in cache
+                    if self.cache.get(cache_key) is None:
+                        # Queue background search for this track
+                        if hasattr(self, 'queue_background_search'):
+                            self.queue_background_search(track)
                 
                 # Now process the tracks, taking advantage of any completed background searches
                 matched_tracks = []

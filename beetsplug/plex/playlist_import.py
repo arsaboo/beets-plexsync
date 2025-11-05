@@ -74,10 +74,13 @@ def add_songs_to_plex(plugin, playlist, songs, manual_search=None):
         unit="song",
     )
 
-    # Pre-queue background searches for all songs
+    # Pre-queue background searches for all songs that are not in cache
     for song in songs_to_process:
-        if hasattr(plugin, 'queue_background_search'):
-            plugin.queue_background_search(song)
+        cache_key = plugin.cache._make_cache_key(song)
+        # Only queue background processing if not in cache
+        if plugin.cache.get(cache_key) is None:
+            if hasattr(plugin, 'queue_background_search'):
+                plugin.queue_background_search(song)
     
     song_list = []
     try:
@@ -110,10 +113,13 @@ def import_search(plugin, playlist, search, limit=10):
         f"Resolving search results for {playlist}",
         unit="song",
     )
-    # Pre-queue background searches for all songs
+    # Pre-queue background searches for all songs that are not in cache
     for song in songs:
-        if hasattr(plugin, 'queue_background_search'):
-            plugin.queue_background_search(song)
+        cache_key = plugin.cache._make_cache_key(song)
+        # Only queue background processing if not in cache
+        if plugin.cache.get(cache_key) is None:
+            if hasattr(plugin, 'queue_background_search'):
+                plugin.queue_background_search(song)
     
     song_list = []
     try:
@@ -285,10 +291,13 @@ def generate_imported_playlist(plugin, lib, playlist_config, plex_lookup=None):
         unit="track",
     )
     
-    # Pre-queue background searches for all songs
+    # Pre-queue background searches for all songs that are not in cache
     for song in unique_tracks:
-        if hasattr(plugin, 'queue_background_search'):
-            plugin.queue_background_search(song)
+        cache_key = plugin.cache._make_cache_key(song)
+        # Only queue background processing if not in cache
+        if plugin.cache.get(cache_key) is None:
+            if hasattr(plugin, 'queue_background_search'):
+                plugin.queue_background_search(song)
     
     try:
         for song in unique_tracks:
