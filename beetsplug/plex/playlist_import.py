@@ -74,6 +74,11 @@ def add_songs_to_plex(plugin, playlist, songs, manual_search=None):
         unit="song",
     )
 
+    # Pre-queue background searches for all songs
+    for song in songs_to_process:
+        if hasattr(plugin, 'queue_background_search'):
+            plugin.queue_background_search(song)
+    
     song_list = []
     try:
         for song in songs_to_process:
@@ -105,6 +110,11 @@ def import_search(plugin, playlist, search, limit=10):
         f"Resolving search results for {playlist}",
         unit="song",
     )
+    # Pre-queue background searches for all songs
+    for song in songs:
+        if hasattr(plugin, 'queue_background_search'):
+            plugin.queue_background_search(song)
+    
     song_list = []
     try:
         for song in songs:
@@ -274,6 +284,11 @@ def generate_imported_playlist(plugin, lib, playlist_config, plex_lookup=None):
         desc=f"{playlist_name[:18]} match",
         unit="track",
     )
+    
+    # Pre-queue background searches for all songs
+    for song in unique_tracks:
+        if hasattr(plugin, 'queue_background_search'):
+            plugin.queue_background_search(song)
     
     try:
         for song in unique_tracks:

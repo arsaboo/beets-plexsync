@@ -18,12 +18,12 @@ import spotipy
 import numpy as np
 import confuse
 import enlighten
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any, NamedTuple
 
 import dateutil.parser
 import requests
@@ -71,6 +71,13 @@ _QUERY_TITLE_BY_FROM_RE = re.compile(
     re.IGNORECASE,
 )
 _FROM_CLAUSE_RE = re.compile(r'\(from\s+"?([^")]+)"?\)', re.IGNORECASE)
+
+
+class BackgroundSearchResult(NamedTuple):
+    """Represents the result of a background search for a track."""
+    cache_result: Optional[Any] = None
+    local_candidates: Optional[List] = None  # Using List instead of specific type to avoid forward reference
+    timestamp: float = 0.0
 
 
 class PlexSync(BeetsPlugin):
@@ -227,6 +234,81 @@ class PlexSync(BeetsPlugin):
                 library not found"
             )
         self.register_listener("database_change", self.listen_for_db_change)
+
+        # Initialize background processing components
+        self._background_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="bg_plexsync")
+        self._background_results_cache: Dict[str, Any] = {}
+        self._background_queue: List[Dict[str, Any]] = []
+        self._background_queue_size = 20  # Maintain queue of ~20 tracks for background processing
+
+    def _background_search_track(self, song: Dict[str, str]) -> BackgroundSearchResult:
+        """Perform cache lookup and local beets candidate search in the background."""
+        cache_key = self.cache._make_cache_key(song)
+        
+        # Check cache first
+        cache_result = self.cache.get(cache_key)
+        
+        # Get local beets candidates
+        local_candidates = self.get_local_beets_candidates(song)
+        
+        return BackgroundSearchResult(
+            cache_result=cache_result,
+            local_candidates=local_candidates,
+            timestamp=time.time()
+        )
+
+    def queue_background_search(self, song: Dict[str, str]) -> str:
+        """Queue a song for background processing to find cache matches and local candidates."""
+        cache_key = self.cache._make_cache_key(song)
+        
+        # Submit the background task
+        future = self._background_executor.submit(self._background_search_track, song)
+        
+        # Store the future for later retrieval
+        self._background_results_cache[cache_key] = {
+            'future': future,
+            'song': song,
+            'queue_time': time.time()
+        }
+        
+        # Clean up old results to prevent memory buildup
+        self._cleanup_old_background_results()
+        
+        return cache_key
+
+    def _cleanup_old_background_results(self):
+        """Clean up old background results to prevent memory buildup."""
+        current_time = time.time()
+        # Remove results older than 5 minutes
+        keys_to_remove = [
+            key for key, result in self._background_results_cache.items()
+            if current_time - result.get('queue_time', 0) > 300  # 5 minutes
+        ]
+        
+        for key in keys_to_remove:
+            if key in self._background_results_cache:
+                del self._background_results_cache[key]
+
+    def get_background_search_result(self, song: Dict[str, str]) -> Optional[BackgroundSearchResult]:
+        """Get the result of a background search if available, None otherwise."""
+        cache_key = self.cache._make_cache_key(song)
+        result_entry = self._background_results_cache.get(cache_key)
+        
+        if result_entry and 'future' in result_entry:
+            future = result_entry['future']
+            if future.done():
+                try:
+                    result = future.result(timeout=0.1)  # Non-blocking check
+                    # Clean up the completed future
+                    del self._background_results_cache[cache_key]
+                    return result
+                except Exception as e:
+                    self._log.error("Background search failed for {}: {}", song, e)
+                    # Clean up the failed future
+                    del self._background_results_cache[cache_key]
+                    return None
+        
+        return None
 
     def _extract_vector_metadata(self, item) -> Dict[str, Optional[str]]:
         return {
@@ -1292,6 +1374,14 @@ class PlexSync(BeetsPlugin):
         self._log.debug(
             "{} songs to be added in Plex library: {}", len(song_list), song_list
         )
+        
+        # Pre-queue background searches for all songs
+        for i, song in enumerate(song_list):
+            # Queue background search for this song
+            if hasattr(self, 'queue_background_search'):
+                self.queue_background_search(song)
+        
+        # Now process the songs, taking advantage of any completed background searches
         matched_songs = []
         for song in song_list:
             found = self.search_plex_song(song)
@@ -1525,6 +1615,13 @@ class PlexSync(BeetsPlugin):
                 self._log.info("Attempting to manually import {} tracks for {}",
                              len(tracks_to_import), playlist_name)
 
+                # Pre-queue background searches for all tracks
+                for track in tracks_to_import:
+                    # Queue background search for this track
+                    if hasattr(self, 'queue_background_search'):
+                        self.queue_background_search(track)
+                
+                # Now process the tracks, taking advantage of any completed background searches
                 matched_tracks = []
                 for track in tracks_to_import:
                     found = self.search_plex_song(track, manual_search=True)
@@ -1655,6 +1752,10 @@ class PlexSync(BeetsPlugin):
         """Clean up when plugin is disabled."""
         if self.loop and not self.loop.is_closed():
             self.close()
+        
+        # Shutdown background executor
+        if hasattr(self, '_background_executor'):
+            self._background_executor.shutdown(wait=False)  # Don't wait to avoid blocking shutdown
 
     def album_for_id(self, album_id):
         """Metadata plugin interface method - PlexSync doesn't provide album metadata."""

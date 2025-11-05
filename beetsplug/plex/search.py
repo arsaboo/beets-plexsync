@@ -114,7 +114,21 @@ def search_plex_song(plugin, song, manual_search=None, llm_attempted=False, use_
                 plugin._candidate_confirmations = []
         return result
 
-    cached_result = plugin.cache.get(cache_key)
+    # First, check if we have pre-computed background results
+    background_result = None
+    if hasattr(plugin, "get_background_search_result"):
+        background_result = plugin.get_background_search_result(song)
+        if background_result:
+            plugin._log.debug("Using pre-computed background results for key: '{}'", cache_key)
+            # Use the pre-computed cache result if available
+            cached_result = background_result.cache_result
+        else:
+            # No background results ready yet, do the normal cache lookup
+            cached_result = plugin.cache.get(cache_key)
+    else:
+        # Background processing not available, do normal cache lookup
+        cached_result = plugin.cache.get(cache_key)
+
     if cached_result is not None:
         plugin._log.debug("Cache HIT for key: '{}' -> result: {}", cache_key, cached_result)
     else:
@@ -167,12 +181,20 @@ def search_plex_song(plugin, song, manual_search=None, llm_attempted=False, use_
 
     candidate_variants: list[tuple[dict[str, str], float]] = []
     local_candidates = []
+    
+    # Use pre-computed background results if available, otherwise compute normally
     if use_local_candidates and hasattr(plugin, "get_local_beets_candidates"):
-        try:
-            local_candidates = plugin.get_local_beets_candidates(song)
-        except Exception as exc:  # noqa: BLE001
-            plugin._log.debug("Local beets candidate lookup failed for {}: {}", song, exc)
-            local_candidates = []
+        if background_result and background_result.local_candidates is not None:
+            # Use pre-computed local candidates from background processing
+            local_candidates = background_result.local_candidates
+            plugin._log.debug("Using pre-computed local candidates for key: '{}'", cache_key)
+        else:
+            # Compute local candidates normally
+            try:
+                local_candidates = plugin.get_local_beets_candidates(song)
+            except Exception as exc:  # noqa: BLE001
+                plugin._log.debug("Local beets candidate lookup failed for {}: {}", song, exc)
+                local_candidates = []
 
         if local_candidates:
             summary = [
