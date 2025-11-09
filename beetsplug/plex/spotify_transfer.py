@@ -81,7 +81,21 @@ def plex_to_spotify(plugin, lib, playlist, query_args=None):
             len(spotify_tracks),
         )
 
-    plugin.add_tracks_to_spotify_playlist(playlist, spotify_tracks)
+    # Deduplicate while preserving order
+    seen = set()
+    deduplicated_tracks = []
+    for track_id in spotify_tracks:
+        if track_id not in seen:
+            seen.add(track_id)
+            deduplicated_tracks.append(track_id)
+    
+    if len(deduplicated_tracks) < len(spotify_tracks):
+        plugin._log.info(
+            "Removed {} duplicate tracks from playlist transfer",
+            len(spotify_tracks) - len(deduplicated_tracks)
+        )
+
+    plugin.add_tracks_to_spotify_playlist(playlist, deduplicated_tracks)
 
 def _resolve_spotify_track(plugin, beets_item):
     spotify_track_id = None
