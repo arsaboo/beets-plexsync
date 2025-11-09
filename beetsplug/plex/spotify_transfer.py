@@ -88,7 +88,7 @@ def plex_to_spotify(plugin, lib, playlist, query_args=None):
         if track_id not in seen:
             seen.add(track_id)
             deduplicated_tracks.append(track_id)
-    
+
     if len(deduplicated_tracks) < len(spotify_tracks):
         plugin._log.info(
             "Removed {} duplicate tracks from playlist transfer",
