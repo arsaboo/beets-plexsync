@@ -1026,7 +1026,7 @@ class PlexSync(BeetsPlugin):
         self._log.info("Updating information for {} tracks", len(tracks))
 
         # Build lookup once for all tracks
-        plex_lookup = sp_mod.build_plex_lookup(self, lib)
+        plex_lookup = self._build_plex_lookup_and_vector_index(lib)
 
         with lib.transaction():
             for track in tracks:
