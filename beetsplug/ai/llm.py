@@ -361,138 +361,6 @@ class MusicSearchTools:
         """
         return SongBasicInfo(title=title, artist="", album=None)
 
-    def _song_info_from_dict(self, data: dict, fallback_title: str) -> SongBasicInfo:
-        """Create SongBasicInfo from dictionary, with fallbacks for missing fields.
-
-        Args:
-            data: Dictionary containing song fields (title, artist, album)
-            fallback_title: Title to use if not present in data
-
-        Returns:
-            SongBasicInfo object with data from dict or fallback values
-        """
-        return SongBasicInfo(
-            title=data.get("title") or fallback_title,
-            artist=data.get("artist") or "",
-            album=data.get("album")  # Can be None
-        )
-
-    def _song_info_from_json(self, json_str: str, fallback_title: str) -> SongBasicInfo:
-        """Parse JSON string and create SongBasicInfo.
-
-        Args:
-            json_str: JSON string containing song information
-            fallback_title: Title to use if parsing fails
-
-        Returns:
-            SongBasicInfo object from parsed JSON or fallback
-        """
-        try:
-            data = json.loads(json_str)
-            if isinstance(data, dict):
-                return self._song_info_from_dict(data, fallback_title)
-            logger.warning(f"JSON parsed but not a dict: {type(data)}")
-            return self._create_fallback_song(fallback_title)
-        except json.JSONDecodeError as e:
-            logger.warning("Failed to parse JSON response: {0}", e)
-            return self._create_fallback_song(fallback_title)
-
-    def _parse_text_format(self, text: str) -> Optional[dict]:
-        """Parse text format like 'title: value\nartist: value\nalbum: value'.
-
-        Args:
-            text: String containing key-value pairs separated by newlines
-
-        Returns:
-            Dictionary with parsed fields or None if parsing fails
-        """
-        try:
-            result = {}
-            lines = text.strip().split('\n')
-
-            for line in lines:
-                line = line.strip()
-                if ':' in line:
-                    key, value = line.split(':', 1)  # Split only on the first colon
-                    key = key.strip().lower()
-                    value = value.strip()
-
-                    # Convert empty values to None, except for empty strings we want to keep
-                    if value.lower() in ['null', 'none', '']:
-                        value = None
-
-                    # Map to correct field names
-                    if key in ['title', 'song', 'track']:
-                        result['title'] = value
-                    elif key in ['artist', 'singer', 'performer']:
-                        result['artist'] = value
-                    elif key in ['album', 'collection', 'record']:
-                        result['album'] = value
-
-            # Only return if we got at least a title
-            if 'title' in result:
-                return result
-            else:
-                logger.debug("Text format parsing did not find a title field: {0}", text)
-                return None
-        except Exception as e:
-            logger.warning("Failed to parse text format: {0}", e)
-            return None
-
-    def _convert_to_song_info(self, data, fallback_title: str) -> SongBasicInfo:
-        """Convert various data formats to SongBasicInfo object.
-
-        Handles multiple response formats:
-        - SongBasicInfo objects (return as-is)
-        - Dictionaries with song fields
-        - JSON strings that need parsing
-
-        Args:
-            data: Can be SongBasicInfo, dict, or JSON string
-            fallback_title: Title to use if conversion fails
-
-        Returns:
-            SongBasicInfo object with extracted or fallback data
-        """
-        # Case 1: Already a SongBasicInfo object
-        if isinstance(data, SongBasicInfo):
-            return data
-
-        # Case 2: Dictionary with song fields
-        if isinstance(data, dict):
-            return self._song_info_from_dict(data, fallback_title)
-
-        # Case 3: Text format that needs parsing (e.g., "title: value\nartist: value\nalbum: value")
-        if isinstance(data, str):
-            # First try to parse as text format
-            parsed_data = self._parse_text_format(data)
-            if parsed_data:
-                return self._song_info_from_dict(parsed_data, fallback_title)
-            # If text parsing fails, try JSON parsing
-            return self._song_info_from_json(data, fallback_title)
-
-        # Case 4: Unknown format - return fallback
-        logger.warning(f"Unexpected response format: {type(data)}")
-        return self._create_fallback_song(fallback_title)
-
-    def _extract_response_data(self, response):
-        """Extract the raw data from various response wrapper formats.
-
-        Recursively unwraps .content attributes to get to the actual data.
-
-        Args:
-            response: Response object from LLM agent
-
-        Returns:
-            The innermost data, unwrapped from any .content attributes
-        """
-        # Unwrap .content attribute if present (recursive)
-        if hasattr(response, 'content'):
-            return self._extract_response_data(response.content)
-
-        # Already at the data level
-        return response
-
     def _build_extraction_prompt(self, content: str, song_name: str) -> str:
         """Build the prompt for song detail extraction.
 
@@ -546,53 +414,7 @@ class MusicSearchTools:
         </search_results>\
         """)
 
-    def _log_content_preview(self, content: str, max_chars: int = 1000) -> None:
-        """Log a preview of the search content for debugging.
 
-        Args:
-            content: Content to preview
-            max_chars: Maximum characters to include in preview
-        """
-        preview = content[:max_chars] if len(content) > max_chars else content
-        logger.debug("First chars of content: {0}...", preview)
-
-    def _log_response_preview(self, response, max_chars: int = 300) -> None:
-        """Log a preview of the LLM response for debugging.
-
-        Args:
-            response: Response object from LLM agent
-            max_chars: Maximum characters to include in preview
-        """
-        content_to_log = getattr(response, 'content', str(response)) if hasattr(response, 'content') else str(response)
-        preview = content_to_log[:max_chars]
-        if len(content_to_log) > max_chars:
-            preview += "..."
-        logger.debug("Raw LLM response content: {0}", preview)
-
-    def _parse_ollama_response(self, response, fallback_title: str) -> SongBasicInfo:
-        """Parse LLM agent response into SongBasicInfo.
-
-        Handles multiple response formats from the Agno agent:
-        - Direct SongBasicInfo object
-        - Dict with song fields
-        - Wrapped response with .content attribute
-        - JSON string that needs parsing
-
-        Args:
-            response: Response object from LLM agent (Ollama or OpenAI)
-            fallback_title: Title to use if parsing fails
-
-        Returns:
-            SongBasicInfo object with parsed data or fallback
-        """
-        # Log response for debugging
-        self._log_response_preview(response)
-
-        # Extract the actual data from wrapper formats
-        data = self._extract_response_data(response)
-
-        # Convert the data to SongBasicInfo
-        return self._convert_to_song_info(data, fallback_title)
 
     def _extract_song_details(self, content: str, song_name: str) -> SongBasicInfo:
         """Extract structured song details from search results.
@@ -609,9 +431,8 @@ class MusicSearchTools:
 
         # Log what we're doing
         logger.debug("Sending to LLM for parsing - Song: {0}", song_name)
-        self._log_content_preview(content)
 
-        # Use instructor if available (preferred path)
+        # Use instructor if available (preferred path with guaranteed structured output)
         if self.instructor_client:
             try:
                 response = self.instructor_client.chat.completions.create(
@@ -626,7 +447,7 @@ class MusicSearchTools:
                 logger.warning(f"instructor extraction failed: {e}. Falling back to Agno.")
                 # Fall through to Agno fallback
         
-        # Fallback to Agno agent
+        # Fallback to Agno agent (less reliable structured output)
         if not self.ollama_agent:
             logger.error("LLM agent not initialized")
             return self._create_fallback_song(song_name)
@@ -635,12 +456,13 @@ class MusicSearchTools:
             # With output_schema set, the agent should return a SongBasicInfo object directly
             response = self.ollama_agent.run(prompt, timeout=30)
 
-            # The response should be a SongBasicInfo object due to output_schema
+            # Check if response has the expected structure
             if isinstance(response.content, SongBasicInfo):
                 return response.content
             else:
-                # Fallback to parsing if not a SongBasicInfo object
-                return self._parse_ollama_response(response, song_name)
+                # Agno didn't return structured output, use fallback
+                logger.warning(f"Agno agent did not return SongBasicInfo, got {type(response.content)}. Using fallback.")
+                return self._create_fallback_song(song_name)
         except Exception as e:
             logger.error("LLM extraction failed: {0}", e)
             return self._create_fallback_song(song_name)
