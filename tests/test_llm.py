@@ -55,6 +55,32 @@ class LLMSearchTest(unittest.TestCase):
         result = self.llm.search_track_info('Input Song')
         self.assertEqual(result, {'title': 'Found', 'artist': 'Artist', 'album': 'Album'})
 
+    def test_instructor_available_flag(self):
+        """Test that INSTRUCTOR_AVAILABLE flag is properly set."""
+        # The flag should be False in test environment (no instructor installed)
+        self.assertFalse(self.llm.INSTRUCTOR_AVAILABLE)
+
+    def test_create_fallback_song(self):
+        """Test fallback song creation."""
+        toolkit = self.llm.MusicSearchTools(provider='ollama')
+        fallback = toolkit._create_fallback_song('Test Title')
+        self.assertEqual(fallback.title, 'Test Title')
+        self.assertEqual(fallback.artist, '')
+        self.assertIsNone(fallback.album)
+
+    def test_instructor_client_initialization(self):
+        """Test that instructor_client is initialized when instructor is available."""
+        toolkit = self.llm.MusicSearchTools(provider='ollama')
+        # In test environment, instructor is not available
+        self.assertIsNone(toolkit.instructor_client)
+
+    def test_agno_fallback_exists(self):
+        """Test that Agno agent fallback is maintained."""
+        toolkit = self.llm.MusicSearchTools(provider='ollama')
+        # Agno is also not available in test environment, so ollama_agent will be None
+        # This test just verifies the attribute exists
+        self.assertTrue(hasattr(toolkit, 'ollama_agent'))
+
 
 if __name__ == '__main__':
     unittest.main()
