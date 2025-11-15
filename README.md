@@ -268,7 +268,7 @@ spotify:
 
   **Structured Output with instructor:**
   
-  The plugin uses the [instructor](https://github.com/jxnl/instructor) library for reliable structured output from LLMs (>99% reliability). This works with both Ollama (via `/v1` endpoint) and OpenAI-compatible APIs. The `instructor` library guarantees that LLM responses match the expected Pydantic models, with built-in retry logic. If `instructor` is not available, the plugin gracefully falls back to the Agno framework.
+  The plugin uses the [instructor](https://github.com/jxnl/instructor) library for reliable structured output from LLMs (>99% reliability). This works with both Ollama (via `/v1` endpoint) and OpenAI-compatible APIs. The `instructor` library ensures that LLM responses match the expected Pydantic models, with built-in retry logic. If `instructor` is not available, the plugin gracefully falls back to the Agno framework.
 
   When multiple search providers are configured, they're used in the following priority order:
   1. SearxNG (tried first if configured)
