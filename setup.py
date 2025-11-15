@@ -26,6 +26,7 @@ setup(
         'pillow',
         'json_repair',
         'agno>=1.2.16',
+        'instructor>=1.0',
         'tavily-python',
         'exa_py',
         'brave-search',

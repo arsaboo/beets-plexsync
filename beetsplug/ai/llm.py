@@ -14,6 +14,7 @@ logger = logging.getLogger('beets')
 
 # Track available dependencies
 AGNO_AVAILABLE = False
+INSTRUCTOR_AVAILABLE = False
 TAVILY_AVAILABLE = False
 SEARXNG_AVAILABLE = False
 EXA_AVAILABLE = False
@@ -54,6 +55,13 @@ try:
 
 except ImportError:
     logger.error("Agno package not available. Please install with: pip install agno")
+
+try:
+    import instructor
+    from openai import OpenAI
+    INSTRUCTOR_AVAILABLE = True
+except ImportError:
+    logger.debug("instructor library not available. Falling back to Agno for structured output.")
 
 # Add default configuration for LLM search
 config['llm'].add({
