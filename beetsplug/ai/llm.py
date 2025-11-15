@@ -177,7 +177,36 @@ class MusicSearchTools:
         """Initialize the LLM agent for text extraction.
 
         Supports both Ollama and OpenAI-compatible models.
+        Uses instructor for structured output when available, falls back to Agno.
         """
+        # Initialize instructor client if available
+        self.instructor_client = None
+        if INSTRUCTOR_AVAILABLE:
+            try:
+                if self.provider == 'ollama':
+                    # Create OpenAI client for Ollama's /v1 endpoint
+                    base_client = OpenAI(
+                        base_url=f"{self.ollama_host}/v1",
+                        api_key="ollama"  # Ollama doesn't require a real key
+                    )
+                else:
+                    # Create OpenAI client for OpenAI-compatible providers
+                    client_args = {}
+                    if self.api_key:
+                        client_args["api_key"] = self.api_key
+                    if self.base_url:
+                        client_args["base_url"] = self.base_url
+                    base_client = OpenAI(**client_args)
+                
+                # Wrap with instructor
+                self.instructor_client = instructor.from_openai(base_client)
+                provider_type = "OpenAI-compatible" if self.provider != 'ollama' else "Ollama"
+                logger.debug(f"Initialized instructor client with {provider_type} provider")
+            except Exception as e:
+                logger.warning(f"Failed to initialize instructor client: {e}. Falling back to Agno.")
+                self.instructor_client = None
+        
+        # Initialize Agno agent as fallback or if instructor unavailable
         try:
             model = self._create_model()
 
@@ -511,16 +540,6 @@ class MusicSearchTools:
 
         If any information is not clearly stated in the search results, use the most likely value based on available context.
         If you cannot determine a value with reasonable confidence, return null for that field.
-
-        FORMAT INSTRUCTIONS:
-        - Return only the extracted information in this exact format:
-        title: [song title]
-        artist: [artist name]
-        album: [album name or null if not found]
-        - Do NOT include any additional text, explanations, or code formatting
-        - Do NOT wrap the response in markdown code blocks
-        - Do NOT return Python code or import statements
-        - The response will be parsed by a structured output system
         </instruction>
         <search_results>
         {content}
@@ -585,17 +604,32 @@ class MusicSearchTools:
         Returns:
             SongBasicInfo object with extracted details or fallback data
         """
-        # Check if agent is available
-        if not self.ollama_agent:
-            logger.error("LLM agent not initialized")
-            return self._create_fallback_song(song_name)
-
         # Build the extraction prompt
         prompt = self._build_extraction_prompt(content, song_name)
 
         # Log what we're doing
         logger.debug("Sending to LLM for parsing - Song: {0}", song_name)
         self._log_content_preview(content)
+
+        # Use instructor if available (preferred path)
+        if self.instructor_client:
+            try:
+                response = self.instructor_client.chat.completions.create(
+                    model=self.model_id,
+                    response_model=SongBasicInfo,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_retries=2
+                )
+                logger.debug("Successfully extracted song info using instructor")
+                return response
+            except Exception as e:
+                logger.warning(f"instructor extraction failed: {e}. Falling back to Agno.")
+                # Fall through to Agno fallback
+        
+        # Fallback to Agno agent
+        if not self.ollama_agent:
+            logger.error("LLM agent not initialized")
+            return self._create_fallback_song(song_name)
 
         try:
             # With output_schema set, the agent should return a SongBasicInfo object directly
