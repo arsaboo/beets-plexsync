@@ -604,9 +604,10 @@ def save_training_data(query_dict: Dict, track_obj, dataset_path: str = None):
         with open(dataset_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")
 
-        logger.debug(f"Saved training example: {input_str} -> {json.dumps(final_output)}")
+        # Use beets logger format style, not f-strings
+        logger.debug("Saved training example: {} -> {}", input_str, json.dumps(final_output))
     except Exception as e:
-        logger.warning(f"Failed to save training data: {e}")
+        logger.warning("Failed to save training data: {}", e)
 
 
 def initialize_search_toolkit():
