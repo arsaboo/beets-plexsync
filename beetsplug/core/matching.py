@@ -165,7 +165,7 @@ def calculate_artist_similarity(
     def normalize_artist(artist: str) -> str:
         artist = artist.lower()
         artist = _ARTIST_SEPARATORS_RE.sub(' and ', artist)
-        artist = _ARTIST_FEAT_RE.sub('', artist)
+        artist = _FEATURING_RE.sub('', artist)
         artist = _NON_ALPHANUM_RE.sub('', artist)
         return artist.strip()
 
