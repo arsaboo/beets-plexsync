@@ -4,7 +4,6 @@ import json
 import logging
 import textwrap
 import time
-import confuse
 import os
 from typing import Optional, Dict
 
@@ -68,7 +67,7 @@ except ImportError:
 # Add default configuration for LLM search
 config['llm'].add({
     'save_training_data': True,
-    'training_data_path': confuse.Filename('finetune/datasets/training_data.jsonl', in_app_dir=True),
+    'training_data_path': 'beetsplug/finetune/datasets/training_data.jsonl',
     'search': {
         'provider': '',  # Auto-detect: uses OpenAI if llm.api_key is set, otherwise Ollama
         'api_key': '',  # Will fall back to llm.api_key if empty
