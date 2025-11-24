@@ -1,4 +1,4 @@
-"""Custom matching utilities for PlexSync plugin."""
+"Custom matching utilities for PlexSync plugin."
 
 import re
 import difflib
@@ -7,6 +7,43 @@ from typing import Optional, Tuple, Iterable
 from beets.autotag.distance import Distance, string_dist
 from beets.library import Item
 from plexapi.audio import Track
+
+# Regex constants
+_THE_RE = re.compile(r"^\s*the\s+")
+_PARENS_RE = re.compile(r"\s*[\(\[][^\)\]]*[\)\]]")
+_FEATURING_RE = re.compile(r"\s*(?:feat\.?|ft\.?|featuring|with)\s+.*$", re.IGNORECASE)
+_VERSION_SUFFIX_RE = re.compile(
+    r"\s*-\s*(?:remaster(?:ed)?(?:\s+\d{4})?|radio edit|single version|album version|deluxe edition|expanded edition|clean version|explicit version)\b.*$",
+    re.IGNORECASE,
+)
+_SEPARATORS_RE = re.compile(r"[&,/\\]")
+_WHITESPACE_RE = re.compile(r"\s+")
+_TRAILING_YEAR_RE = re.compile(r"\s*\b\d{4}\b\s*$")
+
+_SOUNDTRACK_PATTERNS = [
+    # Pattern 1: Parentheses/Brackets - e.g., "Song (From 'Movie')", "Song (Music from 'Movie')"
+    re.compile(
+        r"^(.*?)\s*[\(\[]\s*(?:(?:soundtrack|music)\s+from|from(?:\s+the\s+movie)?)\s+[\"\“\”]?(.+?)[\"\”\“]?\s*[\)\]]",
+        re.IGNORECASE
+    ),
+    # Pattern 2: Hyphen/Dash - e.g., "Song - From 'Movie'"
+    re.compile(
+        r"^(.*?)\s*[-–]\s*from\s+(?:the\s+movie\s+)?[\"\“\”]?(.+?)[\"\”\“]?$",
+        re.IGNORECASE
+    ),
+]
+
+_PARENS_CONTENT_RE = re.compile(r'\([^)]*\)')
+_BRACKETS_CONTENT_RE = re.compile(r'\[[^]]*\]')
+_OST_RE = re.compile(r'(?i)original\s+(?:motion\s+picture\s+)?soundtrack')
+_NON_ALPHANUM_RE = re.compile(r'[^\w\s]')
+
+_ARTIST_SEPARATORS_RE = re.compile(r'\s*[&,]\s*')
+_YEAR_WORD_RE = re.compile(r'\b\d{4}\b')
+_FEATURING_CHECK_RE = re.compile(r'[([]+(?:feat|ft|with)[.)]| featuring', re.IGNORECASE)
+
+_FIND_FEAT_ARTISTS_RE = re.compile(r'(?:feat\.?|ft\.?|with)\s+([^,;&/]+)', re.IGNORECASE)
+_SPLIT_MAIN_ARTISTS_RE = re.compile(r'[,;&/]|\s+and\s+|\s+&\s+')
 
 
 def clean_string(s: str) -> str:
@@ -19,7 +56,7 @@ def clean_string(s: str) -> str:
     - remove parenthetical/bracketed segments anywhere
     - remove trailing featuring clauses (feat./ft./featuring/with ...)
     - drop common edition/suffix markers (remaster, radio edit, deluxe, etc.)
-    - normalize separators (&, /, \) to spaces and collapse whitespace
+    - normalize separators (&, /, \\) to spaces and collapse whitespace
     - remove a trailing year token
     """
     if not s:
@@ -32,28 +69,23 @@ def clean_string(s: str) -> str:
     s = s.replace('"', "").replace("'", "")
 
     # Remove leading article
-    s = re.sub(r"^\s*the\s+", "", s)
+    s = _THE_RE.sub("", s)
 
     # Remove parenthetical/bracketed segments (e.g., (Remastered 2011), [Live])
-    s = re.sub(r"\s*[\(\[][^\)\]]*[\)\]]", "", s)
+    s = _PARENS_RE.sub("", s)
 
     # Remove featuring clauses at the end (feat./ft./featuring/with ...)
-    s = re.sub(r"\s*(?:feat\.?|ft\.?|featuring|with)\s+.*$", "", s, flags=re.IGNORECASE)
+    s = _FEATURING_RE.sub("", s)
 
     # Drop common edition/suffix markers if present after a dash
-    s = re.sub(
-        r"\s*-\s*(?:remaster(?:ed)?(?:\s+\d{4})?|radio edit|single version|album version|deluxe edition|expanded edition|clean version|explicit version)\b.*$",
-        "",
-        s,
-        flags=re.IGNORECASE,
-    )
+    s = _VERSION_SUFFIX_RE.sub("", s)
 
     # Normalize separators
-    s = re.sub(r"[&,/\\]", " ", s)
-    s = re.sub(r"\s+", " ", s)  # Normalize whitespace
+    s = _SEPARATORS_RE.sub(" ", s)
+    s = _WHITESPACE_RE.sub(" ", s)  # Normalize whitespace
 
     # Remove trailing year token
-    s = re.sub(r"\s*\b\d{4}\b\s*$", "", s)
+    s = _TRAILING_YEAR_RE.sub("", s)
 
     return s.strip()
 
@@ -76,29 +108,11 @@ def extract_soundtrack_info(s: str) -> tuple[str, str]:
     # Use raw string for detection (don't pre-clean away quotes)
     text = s.strip()
 
-    # Enhanced patterns for soundtrack detection
-    patterns = [
-        # Song - From "Movie" (quotes optional)
-        r"^(.*?)\s*[-–]\s*from\s+[\"\“\”]?(.+?)[\"\”\“]?$",
-        # Song (From "Movie") or [From "Movie"] (quotes optional)
-        r"^(.*?)\s*[\(\[]\s*from\s+[\"\“\”]?(.+?)[\"\”\“]?\s*[\)\]]",
-        # Song (Soundtrack from "Movie")
-        r"^(.*?)\s*[\(\[]\s*soundtrack\s+from\s+[\"\“\”]?(.+?)[\"\”\“]?\s*[\)\]]",
-        # Song (Music from "Movie")
-        r"^(.*?)\s*[\(\[]\s*music\s+from\s+[\"\“\”]?(.+?)[\"\”\“]?\s*[\)\]]",
-        # Song (From the movie "Movie")
-        r"^(.*?)\s*[\(\[]\s*from\s+the\s+movie\s+[\"\“\”]?(.+?)[\"\”\“]?\s*[\)\]]",
-        # Song - From Movie (no quotes)
-        r"^(.*?)\s*[-–]\s*from\s+(.+)$",
-        # Song (From Movie) (no quotes)
-        r"^(.*?)\s*[\(\[]\s*from\s+(.+?)\s*[\)\]]",
-    ]
-
-    for pattern in patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
+    for pattern in _SOUNDTRACK_PATTERNS:
+        match = pattern.search(text)
         if match:
             main_title = match.group(1).strip()
-            soundtrack_title = match.group(2).strip().strip('"\"').strip()
+            soundtrack_title = match.group(2).strip().strip('""').strip()
             return main_title, soundtrack_title
 
     # No pattern found, return original string with empty soundtrack title
@@ -118,12 +132,11 @@ def clean_text_for_matching(text: str | None) -> str:
         return ""
 
     text = text.lower()
-    text = re.sub(r'\([^)]*\)', '', text)
-    text = re.sub(r'\[[^\]]*\]', '', text)
-    text = re.sub(r'(?i)original\s+(?:motion\s+picture\s+)?soundtrack', '', text)
-    text = re.sub(r'[^\w\s]', ' ', text)
+    text = _PARENS_CONTENT_RE.sub('', text)
+    text = _BRACKETS_CONTENT_RE.sub('', text)
+    text = _OST_RE.sub('', text)
+    text = _NON_ALPHANUM_RE.sub(' ', text)
     return ' '.join(text.split())
-
 
 def calculate_string_similarity(source: str | None, target: str | None) -> float:
     """Compute similarity between two normalized strings."""
@@ -140,7 +153,6 @@ def calculate_string_similarity(source: str | None, target: str | None) -> float
         return 0.9 * (shorter / longer)
     return difflib.SequenceMatcher(None, source, target).ratio()
 
-
 def calculate_artist_similarity(
     source_artists: Iterable[str], target_artists: Iterable[str]
 ) -> float:
@@ -152,9 +164,9 @@ def calculate_artist_similarity(
 
     def normalize_artist(artist: str) -> str:
         artist = artist.lower()
-        artist = re.sub(r'\s*[&,]\s*', ' and ', artist)
-        artist = re.sub(r'\s*(?:feat\.?|ft\.?|featuring)\s*.*$', '', artist)
-        artist = re.sub(r'[^\w\s]', '', artist)
+        artist = _ARTIST_SEPARATORS_RE.sub(' and ', artist)
+        artist = _ARTIST_FEAT_RE.sub('', artist)
+        artist = _NON_ALPHANUM_RE.sub('', artist)
         return artist.strip()
 
     def split_parts(artist: str) -> set[str]:
@@ -215,14 +227,13 @@ def calculate_field_weight(field_value: str, field_type: str) -> float:
         weight *= 0.8  # Reduce for very short fields
 
     # Adjust for distinguishing features
-    if re.search(r'\b\d{4}\b', field_value):  # Contains year as whole word
+    if _YEAR_WORD_RE.search(field_value):  # Contains year as whole word
         weight *= 1.1
-    if re.search(r'[([]+(?:feat|ft|with)[.)]| featuring', field_value, re.IGNORECASE):
+    if _FEATURING_CHECK_RE.search(field_value):
         weight *= 1.05  # Slight boost for detailed artist info
 
     # Ensure weight doesn't exceed reasonable bounds
     return min(weight, 0.9)
-
 
 def assess_field_quality(field_value: str) -> float:
     """Assess the quality of a field value for confidence calculation.
@@ -251,7 +262,7 @@ def assess_field_quality(field_value: str) -> float:
         quality += 0.1
 
     # Increase quality for presence of distinguishing features
-    if re.search(r'\b\d{4}\b', field_value):  # Contains year
+    if _YEAR_WORD_RE.search(field_value):  # Contains year
         quality += 0.1
     if '"' in field_value or "'" in field_value:  # Contains quoted text
         quality += 0.1
@@ -264,7 +275,6 @@ def assess_field_quality(field_value: str) -> float:
     # Clamp to 0.0-1.0 range
     return max(0.0, min(1.0, quality))
 
-
 def enhanced_artist_distance(str1: str, str2: str) -> float:
     """Calculate artist name distance with enhanced multiple artist handling."""
     if not str1 or not str2:
@@ -273,11 +283,11 @@ def enhanced_artist_distance(str1: str, str2: str) -> float:
     # Split artists on common separators with featured artist handling
     def split_artists(s):
         # Handle featured artists separately
-        main_artist = re.sub(r'\s*(feat\.?|ft\.?|with)\s.*$', '', s, flags=re.IGNORECASE)
-        featured_artists = re.findall(r'(?:feat\.?|ft\.?|with)\s+([^,;&/]+)', s, re.IGNORECASE)
+        main_artist = _FEATURING_RE.sub('', s)
+        featured_artists = _FIND_FEAT_ARTISTS_RE.findall(s)
 
         # Split main artist and add featured artists
-        main_artists = {clean_string(a) for a in re.split(r'[,;&/]|\s+and\s+|\s+&\s+', main_artist) if a}
+        main_artists = {clean_string(a) for a in _SPLIT_MAIN_ARTISTS_RE.split(main_artist) if a}
         featured_artists_cleaned = {clean_string(a) for a in featured_artists if a}
 
         return main_artists, featured_artists_cleaned
@@ -306,7 +316,6 @@ def enhanced_artist_distance(str1: str, str2: str) -> float:
         avg_distance *= 0.9  # 10% bonus for main artist matches
 
     return avg_distance
-
 
 def plex_track_distance(
     item: Item,
