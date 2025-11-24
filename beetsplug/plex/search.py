@@ -6,7 +6,7 @@ import re
 from beets import ui
 
 from beetsplug.core.config import get_plexsync_config
-from beetsplug.ai.llm import search_track_info
+from beetsplug.ai.llm import search_track_info, save_training_data
 from beetsplug.core.matching import clean_text_for_matching, get_fuzzy_score
 from beetsplug.plex import manual_search as manual_search_ui
 
@@ -112,6 +112,16 @@ def search_plex_song(plugin, song, manual_search=None, llm_attempted=False, use_
             plugin._candidate_confirmation_depth = 0
             if hasattr(plugin, "_candidate_confirmations"):
                 plugin._candidate_confirmations = []
+        
+        # Save training data if enabled and we have a result
+        if result is not None:
+            try:
+                from beets import config
+                if config['llm']['save_training_data'].get(bool):
+                    save_training_data(song, result)
+            except Exception as e:
+                plugin._log.debug(f"Failed to save training data: {e}")
+
         return result
 
     cached_result = plugin.cache.get(cache_key)

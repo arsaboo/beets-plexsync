@@ -4,6 +4,7 @@ import json
 import logging
 import textwrap
 import time
+import os
 from typing import Optional, Dict
 
 from beets import config
@@ -65,6 +66,8 @@ except ImportError:
 
 # Add default configuration for LLM search
 config['llm'].add({
+    'save_training_data': True,
+    'training_data_path': 'beetsplug/finetune/datasets/training_data.jsonl',
     'search': {
         'provider': '',  # Auto-detect: uses OpenAI if llm.api_key is set, otherwise Ollama
         'api_key': '',  # Will fall back to llm.api_key if empty
@@ -197,7 +200,7 @@ class MusicSearchTools:
                     if self.base_url:
                         client_args["base_url"] = self.base_url
                     base_client = OpenAI(**client_args)
-                
+
                 # Wrap with instructor
                 self.instructor_client = instructor.from_openai(base_client)
                 provider_type = "OpenAI-compatible" if self.provider != 'ollama' else "Ollama"
@@ -205,7 +208,7 @@ class MusicSearchTools:
             except Exception as e:
                 logger.warning(f"Failed to initialize instructor client: {e}. Falling back to Agno.")
                 self.instructor_client = None
-        
+
         # Initialize Agno agent as fallback or if instructor unavailable
         try:
             model = self._create_model()
@@ -446,7 +449,7 @@ class MusicSearchTools:
             except Exception as e:
                 logger.warning(f"instructor extraction failed: {e}. Falling back to Agno.")
                 # Fall through to Agno fallback
-        
+
         # Fallback to Agno agent (less reliable structured output)
         if not self.ollama_agent:
             logger.error("LLM agent not initialized")
@@ -501,6 +504,109 @@ class MusicSearchTools:
             song_details = song_details.model_dump()
         song_details["search_source"] = search_results["source"]
         return song_details
+
+
+def save_training_data(query_dict: Dict, track_obj, dataset_path: str = None):
+    """Save a training example to a JSONL file in Alpaca format.
+
+    Args:
+        query_dict: The input query dictionary (e.g., {'title': '...', 'artist': '...', 'album': '...'})
+        track_obj: The matched Plex track object (ground truth)
+        dataset_path: Path to the JSONL file. If None, reads from config.
+    """
+    if not query_dict or not track_obj:
+        return
+
+    # Get path from config if not provided
+    if not dataset_path:
+        try:
+            dataset_path = config['llm']['training_data_path'].get()
+            # Ensure it's an absolute path or relative to current working dir
+            if dataset_path and not os.path.isabs(dataset_path):
+                dataset_path = os.path.abspath(dataset_path)
+        except Exception:
+            return
+
+    if not dataset_path:
+        return
+
+    # Construct the input string (what the model would see)
+    # We prioritize "raw_input" if it exists (future proofing)
+    # Otherwise, we join the available fields
+    input_str = query_dict.get("raw_input")
+
+    if not input_str:
+        # Fallback: reconstruct from fields
+        parts = []
+        # Some sources put the full query in 'title' if artist/album are missing
+        if query_dict.get("title"):
+            parts.append(str(query_dict.get("title")).strip())
+        if query_dict.get("artist"):
+            parts.append(str(query_dict.get("artist")).strip())
+        if query_dict.get("album"):
+            parts.append(str(query_dict.get("album")).strip())
+
+        # Join with " " as a standard delimiter
+        input_str = " ".join(filter(None, parts))
+
+    # Skip if empty input
+    if not input_str or not input_str.strip():
+        return
+
+    input_str = input_str.strip()
+
+    # Extract ground truth values
+    try:
+        # Handle potential missing attributes safely
+        track_title = getattr(track_obj, "title", "") or ""
+        track_album = getattr(track_obj, "parentTitle", "") or ""
+        track_artist = getattr(track_obj, "originalTitle", None)
+        if not track_artist:
+            # Fallback to artist() method if available
+            try:
+                track_artist = track_obj.artist().title
+            except Exception:
+                track_artist = ""
+        track_artist = track_artist or ""
+    except Exception:
+        return
+
+    # Constraint: Output values must be present in the input string (case-insensitive)
+    # This ensures we don't hallucinate data or include external metadata not present in the query
+
+    def is_present(value: str, source: str) -> bool:
+        if not value or not source:
+            return False
+        # Case-insensitive partial match
+        return value.lower() in source.lower()
+
+    final_output = {
+        "title": track_title if is_present(track_title, input_str) else None,
+        "artist": track_artist if is_present(track_artist, input_str) else None,
+        "album": track_album if is_present(track_album, input_str) else None
+    }
+
+    # Skip if we couldn't extract anything valid
+    if not any(final_output.values()):
+        return
+
+    # Create Alpaca-style entry
+    entry = {
+        "instruction": "Extract the song title, artist, and album from the text. Return JSON.",
+        "input": input_str,
+        "output": json.dumps(final_output)
+    }
+
+    try:
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(dataset_path), exist_ok=True)
+
+        with open(dataset_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
+
+        logger.debug(f"Saved training example: {input_str} -> {json.dumps(final_output)}")
+    except Exception as e:
+        logger.warning(f"Failed to save training data: {e}")
 
 
 def initialize_search_toolkit():
