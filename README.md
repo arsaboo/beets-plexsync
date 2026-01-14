@@ -7,23 +7,54 @@ A plugin for [beets][beets] to sync with your Plex server.
 - **AI-Generated Playlists**: Use `beet plexsonic -p "YOUR_PROMPT"` to create a playlist based on YOUR_PROMPT. Modify the playlist name using `-m` flag, change the number of tracks requested with `-n` flag, and clear the playlist before adding new songs with `-c` flag.
 
 ### Smart Playlists
-Use `beet plex_smartplaylists` to generate or manage custom playlists in Plex. The plugin currently supports three types of playlists:
+Use `beet plex_smartplaylists [-o ONLY]` to generate or manage custom playlists in Plex. The plugin currently supports various types of playlists:
+
+You can use the `-o` or `--only` option to specify a comma-separated list of playlist IDs to update. This is useful for updating only certain playlists (e.g., just the AI playlists) on a schedule:
+
+```sh
+beet plex_smartplaylists -o daily_discovery,forgotten_gems
+```
+
+The command will only generate the specified playlists, skipping others in your configuration.
 
   1. **Daily Discovery**:
       - Uses tracks you've played in the last 15 days as a base to learn about listening habits (configurable via `history_days`)
       - Excludes tracks played in the last 30 days (configurable via `exclusion_days`)
       - Uses an intelligent scoring system that considers:
-          - Track rating (primary factor)
-          - Last played date
-          - Play count
-          - Recently added bonus
+          - Track popularity relative to your library
+          - Rating for rated tracks
+          - Recency of addition to library
+          - Release year (favors newer releases)
       - Introduces controlled randomization to ensure variety
-      - Matches genres with your recent listening history
+      - Matches genres with your recent listening history using both sonic analysis and library-wide genre preferences
       - Uses Plex's [Sonic Analysis](https://support.plex.tv/articles/sonic-analysis-music/) to find sonically similar tracks
+      - Also discovers tracks from your entire library that match your preferred genres
       - Limits the playlist size (configurable via `max_tracks`, default 20)
-      - Controls discovery vs. familiar ratio (configurable via `discovery_ratio`, default 70%)
+      - Controls discovery vs. familiar ratio (configurable via `discovery_ratio`, default 30% - more familiar tracks)
 
-  2. **Forgotten Gems**:
+  2. **70s/80s Flashback**:
+      - Creates a nostalgic playlist featuring tracks from 1970-1989
+      - Prioritizes well-rated tracks from the 70s and 80s that may not have been played recently
+      - Uses a specialized scoring algorithm that emphasizes nostalgic value and age
+      - Balances between familiar favorites and forgotten gems from the era
+      - Limits the playlist size (configurable via `max_tracks`, default 20)
+      - Controls discovery vs. nostalgia ratio (configurable via `discovery_ratio`, default 30%)
+
+  3. **Highly Rated Tracks**:
+      - Curates tracks with high user ratings (7.0 and above)
+      - Focuses on quality by prioritizing highly-rated content
+      - Includes tracks that have stood the test of time according to your ratings
+      - Adds slight recency factor to maintain variety in the playlist
+      - Limits the playlist size (configurable via `max_tracks`, default 20)
+
+  4. **Most Played Tracks**:
+      - Features your most frequently played tracks
+      - Ranks tracks based on cumulative play counts (plex_viewcount)
+      - Uses weighted selection to add variety while prioritizing popular tracks
+      - Sorts all tracks by play count in descending order
+      - Limits the playlist size (configurable via `max_tracks`, default 20)
+
+  5. **Forgotten Gems**:
       - Creates a playlist of tracks that deserve more attention
       - Uses your highly-rated tracks to establish a quality baseline
       - Prioritizes unrated tracks with popularity comparable to your favorites
@@ -33,8 +64,25 @@ Use `beet plex_smartplaylists` to generate or manage custom playlists in Plex. T
       - Controls maximum play count (configurable via `max_plays`, default 2)
       - Minimum rating for rated tracks to be included (configurable via `min_rating`, default 4)
       - Percentage of playlist to fill with unrated but popular tracks (configurable via `discovery_ratio`, default 30%)
+      - Excludes tracks played recently (configurable via `exclusion_days`)
 
-  3. **Imported Playlists**:
+  6. **Recent Hits**:
+      - Curates a playlist of recent, high-energy tracks
+      - Applies a default release-year guard covering roughly the last 3 years whenever no year filter is provided; override with `filters.include.years` or the playlist-level `max_age_years`/`min_year` options
+      - Updated scoring leans harder on release recency and last-play data, with popularity and ratings acting as the tie-breakers
+      - Uses weighted randomness for track selection while respecting your genre preferences
+      - Automatically adjusts selection criteria and limits size (configurable via `max_tracks`, default 20)
+      - Requires a minimum rating (`min_rating`, default 4) and lets you control the discovery ratio (default 20%)
+      - Set `exclusion_days` if you want to keep very recent listens out (default 30 days)
+
+  7. **Fresh Favorites**:
+      - Creates a playlist of high-quality tracks that deserve more plays
+      - Enforces a default release window spanning roughly the last 7 years unless you supply custom year filters or specify `max_age_years`/`min_year`
+      - Updated scoring strongly favors release recency and recent spins while still rewarding strong ratings and popularity
+      - Skips tracks without a trusted release year when the recency guard is active to keep the mix on-theme
+      - Defaults: `max_tracks: 100`, `discovery_ratio: 25`, `min_rating: 6`, `exclusion_days: 21`
+
+  8. **Imported Playlists**:
       - Import playlists from external services (Spotify, Apple Music, YouTube, etc.) and local M3U8 files
       - Configure multiple source URLs and file paths per playlist
       - For M3U8 files, use paths relative to beets config directory or absolute paths
@@ -48,17 +96,18 @@ You can use config filters to finetune any playlist. You can specify the `genre`
 
 ### Library Sync
 - **Plex Library Sync**: `beet plexsync [-f]` imports all the data from your Plex library inside beets. Use the `-f` flag to force update the entire library with fresh information from Plex.
-- **Recent Sync**: `beet plexsyncrecent` updates the information for tracks listened in the last 7 days.
+- **Recent Sync**: `beet plexsyncrecent [--days N]` updates the information for tracks listened in the last N days (default: 7). For example, `beet plexsyncrecent [--days 14]` will update tracks played in the last 14 days.
 
 ### Playlist Manipulation
-- **Playlist Manipulation**: `plexplaylistadd` and `plexplaylistremove` add or remove tracks from Plex playlists. Use the `-m` flag to provide the playlist name.
-- **Playlist Clear**: `beet plexplaylistclear` clears a Plex playlist. Use the `-m` flag to specify the playlist name.
+- **Playlist Manipulation**: `beet plexplaylistadd [-m PLAYLIST] [QUERY]` and `beet plexplaylistremove [-m PLAYLIST] [QUERY]` add or remove tracks from Plex playlists. Use the `-m` flag to provide the playlist name. You can use any [beets query][queries_] as an optional filter.
+- **Playlist Clear**: `beet plexplaylistclear [-m PLAYLIST]` clears a Plex playlist. Use the `-m` flag to specify the playlist name.
 
 ### Playlist Import
-- **Playlist Import**: `beet plexplaylistimport` imports individual playlists from Spotify, Apple Music, Gaana.com, JioSaavn, Youtube, Tidal, M3U8 files, and custom APIs. Use the `-m` flag to specify the playlist name and:
+- **Playlist Import**: `beet plexplaylistimport [-m PLAYLIST] [-u URL] [-l]` imports individual playlists from Spotify, Apple Music, Gaana.com, JioSaavn, Youtube, Tidal, M3U8 files, custom APIs, and ListenBrainz. Use the `-m` flag to specify the playlist name and:
   - For online services: use the `-u` flag to supply the full playlist url
   - For M3U8 files: use the `-u` flag with the file path (relative to beets config directory or absolute path)
   - For custom APIs: configure POST requests in config.yaml (see Configuration section)
+  - For ListenBrainz: use the `-l` or `--listenbrainz` flag to import "Weekly Jams" and "Weekly Exploration" playlists
 
   You can define multiple sources per playlist in your config including custom POST endpoints:
   ```yaml
@@ -80,18 +129,29 @@ You can use config filters to finetune any playlist. You can specify the `genre`
   - Low-rated tracks that were skipped
   - Import statistics and summary
   - The log file helps you identify which tracks need manual attention
-- **Youtube Search Import**: `beet plexsearchimport` imports playlists based on Youtube search. Use the `-m` flag to specify the playlist name, the `-s` flag for the search query, and the `-l` flag to limit the number of search results.
+- **Youtube Search Import**: `beet plexsearchimport [-m PLAYLIST] [-s SEARCH] [-l LIMIT]` imports playlists based on Youtube search. Use the `-m` flag to specify the playlist name, the `-s` flag for the search query, and the `-l` flag to limit the number of search results.
 
 ### Additional Tools
-- **Plex to Spotify**: `beet plex2spotify` copies a Plex playlist to Spotify. Use the `-m` flag to specify the playlist name.
-- **Playlist to Collection**: `beet plexplaylist2collection` converts a Plex playlist to a collection. Use the `-m` flag to specify the playlist name.
-- **Album Collage**: `beet plexcollage` creates a collage of most played albums. Use the `-i` flag to specify the number of days and `-g` flag to specify the grid size.
+- **Plex to Spotify**: `beet plex2spotify [-m PLAYLIST] [QUERY]` copies a Plex playlist to Spotify. Use the `-m` flag to specify the playlist name.
+
+  You can use [beets queries][queries_] with this command to filter which tracks are sent to Spotify. For example, to add only tracks with a `plex_userrating` greater than 2 to the "Sufiyana" playlist, use:
+
+  ```sh
+  beet plex2spotify -m "Sufiyana" plex_userrating:2..
+  ```
+
+  Additional filtering examples:
+  - Only transfer highly-rated tracks: `beet plex2spotify -m "My Playlist" plex_userrating:8..`
+  - Transfer tracks by specific artist: `beet plex2spotify -m "Rock Hits" artist:"The Beatles"`
+  - Transfer tracks from a specific year range: `beet plex2spotify -m "2000s Hits" year:2000..2009`
+  - Combine multiple filters: `beet plex2spotify -m "Recent Favorites" plex_userrating:7.. year:2020..`
+- **Playlist to Collection**: `beet plexplaylist2collection [-m PLAYLIST]` converts a Plex playlist to a collection. Use the `-m` flag to specify the playlist name.
+- **Album Collage**: `beet plexcollage [-i INTERVAL] [-g GRID]` creates a collage of most played albums. Use the `-i` flag to specify the number of days and `-g` flag to specify the grid size.
 
 ### Manual Import for Failed Tracks
 The plugin creates detailed import logs for each playlist import session. You can manually process failed imports using:
 
-- `beet plex_smartplaylists --import-failed`: Process all import logs and attempt manual matching for failed tracks
-- `beet plex_smartplaylists --import-failed --log-file playlist_name_import.log`: Process a specific log file
+- `beet plex_smartplaylists [--import-failed] [--log-file LOGFILE]`: Process all import logs and attempt manual matching for failed tracks, or process a specific log file.
 
 This is especially useful when:
 - You've added new music to your library and want to retry matching previously failed tracks
@@ -123,6 +183,12 @@ Add `plexsync` to your list of enabled plugins.
 
 ```yaml
 plugins: plexsync
+
+# If you want to use the ListenBrainz import feature, you'll need to configure
+# the ListenBrainz plugin. See https://github.com/arsaboo/beets-listenbrainz for setup.
+listenbrainz:
+  user_token: YOUR_USER_TOKEN
+  username: YOUR_USERNAME
 ```
 
 Next, you can configure your Plex server and library like following (see instructions to obtain Plex token [here][plex_token]).
@@ -135,7 +201,7 @@ plex:
   library_name: 'Music'
 ```
 
-If you want to import `spotify` playlists, you will also need to configure the `spotify` plugin. If you are already using the [Spotify][Spotify] plugin, `plexsync`will reuse the same configuration.
+If you want to import `spotify` playlists, you will also need to configure the `spotify` plugin. If you are already using the [Spotify][Spotify] plugin, `plexsync` will reuse the same configuration.
 ```yaml
 spotify:
   client_id: CLIENT_ID
@@ -150,11 +216,65 @@ spotify:
       model: "gpt-3.5-turbo"
       base_url: "https://api.openai.com/v1"  # Optional, for other providers
       search:
-        api_key: "ollama"  # optional for local models; will use base key if empty
-        base_url: "http://192.168.2.162:3006/api/search"  # Override base_url for search
-        model: "qwen2.5:latest"  # Override model for search
-        embedding_model: "snowflake-arctic-embed2:latest"  # Embedding model
+        # provider is auto-detected: OpenAI if llm.api_key is set, otherwise Ollama
+        # Explicitly set to "ollama" if you want to use Ollama instead
+        brave_api_key: "your-brave-api-key"               # Optional Brave Search API key
+        searxng_host: "http://your-searxng-instance.com"  # Optional SearxNG instance
+        exa_api_key: "your-exa-api-key"                   # Optional Exa search API key
+        tavily_api_key: "your-tavily-api-key"             # Optional Tavily API key
+        # Advanced: Override settings from main llm config
+        # api_key: ""           # Uses llm.api_key if empty
+        # base_url: ""          # Uses llm.base_url if empty
+        # model: ""             # Uses llm.model if empty (for OpenAI) or "qwen3:latest" (for Ollama)
+        # ollama_host: "http://localhost:11434"  # Only used when provider is "ollama"
   ```
+
+  **Using OpenAI or OpenAI-compatible APIs for search:**
+  
+  The plugin automatically uses OpenAI-compatible models (via OpenAILike) for LLM search if you have `llm.api_key` configured. No additional configuration needed!
+  
+  **Simple configuration** (auto-detects OpenAI):
+  ```yaml
+  llm:
+    api_key: YOUR_OPENAI_API_KEY
+    model: "gpt-4.1-mini"  # Or your preferred model
+    base_url: "https://api.openai.com/v1"  # Or your preferred endpoint
+    search:
+      brave_api_key: "your-brave-api-key"  # At least one search provider is required
+  ```
+  
+  **Using Ollama instead** (explicit override):
+  ```yaml
+  llm:
+    search:
+      provider: "ollama"  # Explicitly use Ollama
+      model: "qwen3:latest"
+      ollama_host: "http://localhost:11434"
+      brave_api_key: "your-brave-api-key"
+  ```
+  
+  **Advanced: Override search-specific settings**:
+  ```yaml
+  llm:
+    api_key: YOUR_MAIN_API_KEY
+    model: "gpt-4"
+    search:
+      api_key: YOUR_SEARCH_SPECIFIC_KEY  # Use different key for search
+      model: "gpt-3.5-turbo"  # Use cheaper model for search
+      brave_api_key: "your-brave-api-key"
+  ```
+
+  Note: To enable LLM search, you must also set `use_llm_search: yes` in your `plexsync` configuration (see Advanced Usage section).
+
+  **Structured Output with instructor:**
+  
+  The plugin uses the [instructor](https://github.com/jxnl/instructor) library for reliable structured output from LLMs (>99% reliability). This works with both Ollama (via `/v1` endpoint) and OpenAI-compatible APIs. The `instructor` library ensures that LLM responses match the expected Pydantic models, with built-in retry logic. If `instructor` is not available, the plugin gracefully falls back to the Agno framework.
+
+  When multiple search providers are configured, they're used in the following priority order:
+  1. SearxNG (tried first if configured)
+  2. Exa (used if SearxNG fails or isn't configured)
+  3. Brave Search (used if both SearxNG and Exa fail or aren't configured)
+  4. Tavily (used if all above fail or aren't configured)
 
   You can get started with `beet plexsonic -p "YOUR_PROMPT"` to create the playlist based on YOUR_PROMPT. The default playlist name is `SonicSage` (wink wink), you can modify it using `-m` flag. By default, it requests 10 tracks from the AI model. Use the `-n` flag to change the number of tracks requested. Finally, if you prefer to clear the playlist before adding the new songs, you can add `-c` flag. So, to create a new classical music playlist, you can use something like `beet plexsonic -c -n 10 -p "classical music, romanticism era, like Schubert, Chopin, Liszt"`.
 
@@ -196,44 +316,10 @@ spotify:
   }
   ```
 
-* `beet plexsync [-f]`: allows you to import all the data from your Plex library inside beets. Run the command `beet plexsync` and it will obtain `guid`, `ratingkey`, `userrating`, `skipcount`, `viewcount`, `lastviewedat`, `lastratedat`, and `plex_updated`. See details about these attributes [here][plaxapi]. By default, `plexsync` will not overwrite information for tracks that are already rated. If you want to overwrite all the details again, use the `-f` flag, i.e., `beet plexsync -f` will force update the entire library with fresh information from Plex. This can be useful if you have made significant changes to your Plex library (e.g., updated ratings).
-
-* `beet plexsyncrecent`: If you have a large library, `beets plexsync -f` can take a long time. To update only the recently updated tracks, use `beet plexsyncrecent` to update the information for tracks listened in the last 7 days.
-
-* `plexplaylistadd` and `plexplaylistremove` to add or remove tracks from Plex playlists. These commands should be used in conjunction with beets [queries][queries_] to provide the desired items. Use the `-m` flag to provide the playlist name to be used.
-
-   * To add all country music tracks with `plex_userrating` greater than 5 in a playlist `Country`, you can use the command `beet plexplaylistadd -m Country genre:"Country" plex_userrating:5..`
-
-   * To remove all tracks that are rated less than 5 from the `Country` playlist, use the command `beet plexplaylistremove -m Country plex_userrating:..5`
-
-* `beet plexplaylistimport`: allows you to import playlists from other online services. Spotify, Apple Music, Gaana.com, JioSaavn, Youtube, Tidal, and M3U8 files are currently supported. Use the `-m` flag to specify the playlist name to be created in Plex and:
-  - For online services: use the `-u` flag to supply the full playlist url
-  - For M3U8 files: use the `-u` flag with the file path (relative to beets config directory or absolute path)
-
-  For example, to import the Global Top-100 Apple Music playlist, use the command `beet plexplaylistimport -m Top-100 -u https://music.apple.com/us/playlist/top-100-global/pl.d25f5d1181894928af76c85c967f8f31`. Similarly, to import the Hot-hits USA playlist from Spotify, use the command `beet plexplaylistimport -m HotHitsUSA -u https://open.spotify.com/playlist/37i9dQZF1DX0kbJZpiYdZl`
-
-  You can also use this function to import the weekly jams and weekly exploration playlists from ListenBrainz into Plex. You will need to install and configure the [Listenbrainz plugin][listenbrainz_plugin_]. To import the ListenBrainz playlists, use the command `beet plexplaylistimport --listenbrainz`.
-
-* `beet plexsearchimport`: allows you to import playlists based on Youtube search (results are returned in descending order of the number of views). Use the `-m` flag to specify the playlist name to be created in Plex, supply the search query with the `-s` flag, and use the `-l` flag to limit the number of search results.
-
-  For example, to import the top-20 songs by Taylor Swift, use the command `beet plexsearchimport -s "Taylor Swift" -l 20 -m "Taylor"`.
-
-* `beet plexplaylistclear`: allows you to clear a Plex playlist. Use the `-m` flag to specify the playlist name to be cleared in Plex.
-
-* `beet plex2spotify`: allows you to copy a Plex playlist to Spotify. Use the `-m` flag to specify the playlist name to be copied to Spotify.
-
-* `beet plexplaylist2collection`: converts a Plex playlist to collection. Use the `-m` flag to specify the playlist name. A collection with the same name will be created.
-
-* `beet plexcollage`: allows you to create a collage of most played albums. You can use the `-i` flag to specify the number of days to be used (default is 7 days) and `-g` flag to specify the grid size (default is 3). So, `beet plexcollage -g 5 -i 7` can be used to create a 5x5 collage of the most played albums over the last 7 days. You should get a collage.png file in the beet config folder. The output should look something like the following:
-
-<p align="center">
-  <img src="collage.png">
-</p>
-
 ## Advanced
 Plex matching may be less than perfect and it can miss tracks if the tags don't match perfectly. There are few tools you can use to improve searching:
 * You can enable manual search to improve the matching by enabling `manual_search` in your config (default: `False`).
-* You can enable a Perplexity-style LLM search. This is currently tested on [Perplexica](https://github.com/ItzCrazyKns/Perplexica). See `llm config above.
+* You can enable LLM-powered search using Ollama with optional integration for SearxNG, Exa, or Tavily (used in that order if all of them are configured). This provides intelligent search capabilities that can better match tracks with incomplete or variant metadata. See the `llm` configuration section above.
 
 ```yaml
 plexsync:
@@ -259,6 +345,7 @@ plexsync:
         max_plays: 2        # Maximum number of plays for tracks to be included
         min_rating: 4       # Minimum rating for rated tracks
         discovery_ratio: 30 # Percentage of unrated tracks (0-100); Higher values = more discovery
+        exclusion_days: 30  # Number of days to exclude recently played tracks
         filters:
           include:
             genres:
@@ -278,6 +365,20 @@ plexsync:
               before: 1960
           min_rating: 5
 
+      - id: recent_hits
+        name: "Recent Hits"
+        max_tracks: 20
+        discovery_ratio: 20
+        exclusion_days: 0   # Number of days to exclude recently played tracks (default: 0 = include all)
+        filters:
+          include:
+            genres:
+              - Pop
+              - Rock
+            years:
+              after: 2022
+          min_rating: 4
+
       - id: bollywood_hits
         name: "Bollywood Hits"
         type: imported
@@ -289,6 +390,7 @@ plexsync:
         manual_search: no
         clear_playlist: no
 ```
+
 [collage]: collage.png
 [queries_]: https://beets.readthedocs.io/en/latest/reference/query.html?highlight=queries
 [plaxapi]: https://python-plexapi.readthedocs.io/en/latest/modules/audio.html

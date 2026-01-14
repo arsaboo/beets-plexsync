@@ -11,5 +11,24 @@
         "test_*.py"
     ],
     "python.testing.pytestEnabled": false,
-    "python.testing.unittestEnabled": true
+    "python.testing.unittestEnabled": true,
+    "chat.mcp.serverSampling": {
+        "beets-plexsync/.vscode/mcp.json: context7": {
+            "allowedModels": [
+                "copilot/gpt-4.1",
+                "copilot/auto",
+                "copilot/claude-3.5-sonnet",
+                "copilot/claude-3.7-sonnet",
+                "copilot/claude-3.7-sonnet-thought",
+                "copilot/claude-sonnet-4",
+                "copilot/gemini-2.0-flash-001",
+                "copilot/gemini-2.5-pro",
+                "copilot/gpt-4o",
+                "copilot/gpt-5",
+                "copilot/o3-mini",
+                "copilot/o4-mini",
+                "openrouter/qwen/qwen3-coder"
+            ]
+        }
+    }
 }

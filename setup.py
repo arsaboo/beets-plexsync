@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 
 setup(
     name='beets-plexsync',
@@ -10,12 +10,13 @@ setup(
     url='https://github.com/arsaboo/beets-plexsync',
     license='MIT',
     platforms='ALL',
-    packages=['beetsplug'],
+    packages=find_packages(include=['beetsplug', 'beetsplug.*']),
     install_requires=[
-        'beets>=1.6.0',
+        'beets>=2.4.0',
         'plexapi>=4.13.4',
         'jiosaavn-python>=0.2',
         'spotipy',
+        'ollama',
         'openai',
         'pydantic>=2.0.0',
         'python-dateutil',
@@ -24,5 +25,13 @@ setup(
         'beautifulsoup4',
         'pillow',
         'json_repair',
+        'agno>=1.2.16',
+        'instructor>=1.0',
+        'tavily-python',
+        'exa_py',
+        'brave-search',
+        'scipy',
+        'numpy',
+        'pytz',
     ],
 )
