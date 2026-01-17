@@ -57,6 +57,10 @@ class Harmony:
         # Candidate confirmation queue for manual search
         self._candidate_queue: List[Dict] = []
 
+        # Progress tracking
+        self._progress_manager = None
+        self._progress_disabled = False
+
     def initialize(self, force_refresh: bool = False) -> None:
         """Initialize all backends and build indices.
 
@@ -108,6 +112,60 @@ class Harmony:
             logger.error(f"Failed to initialize Harmony: {e}")
             self._initialized = False
             raise
+
+    def _get_progress_manager(self):
+        """Create or return a cached enlighten manager for progress bars.
+        
+        Returns None if enlighten is not available.
+        """
+        if self._progress_disabled:
+            return None
+        if self._progress_manager is None:
+            try:
+                import enlighten
+                self._progress_manager = enlighten.get_manager()
+            except Exception as exc:
+                logger.debug(f"Progress manager unavailable: {exc}")
+                self._progress_disabled = True
+                return None
+        return self._progress_manager
+
+    def create_progress_counter(
+        self, 
+        total: int, 
+        desc: str, 
+        unit: str = "track",
+        **kwargs
+    ):
+        """Create an enlighten counter for progress tracking.
+        
+        Returns None if enlighten is not available or total is 0.
+        
+        Args:
+            total: Total number of items
+            desc: Description for progress bar
+            unit: Unit name (default: "track")
+            **kwargs: Additional enlighten counter options
+        
+        Returns:
+            enlighten.Counter or None
+        """
+        if not total:
+            return None
+        manager = self._get_progress_manager()
+        if manager is None:
+            return None
+        try:
+            return manager.counter(
+                total=total,
+                desc=desc,
+                unit=unit,
+                leave=False,
+                **kwargs
+            )
+        except Exception as exc:
+            logger.debug(f"Failed to create progress counter '{desc}': {exc}")
+            return None
 
     def _load_and_validate_cached_vector_index(self, cache_path: str) -> bool:
         """Load cached vector index and validate it's still current.

@@ -822,9 +822,11 @@ def search_backend_song(
                             harmony_app=harmony_app,
                         )
                     else:
-                        logger.info("No new tracks found. Continuing to manual search...")
+                        logger.info("No new tracks found.")
+                        return None
                 else:
                     logger.warning("Refresh not available (harmony_app not provided)")
+                return None
             
             if not response or response in ('y', 'yes'):
                 # Import matching module if not provided

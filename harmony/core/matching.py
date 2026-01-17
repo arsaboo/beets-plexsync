@@ -148,20 +148,73 @@ def clean_text_for_matching(text: Optional[str]) -> str:
     return ' '.join(text.split())
 
 
-def calculate_string_similarity(source: Optional[str], target: Optional[str]) -> float:
-    """Compute similarity between two normalized strings."""
+def calculate_word_aware_similarity(source: Optional[str], target: Optional[str]) -> float:
+    """Compute similarity between two strings with word-boundary awareness.
+    
+    Distinguishes between:
+    - Complete word matches (high score)
+    - Partial word matches (low score)
+    - No matches (difflib fallback)
+    """
     if not source or not target:
         return 0.0
 
     source = source.lower().strip()
     target = target.lower().strip()
+    
+    # Exact match
     if source == target:
         return 1.0
-    if source in target or target in source:
-        shorter = min(len(source), len(target))
-        longer = max(len(source), len(target))
-        return 0.9 * (shorter / longer)
+    
+    # Tokenize into words
+    source_words = set(source.split())
+    target_words = set(target.split())
+    
+    if not source_words or not target_words:
+        return difflib.SequenceMatcher(None, source, target).ratio()
+    
+    # Check for complete word matches
+    source_in_target = source_words.issubset(target_words)
+    target_in_source = target_words.issubset(source_words)
+    
+    if source_in_target or target_in_source:
+        # Calculate word-level overlap ratio
+        intersection = len(source_words & target_words)
+        union = len(source_words | target_words)
+        if union > 0:
+            word_similarity = intersection / union
+            
+            # Boost for high word overlap
+            if word_similarity >= 0.8:
+                return 0.9 + (word_similarity - 0.8) * 0.5  # 0.9-0.95 range
+            elif word_similarity >= 0.5:
+                return 0.7 + (word_similarity - 0.5) * 0.67  # 0.7-0.9 range
+            else:
+                return 0.5 + word_similarity * 0.4  # 0.5-0.7 range
+    
+    # Check for partial word matches (substring within words)
+    # This is the case we want to penalize
+    has_partial_match = False
+    for source_word in source_words:
+        for target_word in target_words:
+            if source_word in target_word or target_word in source_word:
+                has_partial_match = True
+                break
+        if has_partial_match:
+            break
+    
+    if has_partial_match:
+        # Apply significant penalty for partial word matches
+        base_similarity = difflib.SequenceMatcher(None, source, target).ratio()
+        return base_similarity * 0.4  # 60% penalty
+    
+    # Fallback to character-level similarity
     return difflib.SequenceMatcher(None, source, target).ratio()
+
+
+def calculate_string_similarity(source: Optional[str], target: Optional[str]) -> float:
+    """Compute similarity between two normalized strings using word-aware matching."""
+    return calculate_word_aware_similarity(source, target)
 
 
 def string_dist(source: str, target: str) -> float:
@@ -306,10 +359,20 @@ def enhanced_artist_distance(str1: str, str2: str) -> float:
     if not all_artists1 or not all_artists2:
         return 1.0
 
-    # Calculate matches with different weights for main vs featured artists
+# Calculate matches with different weights for main vs featured artists
     matches = []
     for artist1 in all_artists1:
         best_match = min(string_dist(artist1, artist2) for artist2 in all_artists2)
+        
+        # NEW: Check for first-name matches
+        # If artist1 is a single word and matches first word of any artist2
+        if ' ' not in artist1.strip():
+            for artist2 in all_artists2:
+                artist2_parts = artist2.split()
+                if artist2_parts and artist1 == artist2_parts[0]:
+                    # First name match - boost similarity
+                    best_match = min(best_match, 0.15)  # 0.15 distance = 0.85 similarity
+        
         matches.append(best_match)
 
     # Return average distance with a slight bonus for having more matching main artists
@@ -386,7 +449,7 @@ def plex_track_distance(
     # Available fields
     available_fields = list(dynamic_weights.keys())
 
-    # Normalize dynamic weights
+# Normalize dynamic weights
     total_weight = sum(dynamic_weights.values())
     if total_weight > 0:
         weights = {
@@ -508,6 +571,33 @@ def plex_track_distance(
     details['field_similarity'] = field_similarity_score
     details['whole_query_similarity'] = whole_query_similarity
 
+    # Apply adaptive boosting based on field match quality
+    # Strong matches get boosted, weak matches get reduced
+    for field in available_fields:
+        field_similarity = details.get(field, 0.0)
+        if field_similarity > 0.95:
+            # Excellent match - significant boost
+            dynamic_weights[field] *= 1.4
+        elif field_similarity > 0.9:
+            # Very good match - moderate boost
+            dynamic_weights[field] *= 1.3
+        elif field_similarity < 0.3:
+            # Weak match - reduce influence
+            dynamic_weights[field] *= 0.7
+
+    # Recalculate weights after adaptive boosting
+    total_weight = sum(dynamic_weights.values())
+    if total_weight > 0:
+        weights = {
+            field: dynamic_weights[field] / total_weight
+            for field in available_fields
+        }
+    else:
+        weights = {
+            field: 1.0 / len(available_fields)
+            for field in available_fields
+        }
+
     # Calculate confidence multiplier based on available fields and their qualities
     if available_fields:
         base_confidence = len(available_fields) / 3.0
@@ -517,6 +607,23 @@ def plex_track_distance(
             avg_quality = 0.5
         confidence = base_confidence * (0.5 + 0.5 * avg_quality)
         
+        # Calculate best field similarity to assess match quality
+        best_field_similarity = max(details.values()) if details else 0.0
+        
+        # Apply progressive dampening based on best field quality
+        if best_field_similarity > 0.95:
+            # Excellent match in at least one field - minimal dampening
+            min_score_multiplier = 0.8
+        elif best_field_similarity > 0.9:
+            # Very good match - reduced dampening
+            min_score_multiplier = 0.7
+        elif best_field_similarity > 0.8:
+            # Good match - moderate dampening
+            min_score_multiplier = 0.6
+        else:
+            # Weaker match - current dampening
+            min_score_multiplier = 0.5
+        
         # Apply confidence dampening strategically
         # If whole-query won (scored higher after 0.85 factor), skip additional dampening
         # The 0.85 factor already serves as a confidence penalty for field-misaligned queries
@@ -524,11 +631,28 @@ def plex_track_distance(
             # Whole-query won - already penalized by 0.85 factor, no additional dampening
             score = raw_score
         else:
-            # Field-by-field won - apply normal confidence dampening
-            score = max(raw_score * confidence, raw_score * 0.5)
+            # Field-by-field won - apply progressive confidence dampening
+            score = max(raw_score * confidence, raw_score * min_score_multiplier)
     else:
         score = raw_score
         confidence = 0.5
+
+# Apply bonus for exact field matches after normalization
+    exact_matches = 0
+    if has_title and clean_string(query_title) == clean_string(plex_title):
+        exact_matches += 1
+    if has_album and clean_string(query_album) == clean_string(plex_album):
+        exact_matches += 1
+    if has_artist and clean_string(query_artist) == clean_string(plex_artist):
+        exact_matches += 1
+    
+    # Apply graduated bonus for exact matches
+    if exact_matches >= 2:
+        # Two or more exact matches - significant bonus
+        score = min(1.0, score * 1.15)
+    elif exact_matches == 1:
+        # One exact match - moderate bonus
+        score = min(1.0, score * 1.10)
 
     # Ensure exact/near-exact matches surface with high confidence
     if raw_score >= 0.99:

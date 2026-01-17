@@ -9,15 +9,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
-try:
-    from tqdm import tqdm
-    HAS_TQDM = True
-except ImportError:
-    HAS_TQDM = False
-    # Fallback: no-op progress bar
-    def tqdm(iterable, **kwargs):
-        return iterable
-
 logger = logging.getLogger("harmony.playlist_import")
 
 
@@ -76,38 +67,43 @@ def add_songs_to_playlist(
     song_list = []
     failed_tracks = []
 
-    # Create progress bar
-    progress_desc = f"Importing {playlist_name}"
-    for i, song in enumerate(tqdm(songs, desc=progress_desc, unit="track", disable=not HAS_TQDM)):
-        try:
-            found = harmony_app.search_song(song, manual_search=manual_search)
-            if found:
-                song_list.append(found)
-            else:
-                # Log failed track
-                artist = song.get('artist', 'Unknown Artist')
-                album = song.get('album', 'Unknown')
-                title = song.get('title', 'Unknown Title')
-                failed_tracks.append({
-                    'artist': artist,
-                    'album': album,
-                    'title': title
-                })
-                logger.debug(f"Not found: {artist} - {album} - {title}")
+    # Create progress bar using enlighten
+    progress_bar = harmony_app.create_progress_counter(
+        total=len(songs),
+        desc=f"Importing {playlist_name}",
+        unit="track"
+    )
 
-            # Only log progress if tqdm is not available
-            if not HAS_TQDM and (i + 1) % max(1, len(songs) // 10) == 0:
-                logger.info(f"Progress: {i+1}/{len(songs)} songs matched")
-        except Exception as e:
-            logger.warning(f"Error searching for {song.get('title', 'Unknown')}: {e}")
-            # Log as failed
-            failed_tracks.append({
-                'artist': song.get('artist', 'Unknown Artist'),
-                'album': song.get('album', 'Unknown'),
-                'title': song.get('title', 'Unknown Title'),
-                'error': str(e)
-            })
-            continue
+    try:
+        for i, song in enumerate(songs):
+            try:
+                found = harmony_app.search_song(song, manual_search=manual_search)
+                if found:
+                    song_list.append(found)
+                else:
+                    # Log failed track
+                    artist = song.get('artist', 'Unknown Artist')
+                    album = song.get('album', 'Unknown')
+                    title = song.get('title', 'Unknown Title')
+                    failed_tracks.append({
+                        'artist': artist,
+                        'album': album,
+                        'title': title
+                    })
+                    logger.debug(f"Not found: {artist} - {album} - {title}")
+
+                # Update progress bar
+                if progress_bar:
+                    progress_bar.update()
+
+            except Exception as e:
+                logger.error(f"Error processing song {i+1}: {e}")
+                if progress_bar:
+                    progress_bar.update()
+                continue
+    finally:
+        if progress_bar:
+            progress_bar.close()
 
     # Write failed tracks to log
     with open(log_file, 'a', encoding='utf-8') as f:
@@ -778,26 +774,28 @@ def batch_import_playlists(
     matched_songs = {}  # hash -> matched track dict
     unique_song_list = list(unique_songs.items())
 
-    if HAS_TQDM:
-        progress = tqdm(total=len(unique_song_list), desc="Matching songs", unit="track")
-    else:
-        progress = None
+    progress = harmony_app.create_progress_counter(
+        total=len(unique_song_list),
+        desc="Matching songs",
+        unit="track"
+    )
 
-    for idx, (h, song) in enumerate(unique_song_list, start=1):
-        try:
-            found = harmony_app.search_song(song, manual_search=manual_search)
-            if found:
-                matched_songs[h] = found
-            if progress:
-                progress.update(1)
-        except Exception as e:
-            logger.warning(f"Error matching {song.get('title', 'Unknown')}: {e}")
-            if progress:
-                progress.update(1)
-            continue
-
-    if progress:
-        progress.close()
+    try:
+        for idx, (h, song) in enumerate(unique_song_list, start=1):
+            try:
+                found = harmony_app.search_song(song, manual_search=manual_search)
+                if found:
+                    matched_songs[h] = found
+                if progress:
+                    progress.update(1)
+            except Exception as e:
+                logger.warning(f"Error matching {song.get('title', 'Unknown')}: {e}")
+                if progress:
+                    progress.update(1)
+                continue
+    finally:
+        if progress:
+            progress.close()
 
     total_matched = len(matched_songs)
     logger.info(f"Matched {total_matched}/{total_unique} unique songs")
