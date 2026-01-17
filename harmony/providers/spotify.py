@@ -5,6 +5,8 @@ import os
 import re
 from typing import List, Dict, Any, Optional
 
+from harmony.utils.parsing import parse_soundtrack_title, clean_album_name, clean_html_entities
+
 logger = logging.getLogger("harmony.providers.spotify")
 
 DEFAULT_SPOTIFY_SCOPES = "playlist-modify-private playlist-modify-public playlist-read-private"
@@ -35,14 +37,23 @@ def import_spotify_playlist(
 ) -> List[Dict[str, Any]]:
     """Import tracks from a Spotify playlist URL.
 
-    This is a lightweight implementation that requires optional spotipy library.
-    Falls back to web scraping if spotipy unavailable.
+    IMPORTANT: Spotify requires API credentials for playlist import.
+    Set SPOTIPY_CLIENT_ID and SPOTIPY_CLIENT_SECRET environment variables.
+    Get credentials from: https://developer.spotify.com/dashboard
+    
+    Web scraping fallback is NOT reliable for Spotify as the site uses
+    client-side rendering (React) and track data is loaded via JavaScript.
+    
+    NOTE: Official Spotify editorial playlists (e.g., 37i9dQZF1DX...) may
+    return 403 Forbidden errors even with valid credentials, as they require
+    special permissions. User and community playlists work fine with
+    standard client credentials.
 
     Args:
         url: Spotify playlist URL (https://open.spotify.com/playlist/PLAYLIST_ID)
         cache: Optional cache object for storing results
-        client_id: Spotify API client ID (optional)
-        client_secret: Spotify API client secret (optional)
+        client_id: Spotify API client ID (optional, uses SPOTIPY_CLIENT_ID env var)
+        client_secret: Spotify API client secret (optional, uses SPOTIPY_CLIENT_SECRET env var)
 
     Returns:
         List of track dictionaries with title, artist, album
@@ -75,7 +86,11 @@ def import_spotify_playlist(
         cred_client_secret = client_secret or os.getenv("SPOTIPY_CLIENT_SECRET")
 
         if not cred_client_id or not cred_client_secret:
-            logger.debug("No Spotify credentials provided - skipping API import")
+            logger.warning(
+                "Spotify API credentials not found. Set SPOTIPY_CLIENT_ID and SPOTIPY_CLIENT_SECRET.\n"
+                "Get credentials from: https://developer.spotify.com/dashboard\n"
+                "Web scraping fallback is NOT reliable for Spotify."
+            )
             raise ImportError("Spotify credentials required")
 
         # Use client credentials flow (read-only, no user auth needed)
@@ -92,9 +107,19 @@ def import_spotify_playlist(
                     continue
 
                 try:
+                    # Extract basic metadata
                     title = track.get("name", "Unknown")
                     artist = track["artists"][0]["name"] if track.get("artists") else "Unknown"
                     album = track.get("album", {}).get("name", None)
+                    
+                    # Apply parsing utilities
+                    title = clean_html_entities(title)
+                    title, movie_name = parse_soundtrack_title(title)
+                    artist = clean_html_entities(artist)
+                    
+                    if album:
+                        album = clean_html_entities(album)
+                        album = clean_album_name(album)
 
                     song_list.append({
                         "title": title.strip(),
@@ -126,7 +151,14 @@ def import_spotify_playlist(
     except Exception as e:
         logger.warning(f"Spotify API import failed: {e} - falling back to web scraping")
 
-    # Fallback: Web scraping (requires beautifulsoup4 and requests)
+    # Fallback: Web scraping (NOT RELIABLE - Spotify uses client-side rendering)
+    # This is kept for backwards compatibility but will likely return empty results
+    logger.warning(
+        "Attempting web scraping fallback for Spotify. This is NOT reliable.\n"
+        "Spotify uses client-side rendering and track data is loaded via JavaScript.\n"
+        "Please use Spotify API credentials for reliable playlist import."
+    )
+    
     try:
         import requests
         from bs4 import BeautifulSoup
@@ -173,6 +205,14 @@ def import_spotify_playlist(
                     logger.debug(f"Error parsing Spotify JSON: {e}")
 
         logger.info(f"Imported {len(song_list)} tracks from Spotify via web scraping: {playlist_id}")
+        
+        if not song_list:
+            logger.error(
+                "Web scraping returned no tracks. This is expected because Spotify uses "
+                "client-side rendering. Please use Spotify API credentials instead.\n"
+                "Set SPOTIPY_CLIENT_ID and SPOTIPY_CLIENT_SECRET environment variables.\n"
+                "Get credentials from: https://developer.spotify.com/dashboard"
+            )
 
         # Cache results
         if song_list and cache:
@@ -308,11 +348,21 @@ def _extract_tracks_from_json(data: Dict[str, Any]) -> List[Dict[str, Any]]:
                     track = item.get("track") or item
                     if "name" in track and "artists" in track:
                         try:
+                            # Extract basic metadata
                             title = track.get("name", "").strip()
                             artist = track["artists"][0].get("name", "Unknown") if track["artists"] else "Unknown"
                             album = track.get("album", {}).get("name")
-
+                            
                             if title:
+                                # Apply parsing utilities
+                                title = clean_html_entities(title)
+                                title, movie_name = parse_soundtrack_title(title)
+                                artist = clean_html_entities(artist)
+                                
+                                if album:
+                                    album = clean_html_entities(album)
+                                    album = clean_album_name(album)
+                                
                                 tracks.append({
                                     "title": title,
                                     "artist": artist.strip(),

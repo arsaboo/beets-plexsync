@@ -196,8 +196,6 @@ def search_backend_song(
         return None
 
     # Stage 2: Local Candidate Matching (beets + backend index)
-    candidate_variants: list[tuple[dict, float]] = []
-
     def _resolve_candidate_id(candidate_dict: dict) -> Optional[str]:
         rating_key = candidate_dict.get("backend_id") or candidate_dict.get("plex_ratingkey")
         if rating_key:
@@ -222,51 +220,52 @@ def search_backend_song(
 
         for candidate_entry, score in local_candidates[:3]:
             candidate_dict = dict(candidate_entry.metadata)
-            resolved_id = _resolve_candidate_id(candidate_dict)
-            if resolved_id:
-                try:
-                    fetched = backend.get_track(resolved_id)
-                    if not fetched:
-                        continue
-                    track_dict = _track_to_dict(fetched)
-                    match_score = plex_track_distance(song, track_dict)
-                    logger.debug(
-                        f"Resolved '{song.get('title', '')}' via cached "
-                        f"{source_label} id with similarity {match_score.similarity:.2f}"
-                    )
-                    if match_score.similarity >= 0.8:
+            
+            # Use vector index metadata directly for similarity scoring (no network call)
+            match_score = plex_track_distance(song, candidate_dict)
+            logger.debug(
+                f"Vector {source_label} candidate '{candidate_dict.get('title', '')}' "
+                f"similarity {match_score.similarity:.2f}"
+            )
+            
+            # High confidence match - fetch from Plex to confirm track exists
+            if match_score.similarity >= 0.75:
+                resolved_id = _resolve_candidate_id(candidate_dict)
+                if resolved_id:
+                    try:
+                        fetched = backend.get_track(resolved_id)
+                        if not fetched:
+                            logger.debug(f"High-confidence match {resolved_id} no longer exists in Plex")
+                            continue
+                        # Use fetched track to ensure we have the latest metadata
+                        track_dict = _track_to_dict(fetched)
+                        logger.debug(
+                            f"Resolved '{song.get('title', '')}' via {source_label} "
+                            f"vector index with similarity {match_score.similarity:.2f}"
+                        )
                         _cache_match(cache, cache_key, track_dict)
                         raise StopIteration(track_dict)
-                    if match_score.similarity > 0.05 and candidate_queue is not None:
+                    except StopIteration:
+                        raise
+                    except Exception as exc:
                         logger.debug(
-                            f"Queueing direct match '{track_dict.get('title', '')}' "
-                            f"with similarity {match_score.similarity:.2f} for confirmation"
+                            f"Failed to fetch high-confidence candidate {resolved_id}: {exc}"
                         )
-                        candidate_queue.append({
-                            "track": track_dict,
-                            "similarity": match_score.similarity,
-                            "cache_key": cache_key,
-                            "source": source_label,
-                            "song": dict(song),
-                        })
-                except StopIteration:
-                    raise
-                except Exception as exc:
-                    logger.debug(
-                        f"Failed to fetch candidate id {resolved_id} from {source_label}: {exc}"
-                    )
-
-        for cand, score in local_candidates[:5]:
-            candidate_variants.append(
-                (
-                    {
-                        "title": cand.metadata.get("title", ""),
-                        "artist": cand.metadata.get("artist", ""),
-                        "album": cand.metadata.get("album", ""),
-                    },
-                    score,
+                        continue
+            
+            # Medium confidence match - queue for manual confirmation (no network call needed)
+            elif match_score.similarity > 0.05 and candidate_queue is not None:
+                logger.debug(
+                    f"Queueing {source_label} candidate '{candidate_dict.get('title', '')}' "
+                    f"with similarity {match_score.similarity:.2f} for confirmation"
                 )
-            )
+                candidate_queue.append({
+                    "track": candidate_dict,
+                    "similarity": match_score.similarity,
+                    "cache_key": cache_key,
+                    "source": source_label,
+                    "song": dict(song),
+                })
 
     if use_local_candidates:
         try:
@@ -286,84 +285,10 @@ def search_backend_song(
             return result.args[0]
         except Exception as exc:
             logger.debug(f"Local candidate lookup failed for {song}: {exc}")
-            candidate_variants = []
-
-    # Try candidate variants (refined from local search)
-    if candidate_variants:
-        variant_attempted = False
-        for variant_metadata, variant_score in candidate_variants[:5]:
-            title = (variant_metadata.get("title") or "").strip()
-            album = (variant_metadata.get("album") or "").strip()
-            artist = (variant_metadata.get("artist") or "").strip()
-
-            if not any((title, album, artist)):
-                continue
-
-            variant_attempted = True
-            logger.debug(
-                f"Trying vector candidate variant (score {variant_score:.2f}): "
-                f"title='{title}', album='{album}', artist='{artist}'"
-            )
-
-            variant_song = {"title": title, "album": album, "artist": artist}
-            try:
-                variant_result = search_backend_song(
-                    backend,
-                    cache,
-                    vector_index,
-                    variant_song,
-                    manual_search=False,
-                    llm_attempted=True,
-                    use_local_candidates=False,
-                    llm_agent=llm_agent,
-                    candidate_queue=None,  # Don't queue nested variant results
-                    matching_module=matching_module,
-                )
-            except RecursionError as exc:
-                logger.debug(f"Variant recursion failed for {variant_song}: {exc}")
-                continue
-
-            if variant_result is not None:
-                similarity = plex_track_distance(song, variant_result).similarity
-                logger.debug(
-                    f"Variant '{title}' similarity to query '{song.get('title', '')}' "
-                    f"-> {similarity:.2f}"
-                )
-                if similarity < 0.8:
-                    logger.debug(
-                        f"Rejecting variant '{title}' for '{song.get('title', '')}' "
-                        f"due to low similarity ({similarity:.2f})"
-                    )
-                    if candidate_queue is not None and similarity > 0.05:
-                        # Queue for manual confirmation
-                        candidate_queue.append({
-                            "track": variant_result,
-                            "similarity": similarity,
-                            "cache_key": cache_key,
-                            "source": "variant",
-                            "song": dict(song),
-                        })
-                    continue
-
-                logger.debug(
-                    f"Resolved '{song.get('title', '')}' via vector candidate variant '{title}'"
-                )
-                cache.set(
-                    cache_key,
-                    variant_result.get("backend_id") or variant_result.get("plex_ratingkey"),
-                    variant_result,
-                )
-                return variant_result
-
-        search_strategies_marker = "vector_variant" if variant_attempted else None
-    else:
-        search_strategies_marker = None
 
     # Multi-strategy search against backend
     tracks = []
     search_strategies_tried: list[str] = []
-    if search_strategies_marker:
-        search_strategies_tried.append(search_strategies_marker)
 
     # Store title-only results for reuse in multiple strategies
     title_only_tracks = []
@@ -640,7 +565,7 @@ def search_backend_song(
             f"Single-track search result similarity for '{song.get('title', '')}' "
             f"-> {similarity:.2f}"
         )
-        if similarity >= 0.8:
+        if similarity >= 0.75:
             cache.set(
                 cache_key,
                 result.get("backend_id") or result.get("plex_ratingkey"),
@@ -680,7 +605,14 @@ def search_backend_song(
         logger.debug(f"Best match score {best_match[1]} below threshold for: {song['title']}")
 
     # Stage 4: LLM Enhancement (if enabled and not already attempted)
-    if not llm_attempted and llm_agent is not None:
+    # Skip LLM if we have good candidates queued (>= 0.7 similarity) for manual confirmation
+    has_good_candidates = (
+        candidate_queue is not None 
+        and len(candidate_queue) > 0 
+        and any(c.get('similarity', 0) >= 0.7 for c in candidate_queue)
+    )
+    
+    if not llm_attempted and llm_agent is not None and not has_good_candidates:
         try:
             from harmony.ai.search import search_track_info
 

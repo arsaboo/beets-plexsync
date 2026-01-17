@@ -2,49 +2,29 @@
 
 import asyncio
 import logging
-import re
 from typing import Any, Dict, List, Optional
 
+# Fix for pydantic compatibility issue with jiosaavn package
+try:
+    import pydantic.typing
+    if not hasattr(pydantic.typing, 'Annotated'):
+        # Monkey-patch the missing Annotated import
+        from typing import Annotated
+        pydantic.typing.Annotated = Annotated
+except ImportError:
+    pass
+
 from jiosaavn import JioSaavn
+from harmony.utils.parsing import parse_soundtrack_title, clean_album_name, clean_html_entities
 
 logger = logging.getLogger("harmony.providers.jiosaavn")
 
 saavn = JioSaavn()
 
 
-def _parse_title(title_orig: str) -> tuple[str, str]:
-    """Parse soundtrack-style titles into title and album."""
-    if '(From "' in title_orig:
-        title = re.sub(r"\(From.*\)", "", title_orig)
-        album = re.sub(r'^[^"]+"|(?<!^)"[^"]+"|"[^"]+$', "", title_orig)
-    elif '[From "' in title_orig:
-        title = re.sub(r"\[From.*\]", "", title_orig)
-        album = re.sub(r'^[^"]+"|(?<!^)"[^"]+$', "", title_orig)
-    else:
-        title = title_orig
-        album = ""
-    return title.strip(), album.strip()
-
-
-def _clean_album_name(album_orig: str) -> str:
-    """Clean album name by removing common suffixes and extracting movie name."""
-    album_orig = (
-        album_orig.replace("(Original Motion Picture Soundtrack)", "")
-        .replace("- Hindi", "")
-        .strip()
-    )
-    if '(From "' in album_orig:
-        album = re.sub(r'^[^"]+"|(?<!^)"[^"]+$', "", album_orig)
-    elif '[From "' in album_orig:
-        album = re.sub(r'^[^"]+"|(?<!^)"[^"]+$', "", album_orig)
-    else:
-        album = album_orig
-    return album
-
-
-async def _get_playlist_songs(playlist_url: str) -> Dict[str, Any]:
+def _get_playlist_songs(playlist_url: str) -> Dict[str, Any]:
     """Get playlist songs by URL."""
-    return await saavn.get_playlist_songs(playlist_url)
+    return saavn.playlist(url=playlist_url)
 
 
 def import_jiosaavn_playlist(
@@ -71,51 +51,42 @@ def import_jiosaavn_playlist(
     song_list: List[Dict[str, Any]] = []
 
     try:
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                data = asyncio.run_coroutine_threadsafe(
-                    _get_playlist_songs(url), loop
-                ).result()
-            else:
-                data = loop.run_until_complete(_get_playlist_songs(url))
-        except (RuntimeError, AssertionError):
-            new_loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(new_loop)
-            data = new_loop.run_until_complete(_get_playlist_songs(url))
-            new_loop.close()
+        data = _get_playlist_songs(url)
 
-        if not data or "data" not in data or "list" not in data["data"]:
+        if not data or "songs" not in data:
             logger.error("Invalid response from JioSaavn API")
             return song_list
 
-        songs = data["data"]["list"]
+        songs = data["songs"]
         for song in songs:
             try:
-                if ('From "' in song["title"]) or ("From &quot" in song["title"]):
-                    title_orig = song["title"].replace("&quot;", '"')
-                    title, album = _parse_title(title_orig)
+                if ('From "' in song["songName"]) or ("From &quot" in song["songName"]):
+                    title_orig = song["songName"].replace("&quot;", '"')
+                    title, album = parse_soundtrack_title(title_orig)
                 else:
-                    title = song["title"]
-                    album = _clean_album_name(song["more_info"]["album"])
+                    title = song["songName"]
+                    album = clean_album_name(song["albumName"]) or ""
 
-                year = song.get("year", None)
+                year = song.get("releaseDate", None)
 
-                try:
-                    artist = song["more_info"]["artistMap"]["primary_artists"][0]["name"]
-                except (KeyError, IndexError):
-                    try:
-                        artist = song["more_info"]["artistMap"]["featured_artists"][0][
-                            "name"
-                        ]
-                    except (KeyError, IndexError):
+                # Extract artist from primaryArtists
+                primary_artists = song.get("primaryArtists", "")
+                if primary_artists:
+                    # Take the first artist if there are multiple
+                    artist = clean_html_entities(primary_artists.split(",")[0].strip())
+                else:
+                    # Try featuredArtists as fallback
+                    featured_artists = song.get("featuredArtists", "")
+                    if featured_artists:
+                        artist = clean_html_entities(featured_artists.split(",")[0].strip())
+                    else:
                         continue
 
                 song_list.append(
                     {
-                        "title": title.strip(),
-                        "album": album.strip(),
-                        "artist": artist.strip(),
+                        "title": clean_html_entities(title.strip()),
+                        "album": clean_html_entities(album.strip()),
+                        "artist": artist,
                         "year": year,
                     }
                 )

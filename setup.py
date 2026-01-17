@@ -30,6 +30,7 @@ setup(
         "python-dateutil>=2.8.2",
         "numpy>=1.24.0",
         "enlighten>=1.10.0",
+        "jiosaavn>=0.1.0",
     ],
     extras_require={
         "beets": ["beets>=1.6.0"],

@@ -149,11 +149,12 @@ class MusicSearchTools:
             if TAVILY_AVAILABLE and self.tavily_api_key:
                 tools.append(TavilyTools(api_key=self.tavily_api_key))
 
-            # Create agent
+            # Create agent with telemetry disabled for performance
             self.agent = Agent(
                 model=model,
                 tools=tools if tools else None,
                 markdown=True,
+                telemetry=False,
             )
             logger.info(f"LLM agent initialized with provider={self.provider}, model={self.model}")
         except Exception as e:

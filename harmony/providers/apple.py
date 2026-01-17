@@ -7,6 +7,8 @@ from typing import Any, Dict, List, Optional
 import requests
 from bs4 import BeautifulSoup
 
+from harmony.utils.parsing import parse_soundtrack_title, clean_album_name, clean_html_entities
+
 logger = logging.getLogger("harmony.providers.apple")
 
 
@@ -76,9 +78,27 @@ def import_apple_playlist(
 
         for song in songs:
             try:
-                title = song["title"].strip()
-                album = song["tertiaryLinks"][0]["title"]
-                artist = song["subtitleLinks"][0]["title"]
+                title_orig = song["title"].strip()
+                album_orig = song["tertiaryLinks"][0]["title"]
+                artist_orig = song["subtitleLinks"][0]["title"]
+                
+                # Parse title for "From..." clauses (common in Bollywood/Indian music)
+                if '(From "' in title_orig or '[From "' in title_orig:
+                    title, album_from_title = parse_soundtrack_title(title_orig)
+                    # Use album from title if present, otherwise use the original album
+                    album = album_from_title if album_from_title else album_orig
+                else:
+                    title = title_orig
+                    album = album_orig
+                
+                # Clean album name (remove OST suffixes, etc.)
+                album = clean_album_name(album) or album
+                
+                # Clean HTML entities from all fields
+                title = clean_html_entities(title)
+                album = clean_html_entities(album)
+                artist = clean_html_entities(artist_orig)
+                
                 song_list.append(
                     {
                         "title": title.strip(),
