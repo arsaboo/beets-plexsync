@@ -120,16 +120,10 @@ class MusicSearchTools:
         try:
             # Create model
             if self.provider == "ollama":
-                try:
-                    model = Ollama(
-                        id=self.model,
-                        base_url=self.ollama_host,
-                    )
-                except TypeError:
-                    model = Ollama(
-                        id=self.model,
-                        host=self.ollama_host,
-                    )
+                model = Ollama(
+                    id=self.model,
+                    host=self.ollama_host,
+                )
             else:
                 # OpenAI-compatible
                 model = OpenAILike(

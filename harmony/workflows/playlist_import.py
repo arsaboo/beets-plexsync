@@ -153,7 +153,7 @@ def import_from_url(
     url: str,
     manual_search: bool = False
 ) -> int:
-    """Import a playlist from a URL (Spotify, YouTube, Apple Music, etc).
+    """Import a playlist from a URL (Spotify, YouTube, Apple Music, Qobuz, etc).
 
     Args:
         harmony_app: Harmony app instance
@@ -200,6 +200,9 @@ def import_from_url(
         elif "jiosaavn" in url.lower():
             from harmony.providers import import_jiosaavn_playlist
             songs = import_jiosaavn_playlist(url, harmony_app.cache)
+        elif "qobuz" in url.lower():
+            from harmony.providers import import_qobuz_playlist
+            songs = import_qobuz_playlist(url, harmony_app.cache)
         else:
             logger.error(f"Unsupported playlist URL source: {url}")
             return 0
@@ -399,6 +402,9 @@ def _import_from_url_internal(harmony_app, url: str) -> List[Dict[str, Any]]:
         elif "jiosaavn" in url.lower():
             from harmony.providers.jiosaavn import import_jiosaavn_playlist
             return import_jiosaavn_playlist(url, harmony_app.cache)
+        elif "qobuz" in url.lower():
+            from harmony.providers.qobuz import import_qobuz_playlist
+            return import_qobuz_playlist(url, harmony_app.cache)
     except Exception as e:
         logger.error(f"Error importing from {url}: {e}")
     return []

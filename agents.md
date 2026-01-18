@@ -7,7 +7,7 @@ Harmony is a standalone Python application for playlist management and library t
 Key features include:
 - Smart playlists based on ratings, recency, genres, and play counts.
 - AI-generated playlists from natural language prompts (Ollama/OpenAI-compatible).
-- External playlist import (Spotify, Apple Music, YouTube, Tidal, JioSaavn, Gaana, local M3U8, custom HTTP POST endpoints).
+- External playlist import (Spotify, Apple Music, YouTube, Tidal, Qobuz, JioSaavn, Gaana, ListenBrainz, local M3U8, custom HTTP POST endpoints).
 - Playlist management and transfer (Plex to Spotify today; extensible).
 - Multi-stage search pipeline with cache, vector index, backend search, optional LLM cleanup, and manual confirmation.
 
@@ -39,8 +39,63 @@ Harmony is written in Python and leverages plexapi, spotipy, pydantic, and agno.
 - Workflows (backend-agnostic): harmony/workflows/{search.py, manual_search.py, playlist_import.py}
 - Backends: harmony/backends/{plex.py, beets.py, base.py}
 - Plex (compat wrappers + Plex-specific utilities): harmony/plex/{search.py, manual_search.py, playlist_import.py, smartplaylists.py, operations.py}
-- Providers: harmony/providers/{apple.py, spotify.py, youtube.py, tidal.py, jiosaavn.py, gaana.py, m3u8.py, http_post.py}
+- Providers: harmony/providers/{apple.py, spotify.py, youtube.py, tidal.py, jiosaavn.py, gaana.py, m3u8.py, http_post.py, qobuz.py, listenbrainz.py}
 - Utils: harmony/utils/helpers.py
+
+## Playlist Providers
+
+### Qobuz Provider
+- **Location**: harmony/providers/qobuz.py
+- **URL Pattern**: `https://www.qobuz.com/{lang}/playlists/{category}/{id}`
+- **Method**: Web scraping (no API credentials required)
+- **Cache**: 168 hours (7 days)
+- **Implementation**:
+  - `extract_playlist_id(url)` - Extract numeric ID from Qobuz URLs
+  - `import_qobuz_playlist(url, cache)` - Main import function with caching
+  - Parses tracks from embedded JSON in script tags (similar to Apple Music)
+  - Fallback to HTML parsing if JSON extraction fails
+- **Usage**:
+  ```bash
+  harmony import-playlist "Qobuz Mix" --url https://www.qobuz.com/gb-en/playlists/bollywood/22893019
+  ```
+
+### ListenBrainz Provider
+- **Location**: harmony/providers/listenbrainz.py
+- **Playlist Types**: `weekly_jams`, `weekly_exploration`
+- **Source**: Troi-bot generated recommendation playlists
+- **Authentication**: User token + username (required)
+- **Configuration** in harmony.yaml:
+  ```yaml
+  providers:
+    listenbrainz:
+      username: YOUR_USERNAME
+      token: YOUR_TOKEN
+  
+  playlists:
+    items:
+      - id: weekly_jams
+        name: "Weekly Jams"
+        type: weekly_jams
+        enabled: true
+      - id: weekly_exploration
+        name: "Weekly Exploration"
+        type: weekly_exploration
+        enabled: true
+  ```
+- **Implementation**:
+  - `ListenBrainzClient` - API client with authentication
+  - `parse_troi_playlists(username, token, playlist_type)` - Fetch and filter troi-bot playlists
+  - `fetch_troi_playlist_tracks(playlist_id, token)` - Get tracks from a playlist
+  - `get_weekly_jams(username, token, most_recent=True)` - Convenience function for Weekly Jams
+  - `get_weekly_exploration(username, token, most_recent=True)` - Convenience function for Weekly Exploration
+- **Usage**:
+  ```bash
+  harmony smart-playlists  # Processes ListenBrainz playlists configured in harmony.yaml
+  ```
+- **Integration**:
+  - ListenBrainz playlists are handled in `Harmony._generate_listenbrainz_playlist()` (harmony/app.py)
+  - Detected by playlist type in `generate_smart_playlist()` before standard smart playlist logic
+  - Uses `harmony.workflows.playlist_import.add_songs_to_playlist()` to search and add tracks
 
 ## Search Pipeline Overview (harmony/workflows/search.py)
 When search_backend_song(...) is called, the pipeline should proceed:

@@ -71,6 +71,32 @@ except ImportError as e:
     def import_post_playlist(*args, **kwargs):
         raise NotImplementedError("POST endpoint provider unavailable")
 
+try:
+    from harmony.providers.qobuz import import_qobuz_playlist
+except ImportError as e:
+    logger.warning(f"Qobuz provider import failed: {e}")
+    def import_qobuz_playlist(*args, **kwargs):
+        raise NotImplementedError("Qobuz provider unavailable")
+
+try:
+    from harmony.providers.listenbrainz import (
+        ListenBrainzClient,
+        get_weekly_jams,
+        get_weekly_exploration,
+        fetch_troi_playlist_tracks,
+    )
+except ImportError as e:
+    logger.warning(f"ListenBrainz provider import failed: {e}")
+    def get_weekly_jams(*args, **kwargs):
+        raise NotImplementedError("ListenBrainz provider unavailable")
+    def get_weekly_exploration(*args, **kwargs):
+        raise NotImplementedError("ListenBrainz provider unavailable")
+    def fetch_troi_playlist_tracks(*args, **kwargs):
+        raise NotImplementedError("ListenBrainz provider unavailable")
+    class ListenBrainzClient:
+        def __init__(self, *args, **kwargs):
+            raise NotImplementedError("ListenBrainz provider unavailable")
+
 __all__ = [
     "import_spotify_playlist",
     "get_playlist_id",
@@ -82,4 +108,9 @@ __all__ = [
     "import_jiosaavn_playlist",
     "import_m3u8_playlist",
     "import_post_playlist",
+    "import_qobuz_playlist",
+    "ListenBrainzClient",
+    "get_weekly_jams",
+    "get_weekly_exploration",
+    "fetch_troi_playlist_tracks",
 ]

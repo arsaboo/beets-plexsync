@@ -217,11 +217,33 @@ def import_playlist(
         help="Skip refreshing vector index after import",
     ),
 ) -> None:
-    """Import a playlist from Spotify, YouTube, Apple Music, etc.
+    """Import a playlist from external sources.
+
+    Supported sources:
+        - Spotify: https://open.spotify.com/playlist/PLAYLIST_ID
+        - YouTube: https://www.youtube.com/playlist?list=PLAYLIST_ID
+        - Apple Music: https://music.apple.com/.../playlist/PLAYLIST_ID
+        - Qobuz: https://www.qobuz.com/{lang}/playlists/{category}/{id}
+        - Tidal: https://tidal.com/browse/playlist/...
+        - JioSaavn, Gaana, local M3U8, custom HTTP POST endpoints
+
+    For ListenBrainz Weekly Jams/Exploration, configure in harmony.yaml:
+        playlists:
+          items:
+            - id: weekly_jams
+              name: "Weekly Jams"
+              type: weekly_jams
+        providers:
+          listenbrainz:
+            username: YOUR_USERNAME
+            token: YOUR_TOKEN
+
+    Then use: harmony smart-playlists
 
     Examples:
         harmony import-playlist "My Spotify Mix" --url https://open.spotify.com/playlist/PLAYLIST_ID
         harmony import-playlist "YouTube Hits" --url https://www.youtube.com/playlist?list=PLxxxx
+        harmony import-playlist "Qobuz Bollywood" --url https://www.qobuz.com/gb-en/playlists/bollywood/22893019
         harmony import-playlist "Better Matches" --url https://open.spotify.com/playlist/ID --llm-cleanup
     """
     try:

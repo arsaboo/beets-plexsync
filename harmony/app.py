@@ -664,6 +664,63 @@ class Harmony:
             logger.error(f"Error creating playlist: {e}")
             return False
 
+    def _generate_listenbrainz_playlist(
+        self, playlist_name: str, playlist_type: str
+    ) -> Optional[Dict]:
+        """Generate ListenBrainz playlist (Weekly Jams or Exploration).
+
+        Args:
+            playlist_name: Name for the playlist
+            playlist_type: Type of playlist (weekly_jams or weekly_exploration)
+
+        Returns:
+            Dict with playlist details or None if failed
+        """
+        # Check for ListenBrainz credentials
+        if not self.config.providers.listenbrainz.token:
+            logger.error("ListenBrainz token not configured")
+            return {"selected_count": 0}
+
+        if not self.config.providers.listenbrainz.username:
+            logger.error("ListenBrainz username not configured")
+            return {"selected_count": 0}
+
+        # Import tracks from ListenBrainz
+        try:
+            from harmony.providers.listenbrainz import (
+                get_weekly_jams,
+                get_weekly_exploration,
+            )
+
+            username = self.config.providers.listenbrainz.username
+            token = self.config.providers.listenbrainz.token
+
+            if playlist_type == "weekly_jams":
+                tracks = get_weekly_jams(username, token, most_recent=True)
+            elif playlist_type == "weekly_exploration":
+                tracks = get_weekly_exploration(username, token, most_recent=True)
+            else:
+                logger.error(f"Unknown ListenBrainz playlist type: {playlist_type}")
+                return {"selected_count": 0}
+
+            if not tracks:
+                logger.warning(f"No tracks from ListenBrainz {playlist_type}")
+                return {"selected_count": 0}
+
+            # Search and add tracks to Plex
+            from harmony.workflows.playlist_import import add_songs_to_playlist
+
+            count = add_songs_to_playlist(self, playlist_name, tracks, manual_search=False)
+
+            return {
+                "playlist_name": playlist_name,
+                "selected_count": count,
+                "playlist_type": playlist_type,
+            }
+        except Exception as e:
+            logger.error(f"Error generating ListenBrainz playlist: {e}")
+            return {"selected_count": 0}
+
     def generate_smart_playlist(
         self,
         playlist_name: str,
@@ -685,6 +742,10 @@ class Harmony:
         if not self._initialized or not self.plex.connected:
             logger.error("Harmony not initialized")
             return None
+
+        # Handle ListenBrainz playlists
+        if playlist_type in ["weekly_jams", "weekly_exploration"]:
+            return self._generate_listenbrainz_playlist(playlist_name, playlist_type)
 
         try:
             from harmony.plex.smartplaylists import generate_playlist

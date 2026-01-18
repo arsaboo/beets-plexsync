@@ -49,10 +49,18 @@ class SpotifyConfig(BaseModel):
     cache_path: Optional[str] = None
 
 
+class ListenBrainzConfig(BaseModel):
+    """ListenBrainz provider configuration."""
+
+    token: Optional[str] = None
+    username: Optional[str] = None
+
+
 class ProvidersConfig(BaseModel):
     """External service providers configuration."""
 
     spotify: SpotifyConfig = Field(default_factory=SpotifyConfig)
+    listenbrainz: ListenBrainzConfig = Field(default_factory=ListenBrainzConfig)
     m3u8_dir: Optional[str] = None
 
 
