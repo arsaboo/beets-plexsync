@@ -10,6 +10,7 @@ Key features include:
 - External playlist import (Spotify, Apple Music, YouTube, Tidal, Qobuz, JioSaavn, Gaana, ListenBrainz, local M3U8, custom HTTP POST endpoints).
 - Playlist management and transfer (Plex to Spotify today; extensible).
 - Multi-stage search pipeline with cache, vector index, backend search, optional LLM cleanup, and manual confirmation.
+- Optional AudioMuse enrichment for mood/energy filtering in smart playlists.
 
 Harmony is written in Python and leverages plexapi, spotipy, pydantic, and agno.
 
@@ -38,8 +39,10 @@ Harmony is written in Python and leverages plexapi, spotipy, pydantic, and agno.
 - Core: harmony/core/{cache.py, matching.py, vector_index.py}
 - Workflows (backend-agnostic): harmony/workflows/{search.py, manual_search.py, playlist_import.py}
 - Backends: harmony/backends/{plex.py, beets.py, base.py}
+- AudioMuse backend: harmony/backends/audiomuse.py
 - Plex (compat wrappers + Plex-specific utilities): harmony/plex/{search.py, manual_search.py, playlist_import.py, smartplaylists.py, operations.py}
 - Providers: harmony/providers/{apple.py, spotify.py, youtube.py, tidal.py, jiosaavn.py, gaana.py, m3u8.py, http_post.py, qobuz.py, listenbrainz.py}
+- AudioMuse config lives under providers.audiomuse in harmony.yaml.
 - Utils: harmony/utils/helpers.py
 
 ## Playlist Providers
@@ -122,9 +125,10 @@ When search_backend_song(...) is called, the pipeline should proceed:
    - Provider priority in toolkit: SearxNG > Exa > Brave > Tavily.
 
 ## Smart Playlists
-- Types: daily_discovery, forgotten_gems, recent_hits, fresh_favorites, 70s80s_flashback, highly_rated, most_played.
+- Types: daily_discovery, forgotten_gems, recent_hits, fresh_favorites, 70s80s_flashback, highly_rated, most_played, energetic_workout, relaxed_evening.
 - Filters: history_days, exclusion_days, discovery_ratio, include/exclude genres, include/exclude years, min_rating.
 - Prefers beets metadata for genres/years when configured; falls back to Plex.
+- AudioMuse mood filters live under filters.mood (min/max energy, danceable, happy, sad, relaxed, party, aggressive, tempo, mood_categories).
 
 ## Testing
 - **Environment requirement**: All testing must be carried out in the `py311` conda environment, which has all dependencies installed.

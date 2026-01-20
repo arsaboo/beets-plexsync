@@ -6,17 +6,12 @@ plex:
   host: "192.168.1.100"          # IP address or hostname
   port: 32400                     # Default Plex port
   token: "${PLEX_TOKEN}"          # Plex API token (set via env var)
-  library:
-    music_section: "Music"        # Name of Plex Music library
-
-  # Optional: explicit URL (useful if standard connection fails)
-  # explicit_url: "http://192.168.1.100:32400"
+  library_name: "Music"           # Name of Plex Music library
+  verify_ssl: true
 
 beets:
   # Optional: beets library for enrichment (not required)
-  enabled: false
-  library_db: "/path/to/beets/library.db"
-  music_directory: "/path/to/music"
+  library_db: "/path/to/beets/musiclibrary.blb"
 
 providers:
   spotify:
@@ -25,59 +20,42 @@ providers:
     redirect_uri: "http://localhost:8888/callback"
     scopes: "playlist-modify-private playlist-modify-public playlist-read-private"
     cache_path: "spotify_token.json"
+  audiomuse:
+    # Optional: AudioMuse enrichment for mood-based filtering
+    base_url: "http://localhost:8001"
+    enabled: false
+    timeout: 30
+    acoustic_enrichment: true
+    cache_ttl_days: 7
   m3u8_dir: "C:/path/to/m3u8"
 
 playlists:
-  # Smart playlist configuration
-  enabled: true
-
-  # Default settings for all playlists
   defaults:
-    # How many days back to look for "recently played"
-    history_days: 15
-    # How many days back to exclude from "discovery" playlists
-    exclusion_days: 30
-    # Whether to prompt for manual matching
     manual_search: false
-    # Clear playlist before regenerating
     clear_playlist: true
-
-  # Individual smart playlists
-  smart:
-    daily_discovery:
-      enabled: true
-      num_tracks: 50
-      description: "Mix of highly-rated and popular tracks from recent history"
-
-    forgotten_gems:
-      enabled: true
-      num_tracks: 40
-      description: "Tracks you rated highly but haven't heard in a while"
-
-    recent_hits:
-      enabled: true
-      num_tracks: 50
-      description: "Recently released popular tracks"
-
-    fresh_favorites:
-      enabled: true
-      num_tracks: 40
-      description: "Your favorite newly released tracks"
-
-    70s80s_flashback:
-      enabled: true
-      num_tracks: 45
-      description: "Classic tracks from the 70s and 80s"
-
-    highly_rated:
-      enabled: true
-      num_tracks: 35
-      description: "Your highest-rated tracks"
-
-    most_played:
-      enabled: true
-      num_tracks: 40
-      description: "Tracks you play most frequently"
+  items:
+    - id: daily_discovery
+      name: "Daily Discovery"
+      max_tracks: 50
+      history_days: 15
+      exclusion_days: 30
+      discovery_ratio: 45
+      filters:
+        min_rating: 3
+    - id: forgotten_gems
+      name: "Forgotten Gems"
+      max_tracks: 40
+      exclusion_days: 60
+    - id: energetic_workout
+      name: "Energetic Workout"
+      type: energetic_workout
+      max_tracks: 40
+      filters:
+        mood:
+          min_energy: 0.6
+          min_tempo: 120
+          min_danceable: 0.5
+          max_sad: 0.3
 
   # Imported playlists from external sources
   imported:

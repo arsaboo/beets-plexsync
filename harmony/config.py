@@ -30,6 +30,16 @@ class BeetsConfig(BaseModel):
     library_db: Optional[str] = None  # Path to musiclibrary.blb
 
 
+class AudioMuseConfig(BaseModel):
+    """AudioMuse backend configuration for acoustic enrichment."""
+
+    base_url: str = "http://localhost:8001"
+    enabled: bool = False
+    timeout: int = 30
+    acoustic_enrichment: bool = True
+    cache_ttl_days: int = 7
+
+
 class LLMSearchConfig(BaseModel):
     """LLM search provider configuration."""
 
@@ -61,6 +71,7 @@ class ProvidersConfig(BaseModel):
 
     spotify: SpotifyConfig = Field(default_factory=SpotifyConfig)
     listenbrainz: ListenBrainzConfig = Field(default_factory=ListenBrainzConfig)
+    audiomuse: AudioMuseConfig = Field(default_factory=AudioMuseConfig)
     m3u8_dir: Optional[str] = None
 
 
@@ -208,6 +219,7 @@ class HarmonyConfig(BaseSettings):
             "llm": self.llm.model_dump(),
             "playlists": self.playlists.model_dump(),
             "search": self.search.model_dump(),
+            "cache": self.cache.model_dump(),
         }
 
     def to_yaml(self) -> str:

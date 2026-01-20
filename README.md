@@ -11,7 +11,7 @@
 - **🤖 AI Playlist Generation**: Create playlists from natural language using LLMs (Ollama, OpenAI)
 - **⚡ Fast Search**: 6-strategy pipeline with vector caching (150x faster after first run)
 - **💾 Persistent Caching**: SQLite + JSON vector index for instant results
-- **🔌 Flexible Backends**: Works with Plex (required) + optional beets enrichment
+- **🔌 Flexible Backends**: Works with Plex (required) + optional beets + AudioMuse enrichment
 - **🚀 Batch Processing**: Generate multiple playlists efficiently with single cache build
 
 ## 🎛️ Beets Integration (Optional)
@@ -39,6 +39,26 @@ beets:
 | Smart playlist generation | Same speed | Same speed | 1x |
 
 💡 **Recommendation**: If you use beets, configure it in Harmony for optimal performance!
+
+## 🎧 AudioMuse Integration (Optional)
+
+Harmony can optionally enrich tracks with **AudioMuse-AI** acoustic analysis, adding mood/energy filters to smart playlists.
+
+**Benefits**:
+- **Mood-aware filtering**: Filter playlists by energy, danceability, happy/sad, relaxed, party, etc.
+- **Acoustic categories**: Use mood categories (rock, pop, oldies, etc.) from AudioMuse analysis
+- **Cached enrichment**: Only fetches data when needed and caches results
+
+**Setup**:
+```yaml
+providers:
+  audiomuse:
+    base_url: "http://localhost:8001"
+    enabled: true
+    timeout: 30
+    acoustic_enrichment: true
+    cache_ttl_days: 7
+```
 
 ## 🚀 Quick Start
 
@@ -74,6 +94,12 @@ plex:
 # Optional: Beets integration for faster search & better metadata
 beets:
   library_db: "/path/to/musiclibrary.blb"
+
+# Optional: AudioMuse enrichment for mood-based filtering
+providers:
+  audiomuse:
+    base_url: "http://localhost:8001"
+    enabled: true
 
 # Optional: Configure smart playlists for batch generation
 playlists:
@@ -196,6 +222,22 @@ print(f"AI playlist: {count} matched tracks")
 | **70s80s_flashback** | Era-specific nostalgia | Era filter, rating |
 | **highly_rated** | Your top-rated tracks | User rating only |
 | **most_played** | Frequently played | Play count |
+| **energetic_workout** | High energy, fast tempo | Rating, popularity, recency |
+| **relaxed_evening** | Calm, low energy | Rating, recency |
+
+### Mood Filters (AudioMuse)
+
+When AudioMuse is enabled, smart playlists can add a `filters.mood` section:
+
+```yaml
+filters:
+  mood:
+    min_energy: 0.6
+    min_tempo: 120
+    min_danceable: 0.5
+    max_sad: 0.3
+    mood_categories: [rock, pop]
+```
 
 ## ⚙️ Architecture
 

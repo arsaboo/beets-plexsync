@@ -5,7 +5,7 @@ Generates dynamic playlists based on ratings, play counts, genres, and recency.
 
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 import json
 
 logger = logging.getLogger("harmony.plex.smartplaylists")
@@ -104,6 +104,32 @@ DEFAULT_SCORING_WEIGHTS = {
             "z_play_count": 0.5,
             "z_recency": 0.4,
             "z_popularity": 0.1
+        }
+    },
+    "energetic_workout": {
+        "rated_weights": {
+            "z_rating": 0.3,
+            "z_recency": 0.2,
+            "z_popularity": 0.3,
+            "z_age": 0.2
+        },
+        "unrated_weights": {
+            "z_popularity": 0.4,
+            "z_recency": 0.3,
+            "z_age": 0.3
+        }
+    },
+    "relaxed_evening": {
+        "rated_weights": {
+            "z_rating": 0.4,
+            "z_recency": 0.3,
+            "z_play_count": -0.2,
+            "z_popularity": 0.1
+        },
+        "unrated_weights": {
+            "z_recency": 0.4,
+            "z_popularity": 0.3,
+            "z_play_count": -0.3
         }
     }
 }
@@ -434,6 +460,89 @@ def filter_by_year_constraints(
     return filtered
 
 
+def _value_within_range(value: Optional[float], minimum: Optional[float], maximum: Optional[float]) -> bool:
+    if value is None:
+        return True
+    if minimum is not None and value < minimum:
+        return False
+    if maximum is not None and value > maximum:
+        return False
+    return True
+
+
+def filter_by_mood(
+    tracks: List[Dict[str, Any]],
+    audiomuse_backend: Any,
+    mood_filters: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    """Filter tracks by AudioMuse mood criteria."""
+    if not mood_filters or not audiomuse_backend:
+        return tracks
+
+    filtered: List[Dict[str, Any]] = []
+    for track in tracks:
+        item_id = track.get("audiomuse_item_id")
+        if not item_id:
+            title = track.get("title")
+            artist = track.get("artist")
+            if title and artist:
+                item_id = audiomuse_backend.search_tracks_by_metadata(title, artist)
+                if item_id:
+                    track["audiomuse_item_id"] = item_id
+
+        if not item_id:
+            filtered.append(track)
+            continue
+
+        features = audiomuse_backend.get_track_features(item_id)
+        if not features:
+            filtered.append(track)
+            continue
+
+        energy = features.get("energy")
+        tempo = features.get("tempo")
+        mood_features = features.get("mood_features", {})
+        mood_categories = features.get("mood_categories", {})
+
+        if not _value_within_range(
+            energy,
+            mood_filters.get("min_energy"),
+            mood_filters.get("max_energy"),
+        ):
+            continue
+
+        if not _value_within_range(
+            tempo,
+            mood_filters.get("min_tempo"),
+            mood_filters.get("max_tempo"),
+        ):
+            continue
+
+        failed = False
+        for feature_name in ["danceable", "aggressive", "happy", "party", "relaxed", "sad"]:
+            min_key = f"min_{feature_name}"
+            max_key = f"max_{feature_name}"
+            if min_key not in mood_filters and max_key not in mood_filters:
+                continue
+            feature_value = mood_features.get(feature_name)
+            if not _value_within_range(feature_value, mood_filters.get(min_key), mood_filters.get(max_key)):
+                failed = True
+                break
+        if failed:
+            continue
+
+        preferred_categories = mood_filters.get("mood_categories") or []
+        if preferred_categories:
+            preferred_normalized = {str(cat).strip().lower() for cat in preferred_categories}
+            categories_normalized = {str(cat).strip().lower() for cat in mood_categories.keys()}
+            if preferred_normalized and not preferred_normalized.intersection(categories_normalized):
+                continue
+
+        filtered.append(track)
+
+    return filtered
+
+
 def apply_filters(
     tracks: List[Dict[str, Any]],
     min_rating: float = None,
@@ -443,6 +552,8 @@ def apply_filters(
     max_days_since_played: int = None,
     include: Dict[str, Any] = None,
     exclude: Dict[str, Any] = None,
+    mood: Dict[str, Any] = None,
+    audiomuse_backend: Any = None,
 ) -> List[Dict[str, Any]]:
     """Apply multiple filters to a track list."""
     result = tracks
@@ -464,6 +575,10 @@ def apply_filters(
     if min_days_since_played or max_days_since_played:
         result = filter_by_recency(result, min_days_since_played, max_days_since_played)
 
+    if mood and audiomuse_backend:
+        result = filter_by_mood(result, audiomuse_backend, mood)
+        logger.info(f"After mood filtering: {len(result)} tracks")
+
     return result
 
 
@@ -475,6 +590,7 @@ def generate_playlist(
     history_days: int = None,
     exclusion_days: int = None,
     discovery_ratio: int = None,
+    audiomuse_backend: Any = None,
     **filter_kwargs
 ) -> Dict[str, Any]:
     """Generate a smart playlist from tracks.
@@ -503,7 +619,7 @@ def generate_playlist(
             include["genres"] = preferred_genres
             filter_kwargs["include"] = include
 
-    filtered = apply_filters(tracks, **filter_kwargs)
+    filtered = apply_filters(tracks, audiomuse_backend=audiomuse_backend, **filter_kwargs)
     logger.info(f"After filtering: {len(filtered)} tracks")
 
     # Select and weight tracks

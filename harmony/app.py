@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 from harmony.config import HarmonyConfig
 from harmony.backends.plex import PlexBackend
 from harmony.backends.beets import BeetsBackend
+from harmony.backends.audiomuse import AudioMuseBackend
 from harmony.core.cache import Cache
 from harmony.core.vector_index import VectorIndex
 from harmony.models import Track
@@ -33,6 +34,10 @@ class Harmony:
         # Initialize beets backend (optional - will gracefully skip if beets not installed)
         beets_config = self.config.beets.model_dump()
         self.beets = BeetsBackend(beets_config) if beets_config.get("library_db") else None
+
+        # Initialize AudioMuse backend (optional)
+        audiomuse_config = self.config.providers.audiomuse.model_dump() if hasattr(self.config, "providers") else {}
+        self.audiomuse = AudioMuseBackend(audiomuse_config) if audiomuse_config.get("enabled") else None
 
         # Initialize cache
         cache_db_path = self.config.cache.db_path if hasattr(self.config, 'cache') else "harmony_cache.db"
@@ -74,6 +79,11 @@ class Harmony:
             # Connect to beets if available
             if self.beets:
                 self.beets.connect()
+
+            # Connect to AudioMuse if available
+            if self.audiomuse:
+                self.audiomuse.cache = self.cache
+                self.audiomuse.connect()
 
             # Initialize LLM if configured
             llm_config = self.config.llm.model_dump() if hasattr(self.config, 'llm') else {}
@@ -844,6 +854,7 @@ class Harmony:
                 history_days=history_days,
                 exclusion_days=exclusion_days,
                 discovery_ratio=discovery_ratio,
+                audiomuse_backend=self.audiomuse,
                 **filter_kwargs
             )
 
