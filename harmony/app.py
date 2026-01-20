@@ -18,6 +18,8 @@ logger = logging.getLogger("harmony")
 class Harmony:
     """Main Harmony application managing backends and features."""
 
+    AUDIO_MUSE_PLAYLIST_TYPES = {"energetic_workout", "relaxed_evening"}
+
     def __init__(self, config_path: str = "harmony.yaml"):
         """Initialize Harmony.
 
@@ -80,11 +82,6 @@ class Harmony:
             if self.beets:
                 self.beets.connect()
 
-            # Connect to AudioMuse if available
-            if self.audiomuse:
-                self.audiomuse.cache = self.cache
-                self.audiomuse.connect()
-
             # Initialize LLM if configured
             llm_config = self.config.llm.model_dump() if hasattr(self.config, 'llm') else {}
             if llm_config and llm_config.get('enabled', False):
@@ -122,6 +119,50 @@ class Harmony:
             logger.error(f"Failed to initialize Harmony: {e}")
             self._initialized = False
             raise
+
+    def _playlist_requires_audiomuse(
+        self,
+        playlist_type: Optional[str],
+        filters: Optional[Dict[str, Any]],
+    ) -> bool:
+        if playlist_type in self.AUDIO_MUSE_PLAYLIST_TYPES:
+            return True
+        if filters and isinstance(filters, dict) and filters.get("mood"):
+            return True
+        return False
+
+    def ensure_audiomuse_for_playlist(
+        self,
+        playlist_type: Optional[str],
+        filters: Optional[Dict[str, Any]],
+        playlist_name: Optional[str] = None,
+    ) -> None:
+        if not self._playlist_requires_audiomuse(playlist_type, filters):
+            return
+
+        if not self.audiomuse:
+            label = playlist_name or playlist_type or "playlist"
+            logger.warning(f"AudioMuse unavailable; mood filters ignored for {label}")
+            return
+
+        if not self.audiomuse.cache:
+            self.audiomuse.cache = self.cache
+
+        if not self.audiomuse.connected:
+            self.audiomuse.connect()
+
+        if not self.audiomuse.connected:
+            label = playlist_name or playlist_type or "playlist"
+            logger.warning(f"AudioMuse unavailable; mood filters ignored for {label}")
+
+    def ensure_audiomuse_for_playlists(self, playlists: List[Any]) -> None:
+        for playlist in playlists:
+            playlist_type = getattr(playlist, "type", None) or getattr(playlist, "id", None)
+            filters = getattr(playlist, "filters", None)
+            if self._playlist_requires_audiomuse(playlist_type, filters):
+                name = getattr(playlist, "name", None) or playlist_type
+                self.ensure_audiomuse_for_playlist(playlist_type, filters, name)
+                return
 
     def _get_progress_manager(self):
         """Create or return a cached enlighten manager for progress bars.
@@ -759,6 +800,8 @@ class Harmony:
 
         try:
             from harmony.plex.smartplaylists import generate_playlist
+
+            self.ensure_audiomuse_for_playlist(playlist_type, filters, playlist_name)
 
             def _normalize_genres(value):
                 if not value:

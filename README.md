@@ -103,10 +103,11 @@ providers:
 
 # Optional: Configure smart playlists for batch generation
 playlists:
-  smart:
-    - name: "Daily Discovery"
+  items:
+    - id: daily_discovery
+      name: "Daily Discovery"
       type: daily_discovery
-      num_tracks: 50
+      max_tracks: 50
       enabled: true
 ```
 

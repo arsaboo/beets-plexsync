@@ -609,6 +609,9 @@ def smart_playlists(
         # Separate imported and smart playlists
         imported_playlists = [p for p in selected_playlists if p.type == "imported"]
         smart_playlists = [p for p in selected_playlists if p.type != "imported"]
+
+        if smart_playlists:
+            harmony.ensure_audiomuse_for_playlists(smart_playlists)
         
         # Process imported playlists in batch for efficiency
         if imported_playlists:
