@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import logging
+import time
 from typing import Optional, List, Dict, Any
 
 from harmony.core.matching import plex_track_distance, clean_text_for_matching
@@ -127,6 +128,38 @@ def search_backend_song(
     Returns:
         Dict with track metadata (title, artist, album, backend_id) or None
     """
+    start_time = time.perf_counter()
+    timing_ms: dict[str, float] = {}
+
+    def _record_timing(name: str, start: float) -> None:
+        elapsed = (time.perf_counter() - start) * 1000.0
+        timing_ms[name] = timing_ms.get(name, 0.0) + elapsed
+
+    def _log_timing() -> None:
+        total_ms = (time.perf_counter() - start_time) * 1000.0
+        accounted_ms = sum(timing_ms.values())
+        timing_ms["unaccounted_ms"] = max(total_ms - accounted_ms, 0.0)
+        title = (song.get("title") or "").strip()
+        artist = (song.get("artist") or "").strip()
+        album = (song.get("album") or "").strip()
+        logger.debug(
+            "Search timing title='%s' artist='%s' album='%s' total_ms=%.1f stages=%s",
+            title,
+            artist,
+            album,
+            total_ms,
+            timing_ms,
+        )
+
+    def _return(value: Optional[dict]) -> Optional[dict]:
+        _log_timing()
+        return value
+
+    def _cache_set(*args, **kwargs) -> None:
+        stage_start = time.perf_counter()
+        cache.set(*args, **kwargs)
+        _record_timing("cache_write_ms", stage_start)
+
     cache_key = cache._make_cache_key(song)
     logger.debug(f"Generated cache key: '{cache_key}' for song: {song}")
 
@@ -156,44 +189,44 @@ def search_backend_song(
                             f"Cached cleaned metadata search succeeded, "
                             f"updating original cache: {song}"
                         )
-                        cache.set(
+                        _cache_set(
                             cache_key,
                             result.get("backend_id") or result.get("plex_ratingkey"),
                             result,
                         )
-                        return result
+                        return _return(result)
                 logger.debug(f"Found cached skip result for: {song}")
-                return None
+                return _return(None)
             if rating_key:
                 try:
                     fetched = backend.get_track(str(rating_key))
                     if fetched:
                         logger.debug(f"Found cached match for: {song} -> {fetched.title}")
-                        return _track_to_dict(fetched)
+                        return _return(_track_to_dict(fetched))
                 except Exception as exc:
                     logger.debug(f"Failed to fetch cached item {rating_key}: {exc}")
-                    cache.set(cache_key, None)
+                    _cache_set(cache_key, None)
         else:
             # Legacy cached result (single int/str value)
             if cached_result == -1:
                 logger.debug(f"Found legacy cached skip result for: {song}")
-                return None
+                return _return(None)
             if cached_result:
                 try:
                     fetched = backend.get_track(str(cached_result))
                     if fetched:
                         logger.debug(f"Found legacy cached match for: {song} -> {fetched.title}")
-                        return _track_to_dict(fetched)
+                        return _return(_track_to_dict(fetched))
                 except Exception as exc:
                     logger.debug(f"Failed to fetch legacy cached item {cached_result}: {exc}")
-                    cache.set(cache_key, None)
+                    _cache_set(cache_key, None)
 
     # Short-circuit: Cannot search without a title
     if not (song.get("title") or "").strip():
         logger.warning(f"Cannot search without a title, skipping: {song}")
         ttl = _get_negative_cache_ttl(harmony_app)
-        cache.set(cache_key, None, ttl_days=ttl)  # Cache the failure to avoid retries
-        return None
+        _cache_set(cache_key, None, ttl_days=ttl)  # Cache the failure to avoid retries
+        return _return(None)
 
     # Stage 2: Local Candidate Matching (beets + backend index)
     def _resolve_candidate_id(candidate_dict: dict) -> Optional[str]:
@@ -268,6 +301,7 @@ def search_backend_song(
                 })
 
     if use_local_candidates:
+        stage_start = time.perf_counter()
         try:
             if beets_vector_index is not None:
                 query_counts, query_norm = beets_vector_index.build_query_vector(song)
@@ -282,9 +316,11 @@ def search_backend_song(
                 )
                 _process_local_candidates(local_candidates, "backend")
         except StopIteration as result:
-            return result.args[0]
+            return _return(result.args[0])
         except Exception as exc:
             logger.debug(f"Local candidate lookup failed for {song}: {exc}")
+        finally:
+            _record_timing("local_candidates_ms", stage_start)
 
     # Multi-strategy search against backend
     tracks = []
@@ -308,13 +344,13 @@ def search_backend_song(
         # Album+Title: High precision when album is accurate
         if has_album:
             strategies.append("album_title")
-        
+
+        # Title-only: Always try (cached for reuse in later strategies)
+        strategies.append("title_only")
+
         # Artist+Title: High precision for artist-centric searches
         if has_artist:
             strategies.append("artist_title")
-        
-        # Title-only: Always try (cached for reuse in later strategies)
-        strategies.append("title_only")
         
         # Artist+Fuzzy Title: Handle typos and variations
         if has_artist:
@@ -339,6 +375,7 @@ def search_backend_song(
         # Strategy 1: Album + Title
         if "album_title" in selected_strategies and len(tracks) == 0:
             search_strategies_tried.append("album_title")
+            stage_start = time.perf_counter()
             try:
                 tracks = backend.search_tracks(
                     title=song["title"], album=song["album"], limit=50
@@ -347,66 +384,92 @@ def search_backend_song(
             except Exception as exc:
                 logger.debug(f"Strategy 1 failed: {exc}")
                 tracks = []
+            finally:
+                _record_timing("strategy_album_title_ms", stage_start)
 
-        # Strategy 2: Artist + Title (high precision)
-        if "artist_title" in selected_strategies and len(tracks) == 0:
-            search_strategies_tried.append("artist_title")
-            artist_variants = _split_artist_variants(song["artist"])
-            search_artists = artist_variants or [song["artist"]]
-            unique_tracks = {}
-
-            # Make parallel API calls for better performance
-            from concurrent.futures import ThreadPoolExecutor, as_completed
-            
-            def search_single_artist(artist: str):
-                """Search for tracks with given artist variant."""
-                if not artist:
-                    return []
-                try:
-                    results = backend.search_tracks(
-                        title=song["title"], artist=artist, limit=50
-                    )
-                    logger.debug(
-                        f"Strategy 2 (Artist+Title): Artist '{artist}' "
-                        f"-> {len(results)} tracks"
-                    )
-                    return results
-                except Exception as exc:
-                    logger.debug(f"Strategy 2 artist variant '{artist}' failed: {exc}")
-                    return []
-            
-            # Execute searches in parallel (up to 4 concurrent threads)
-            with ThreadPoolExecutor(max_workers=4) as executor:
-                futures = {
-                    executor.submit(search_single_artist, artist): artist
-                    for artist in search_artists
-                }
-                
-                for future in as_completed(futures):
-                    candidate_tracks = future.result()
-                    for track in candidate_tracks:
-                        key = track.get("backend_id") or track.get("plex_ratingkey") or id(track)
-                        if key not in unique_tracks:
-                            unique_tracks[key] = track
-
-            tracks = list(unique_tracks.values())
-
-        # Strategy 3: Title only (cached for reuse in later strategies)
+        # Strategy 2: Title only (cached for reuse in later strategies)
         if "title_only" in selected_strategies and len(tracks) == 0:
             search_strategies_tried.append("title_only")
+            stage_start = time.perf_counter()
             try:
                 title_tracks = backend.search_tracks(title=song["title"], limit=50)
                 title_only_tracks = title_tracks[:]
                 tracks = title_tracks
-                logger.debug(f"Strategy 3 (Title-only): Found {len(tracks)} tracks")
+                logger.debug(f"Strategy 2 (Title-only): Found {len(tracks)} tracks")
             except Exception as exc:
-                logger.debug(f"Strategy 3 failed: {exc}")
+                logger.debug(f"Strategy 2 failed: {exc}")
                 title_only_tracks = []
                 tracks = []
+            finally:
+                _record_timing("strategy_title_only_ms", stage_start)
+
+        # Strategy 3: Artist + Title (high precision)
+        if "artist_title" in selected_strategies and len(tracks) == 0:
+            search_strategies_tried.append("artist_title")
+            stage_start = time.perf_counter()
+            artist_variants = _split_artist_variants(song["artist"])
+            search_artists = artist_variants or [song["artist"]]
+            unique_tracks = {}
+
+            if title_only_tracks:
+                logger.debug("Reusing title-only results for Strategy 3 (Artist+Title)")
+                filtered_tracks = [
+                    track
+                    for track in title_only_tracks
+                    if _track_matches_artist_variants(track, artist_variants)
+                ]
+                for track in filtered_tracks:
+                    key = track.get("backend_id") or track.get("plex_ratingkey") or id(track)
+                    if key not in unique_tracks:
+                        unique_tracks[key] = track
+            else:
+                # Make parallel API calls for better performance
+                from concurrent.futures import ThreadPoolExecutor, as_completed
+
+                def search_single_artist(artist: str):
+                    """Search for tracks with given artist variant."""
+                    if not artist:
+                        return []
+                    try:
+                        results = backend.search_tracks(
+                            title=song["title"], artist=artist, limit=50
+                        )
+                        logger.debug(
+                            f"Strategy 3 (Artist+Title): Artist '{artist}' "
+                            f"-> {len(results)} tracks"
+                        )
+                        return results
+                    except Exception as exc:
+                        logger.debug(
+                            f"Strategy 3 artist variant '{artist}' failed: {exc}"
+                        )
+                        return []
+
+                # Execute searches in parallel (up to 4 concurrent threads)
+                with ThreadPoolExecutor(max_workers=4) as executor:
+                    futures = {
+                        executor.submit(search_single_artist, artist): artist
+                        for artist in search_artists
+                    }
+
+                    for future in as_completed(futures):
+                        candidate_tracks = future.result()
+                        for track in candidate_tracks:
+                            key = (
+                                track.get("backend_id")
+                                or track.get("plex_ratingkey")
+                                or id(track)
+                            )
+                            if key not in unique_tracks:
+                                unique_tracks[key] = track
+
+            tracks = list(unique_tracks.values())
+            _record_timing("strategy_artist_title_ms", stage_start)
 
         # Strategy 4: Artist + Fuzzy Title
         if "artist_fuzzy_title" in selected_strategies and len(tracks) == 0:
             search_strategies_tried.append("artist_fuzzy_title")
+            stage_start = time.perf_counter()
             fuzzy_query = clean_text_for_matching(song["title"])
             artist_variants = _split_artist_variants(song["artist"])
             search_artists = artist_variants or [song["artist"]]
@@ -492,10 +555,13 @@ def search_backend_song(
                         tracks = filtered_tracks
             except Exception as exc:
                 logger.debug(f"Artist+fuzzy search strategy failed: {exc}")
+            finally:
+                _record_timing("strategy_artist_fuzzy_title_ms", stage_start)
 
         # Strategy 5: Album only
         if "album_only" in selected_strategies and len(tracks) == 0:
             search_strategies_tried.append("album_only")
+            stage_start = time.perf_counter()
             try:
                 # Optimization: Filter title-only results by album
                 if title_only_tracks and song.get("album"):
@@ -517,10 +583,13 @@ def search_backend_song(
             except Exception as exc:
                 logger.debug(f"Strategy 5 failed: {exc}")
                 tracks = []
+            finally:
+                _record_timing("strategy_album_only_ms", stage_start)
 
         # Strategy 6: Fuzzy Title
         if "fuzzy_title" in selected_strategies and len(tracks) == 0:
             search_strategies_tried.append("fuzzy_title")
+            stage_start = time.perf_counter()
             try:
                 fuzzy_query = clean_text_for_matching(song["title"])
 
@@ -549,29 +618,33 @@ def search_backend_song(
                     )
             except Exception as exc:
                 logger.debug(f"Fuzzy search strategy failed: {exc}")
+            finally:
+                _record_timing("strategy_fuzzy_title_ms", stage_start)
 
     except Exception as exc:
         logger.debug(
             f"Error during multi-strategy search for {song.get('album', '')} "
             f"- {song.get('title', '')}: {exc}"
         )
-        return None
+        return _return(None)
 
     # Process results
     if len(tracks) == 1:
         result = tracks[0]
+        stage_start = time.perf_counter()
         similarity = plex_track_distance(song, result).similarity
+        _record_timing("single_result_similarity_ms", stage_start)
         logger.debug(
             f"Single-track search result similarity for '{song.get('title', '')}' "
             f"-> {similarity:.2f}"
         )
         if similarity >= 0.75:
-            cache.set(
+            _cache_set(
                 cache_key,
                 result.get("backend_id") or result.get("plex_ratingkey"),
                 result,
             )
-            return result
+            return _return(result)
         logger.debug(
             f"Rejecting single-track result for '{song.get('title', '')}' "
             f"due to low similarity ({similarity:.2f})"
@@ -588,7 +661,12 @@ def search_backend_song(
         tracks = []
 
     if len(tracks) > 1:
+        stage_start = time.perf_counter()
         sorted_tracks = _find_closest_match(song, tracks)
+        _record_timing("find_closest_match_ms", stage_start)
+        logger.debug(
+            "Closest match scoring on %d tracks", len(tracks)
+        )
         logger.debug(
             f"Found {len(sorted_tracks)} tracks for {song['title']} "
             f"using strategies: {', '.join(search_strategies_tried)}"
@@ -596,12 +674,12 @@ def search_backend_song(
 
         best_match = sorted_tracks[0]
         if best_match[1] >= 0.7:
-            cache.set(
+            _cache_set(
                 cache_key,
                 best_match[0].get("backend_id") or best_match[0].get("plex_ratingkey"),
                 best_match[0],
             )
-            return best_match[0]
+            return _return(best_match[0])
         logger.debug(f"Best match score {best_match[1]} below threshold for: {song['title']}")
 
     # Stage 4: LLM Enhancement (if enabled and not already attempted)
@@ -613,6 +691,7 @@ def search_backend_song(
     )
     
     if not llm_attempted and llm_agent is not None and not has_good_candidates:
+        stage_start = time.perf_counter()
         try:
             from harmony.ai.search import search_track_info
 
@@ -644,20 +723,22 @@ def search_backend_song(
                     logger.debug(
                         f"LLM-cleaned search succeeded, caching for original query: {song}"
                     )
-                    cache.set(
+                    _cache_set(
                         cache_key,
                         result.get("backend_id") or result.get("plex_ratingkey"),
                         result,
                     )
-                    return result
+                    return _return(result)
                 else:
                     # Cache negative result with cleaned metadata for future use
                     logger.debug(
                         f"LLM-cleaned search also failed, caching negative with metadata"
                     )
-                    cache.set(cache_key, None, cleaned_metadata)
+                    _cache_set(cache_key, None, cleaned_metadata)
         except Exception as exc:
             logger.debug(f"LLM enhancement failed: {exc}")
+        finally:
+            _record_timing("llm_ms", stage_start)
 
     # Stage 5: Manual Search with Candidate Confirmation Queue
     if manual_search:
@@ -696,12 +777,12 @@ def search_backend_song(
                             f"User accepted queued candidate '{title}' for "
                             f"'{original_song.get('title', '')}'"
                         )
-                        cache.set(
+                        _cache_set(
                             chosen_cache_key,
                             track.get("backend_id") or track.get("plex_ratingkey"),
                             track,
                         )
-                        return track
+                        return _return(track)
                 elif action == "manual":
                     manual_query = selection.get("original_song") or song
                     result = manual_track_search(
@@ -714,14 +795,14 @@ def search_backend_song(
                         logger.debug(
                             f"Manual search succeeded, caching for original query: {manual_query}"
                         )
-                        cache.set(
+                        _cache_set(
                             cache_key,
                             result.get("backend_id") or result.get("plex_ratingkey"),
                             result,
                         )
-                        return result
+                        return _return(result)
                 elif action == "abort":
-                    return None
+                    return _return(None)
                 elif action == "skip":
                     pass  # Continue to prompt below
 
@@ -741,7 +822,7 @@ def search_backend_song(
                     if added > 0:
                         logger.info(f"Added {added} new tracks to index. Retrying search...")
                         # Retry search with updated index
-                        return search_backend_song(
+                        return _return(search_backend_song(
                             backend, cache, vector_index, song,
                             beets_vector_index=beets_vector_index,
                             beets_lookup=beets_lookup,
@@ -752,13 +833,13 @@ def search_backend_song(
                             candidate_queue=candidate_queue,
                             matching_module=matching_module,
                             harmony_app=harmony_app,
-                        )
+                        ))
                     else:
                         logger.info("No new tracks found.")
-                        return None
+                        return _return(None)
                 else:
                     logger.warning("Refresh not available (harmony_app not provided)")
-                return None
+                return _return(None)
             
             if not response or response in ('y', 'yes'):
                 # Import matching module if not provided
@@ -780,7 +861,7 @@ def search_backend_song(
                         if added > 0:
                             logger.info(f"Added {added} new tracks to index. Retrying search...")
                             # Retry search with updated index
-                            return search_backend_song(
+                            return _return(search_backend_song(
                                 backend, cache, vector_index, song,
                                 beets_vector_index=beets_vector_index,
                                 beets_lookup=beets_lookup,
@@ -791,7 +872,7 @@ def search_backend_song(
                                 candidate_queue=candidate_queue,
                                 matching_module=matching_module,
                                 harmony_app=harmony_app,
-                            )
+                            ))
                         else:
                             logger.info("No new tracks found. Please try manual search again.")
                             # Return to manual search
@@ -809,12 +890,12 @@ def search_backend_song(
                     logger.debug(
                         f"Manual search succeeded, caching for original query: {song}"
                     )
-                    cache.set(
+                    _cache_set(
                         cache_key,
                         result.get("backend_id") or result.get("plex_ratingkey"),
                         result,
                     )
-                    return result
+                    return _return(result)
         except Exception as exc:
             logger.error(f"Manual search failed: {exc}")
 
@@ -822,8 +903,8 @@ def search_backend_song(
         f"All search strategies failed for: {song} "
         f"(tried: {', '.join(search_strategies_tried) if search_strategies_tried else 'none'})"
     )
-    cache.set(cache_key, None)
-    return None
+    _cache_set(cache_key, None)
+    return _return(None)
 
 
 def search_plex_song(*args, **kwargs) -> Optional[dict]:

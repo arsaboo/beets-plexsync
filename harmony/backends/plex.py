@@ -151,7 +151,9 @@ class PlexBackend(MusicBackend):
         try:
             if hasattr(plex_track, "originalTitle") and plex_track.originalTitle:
                 return plex_track.originalTitle
-            elif hasattr(plex_track, "artist") and callable(plex_track.artist):
+            if hasattr(plex_track, "grandparentTitle") and plex_track.grandparentTitle:
+                return plex_track.grandparentTitle
+            if hasattr(plex_track, "artist") and callable(plex_track.artist):
                 try:
                     return plex_track.artist().title
                 except Exception:
