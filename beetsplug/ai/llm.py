@@ -214,7 +214,6 @@ class MusicSearchTools:
                 model=model,
                 description="You extract structured song information from search results.",
                 output_schema=SongBasicInfo,  # Use output_schema for structured output
-                telemetry=False,
             )
         except Exception as e:
             logger.error(f"Failed to initialize LLM agent: {e}")
@@ -272,11 +271,10 @@ class MusicSearchTools:
             try:
                 model = self._create_model()
 
-                # Create Agent with tools and telemetry disabled
+                # Create Agent with tools
                 self.search_agent = Agent(
                     model=model,
-                    tools=tools,
-                    telemetry=False,
+                    tools=tools
                 )
             except Exception as e:
                 logger.error(f"Failed to initialize search agent with tools: {e}")

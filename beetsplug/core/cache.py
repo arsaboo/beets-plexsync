@@ -158,55 +158,59 @@ class Cache:
             logger.error("Failed to initialize Spotify cache tables: {}", e)
             raise
 
-    def clear_expired_playlist_cache(self, max_age_hours=168, source=None):
-        """Clear expired playlist cache entries with smart expiration.
-
-        Automatically applies randomized expiration (60-200 hours) for Spotify sources
-        to prevent thundering herd issues. Uses fixed TTL for other sources.
-
-        Args:
-            max_age_hours: Fixed TTL for non-Spotify sources (default: 7 days)
-            source: Optional source filter (e.g., "spotify_tracks", "youtube")
-        """
+    def clear_expired_spotify_cache(self):
+        """Clear expired Spotify cache entries with randomized expiration."""
         try:
             import random
 
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
 
-                # Build query based on source filter
-                if source:
-                    query = "SELECT playlist_id, source, created_at FROM playlist_cache WHERE source = ?"
-                    cursor.execute(query, (source,))
-                else:
-                    query = "SELECT playlist_id, source, created_at FROM playlist_cache"
-                    cursor.execute(query)
+                # Get all entries
+                for table_type in ["api", "web", "tracks"]:
+                    table_name = f"spotify_{table_type}_cache"
+                    cursor.execute(f"SELECT playlist_id, created_at FROM {table_name}")
+                    rows = cursor.fetchall()
 
-                rows = cursor.fetchall()
-                deleted_count = 0
+                    for playlist_id, created_at in rows:
+                        if created_at:
+                            expiry_hours = random.uniform(60, 200)
+                            created_dt = datetime.fromisoformat(created_at)
+                            expiry = created_dt + timedelta(hours=expiry_hours)
 
-                for playlist_id, source_name, created_at_str in rows:
-                    created_at = datetime.fromisoformat(created_at_str)
+                            # Check if expired
+                            if datetime.now() > expiry:
+                                cursor.execute(
+                                    f"DELETE FROM {table_name} WHERE playlist_id = ?",
+                                    (playlist_id,),
+                                )
+                                if cursor.rowcount:
+                                    logger.debug(
+                                        "Cleaned expired entry from {} (age: {:.1f}h)",
+                                        table_name,
+                                        expiry_hours,
+                                    )
 
-                    # Use randomized expiry for Spotify to prevent thundering herd
-                    if source_name and 'spotify' in source_name.lower():
-                        random_hours = random.randint(60, 200)
-                        expiry = created_at + timedelta(hours=random_hours)
-                    else:
-                        # Fixed expiry for other sources
-                        expiry = created_at + timedelta(hours=max_age_hours)
+                conn.commit()
+        except Exception as e:
+            logger.error("Failed to clear expired Spotify cache: {}", e)
 
-                    # Delete if expired
-                    if datetime.now() > expiry:
-                        cursor.execute(
-                            "DELETE FROM playlist_cache WHERE playlist_id = ? AND source = ?",
-                            (playlist_id, source_name),
-                        )
-                        deleted_count += 1
+    def clear_expired_playlist_cache(self, max_age_hours=72):
+        """Clear expired playlist cache entries."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                expiry = datetime.now() - timedelta(hours=max_age_hours)
 
-                if deleted_count:
-                    logger.debug("Cleaned {} expired playlist cache entries", deleted_count)
-
+                # Delete expired entries
+                cursor.execute(
+                    "DELETE FROM playlist_cache WHERE created_at < ?",
+                    (expiry.isoformat(),),
+                )
+                if cursor.rowcount:
+                    logger.debug(
+                        "Cleaned {} expired playlist cache entries", cursor.rowcount
+                    )
                 conn.commit()
         except Exception as e:
             logger.error("Failed to clear expired playlist cache: {}", e)

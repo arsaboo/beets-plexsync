@@ -1,146 +1,91 @@
-# Harmony - Project Context
+# beets-plexsync - Project Context
 
 ## Project Overview
 
-Harmony is a standalone Python application for playlist management and library tooling. It is not a beets plugin; beets integration is optional and used to enrich metadata and accelerate search when configured.
+This project is a plugin for [beets](https://github.com/beetbox/beets), a music library manager. The plugin, named `plexsync`, provides powerful tools to synchronize and manage your music library between beets and a Plex Media Server.
 
 Key features include:
-- Smart playlists based on ratings, recency, genres, and play counts.
-- AI-generated playlists from natural language prompts (Ollama/OpenAI-compatible).
-- External playlist import (Spotify, Apple Music, YouTube, Tidal, Qobuz, JioSaavn, Gaana, ListenBrainz, local M3U8, custom HTTP POST endpoints).
-- Playlist management and transfer (Plex to Spotify today; extensible).
-- Multi-stage search pipeline with cache, vector index, backend search, optional LLM cleanup, and manual confirmation.
+- **Library Sync**: Import track data (ratings, play counts, last played dates) from Plex into your beets library.
+- **Smart Playlists**: Generate dynamic playlists in Plex based on your listening history, track ratings, genres, and other criteria. Includes "Daily Discovery", "Forgotten Gems", and "Recent Hits".
+- **AI-Generated Playlists**: Create playlists in Plex based on natural language prompts using an LLM (like GPT, Ollama models).
+- **External Playlist Import**: Import playlists from various sources like Spotify, Apple Music, YouTube, Tidal, JioSaavn, Gaana, local M3U8 files, and custom HTTP POST endpoints.
+- **Playlist Management**: Add/remove tracks from Plex playlists using beets queries, clear playlists.
+- **Additional Tools**: Copy Plex playlists to Spotify, convert playlists to collections, create album collages.
 
-Harmony is written in Python and leverages plexapi, spotipy, pydantic, and agno.
+The plugin is written in Python and leverages several libraries including `plexapi`, `spotipy`, `openai`, `pydantic`, and others.
 
 ## Implementation Guidelines for Coding Assistants
 
-- Ask clarifying questions for ambiguous changes.
-- Draft and confirm approach for non-trivial features.
-- List trade-offs when multiple approaches exist.
-- Follow existing patterns and module boundaries below.
+- Ask clarifying questions for ambiguous changes
+- Draft and confirm approach for non-trivial features
+- List trade-offs when multiple approaches exist
+- Follow existing patterns and module boundaries below
 
 ### Critical Constraints
-- Keep cache keys stable (SQLite via core/cache.py).
-- Keep public APIs and method signatures stable when possible.
-- Preserve vector index behavior (core/vector_index.py) to avoid regressions.
-- Beets integration is optional; do not require beets to run core features.
+- NEVER modify cache keys (stored in SQLite via core/cache.py)
+- Keep public APIs and method signatures stable when possible
+- Maintain compatibility with beets plugin architecture and CLI
+- Preserve vector index behavior (core/vector_index.py) to avoid regressions
 
 ### Development Patterns
-- Use logging with namespace harmony.*
-- Prefer Pydantic v2 models for structured data.
-- Cache expensive operations (Plex calls, providers, LLM, vector index).
-- Keep LLM tooling behind config flags and degrade gracefully.
+- Use logging with namespace beets.plexsync
+- Prefer Pydantic v2 models for structured data
+- Cache expensive operations (Plex calls, providers, LLM)
+- Keep LLM tooling behind config flags and degrade gracefully
 
 ## Code Organization
-- Entry point: harmony/app.py and harmony/cli.py
-- AI: harmony/ai/{llm.py, search.py}
-- Core: harmony/core/{cache.py, matching.py, vector_index.py}
-- Workflows (backend-agnostic): harmony/workflows/{search.py, manual_search.py, playlist_import.py}
-- Backends: harmony/backends/{plex.py, beets.py, base.py}
-- Plex (compat wrappers + Plex-specific utilities): harmony/plex/{search.py, manual_search.py, playlist_import.py, smartplaylists.py, operations.py}
-- Providers: harmony/providers/{apple.py, spotify.py, youtube.py, tidal.py, jiosaavn.py, gaana.py, m3u8.py, http_post.py, qobuz.py, listenbrainz.py}
-- Utils: harmony/utils/helpers.py
+- Entry point: beetsplug/plexsync.py
+- AI: beetsplug/ai/llm.py (Agno-based; OpenAI-like or Ollama)
+- Core: beetsplug/core/{cache.py, config.py, matching.py, vector_index.py}
+- Plex: beetsplug/plex/{search.py, manual_search.py, playlist_import.py, smartplaylists.py, operations.py, spotify_transfer.py, collage.py}
+- Providers: beetsplug/providers/{apple.py, spotify.py, youtube.py, tidal.py, jiosaavn.py, gaana.py, m3u8.py, post.py}
+- Utils: beetsplug/utils/helpers.py
 
-## Playlist Providers
-
-### Qobuz Provider
-- **Location**: harmony/providers/qobuz.py
-- **URL Pattern**: `https://www.qobuz.com/{lang}/playlists/{category}/{id}`
-- **Method**: Web scraping (no API credentials required)
-- **Cache**: 168 hours (7 days)
-- **Implementation**:
-  - `extract_playlist_id(url)` - Extract numeric ID from Qobuz URLs
-  - `import_qobuz_playlist(url, cache)` - Main import function with caching
-  - Parses tracks from embedded JSON in script tags (similar to Apple Music)
-  - Fallback to HTML parsing if JSON extraction fails
-- **Usage**:
-  ```bash
-  harmony import-playlist "Qobuz Mix" --url https://www.qobuz.com/gb-en/playlists/bollywood/22893019
-  ```
-
-### ListenBrainz Provider
-- **Location**: harmony/providers/listenbrainz.py
-- **Playlist Types**: `weekly_jams`, `weekly_exploration`
-- **Source**: Troi-bot generated recommendation playlists
-- **Authentication**: User token + username (required)
-- **Configuration** in harmony.yaml:
-  ```yaml
-  providers:
-    listenbrainz:
-      username: YOUR_USERNAME
-      token: YOUR_TOKEN
-  
-  playlists:
-    items:
-      - id: weekly_jams
-        name: "Weekly Jams"
-        type: weekly_jams
-        enabled: true
-      - id: weekly_exploration
-        name: "Weekly Exploration"
-        type: weekly_exploration
-        enabled: true
-  ```
-- **Implementation**:
-  - `ListenBrainzClient` - API client with authentication
-  - `parse_troi_playlists(username, token, playlist_type)` - Fetch and filter troi-bot playlists
-  - `fetch_troi_playlist_tracks(playlist_id, token)` - Get tracks from a playlist
-  - `get_weekly_jams(username, token, most_recent=True)` - Convenience function for Weekly Jams
-  - `get_weekly_exploration(username, token, most_recent=True)` - Convenience function for Weekly Exploration
-- **Usage**:
-  ```bash
-  harmony smart-playlists  # Processes ListenBrainz playlists configured in harmony.yaml
-  ```
-- **Integration**:
-  - ListenBrainz playlists are handled in `Harmony._generate_listenbrainz_playlist()` (harmony/app.py)
-  - Detected by playlist type in `generate_smart_playlist()` before standard smart playlist logic
-  - Uses `harmony.workflows.playlist_import.add_songs_to_playlist()` to search and add tracks
-
-## Search Pipeline Overview (harmony/workflows/search.py)
-When search_backend_song(...) is called, the pipeline should proceed:
+## Search Pipeline Overview (beetsplug/plex/search.py)
+When PlexSync.search_plex_song(...) is called, the pipeline should proceed:
 1. Cache check
-   - Return cached backend_id via backend.get_track when present.
-2. Local candidates
-   - Prefer beets vector index when configured, then backend vector index.
-   - Try direct match via cached backend_id/plex_ratingkey/provider_ids.
-   - Prepare variant queries from candidates and try backend search.
-3. Multi-strategy backend search
-   - If tracks found, score with core/matching.plex_track_distance.
-   - Accept when similarity threshold is met; else queue for review.
-4. Manual search UI (workflows/manual_search.py)
-   - review_candidate_confirmations(.) queues and deduplicates options.
-   - handle_manual_search(.) supports actions:
-     - a: Abort, s: Skip (store negative cache), e: Enter manual search.
-     - Numeric selection caches positive result against the original query only.
-   - _store_negative_cache(cache, song, original_query)
-     - Writes None to cache when there is a valid title in the chosen query.
-   - _cache_selection(cache, song, track, original_query)
-     - Caches ONLY the original query key (not the manual entry).
+   - Return cached ratingKey via plugin.music.fetchItem when present
+2. Local beets candidates
+   - Use core/vector_index.py to surface LocalCandidate entries
+   - Try direct match via cached plex_ratingkey if present
+     - Accept immediately if similarity >= 0.8
+     - Otherwise queue for manual confirmation
+   - Prepare variant queries from candidates and try Plex music.searchTracks
+3. Single/multiple track search
+   - If tracks found, score with core/matching.plex_track_distance
+   - Accept when similarity threshold is met; else queue for review
+4. Manual search UI (manual_search.py)
+   - review_candidate_confirmations(…) queues and deduplicates options
+   - handle_manual_search(…) supports actions:
+     - a: Abort, s: Skip (store negative cache), e: Enter manual search
+     - Numeric selection caches positive result against the original query only
+   - _store_negative_cache(plugin, song, original_query)
+     - Writes None to cache when there is a valid title in the chosen query
+   - _cache_selection(plugin, song, track, original_query)
+     - Caches ONLY the original query key (not the manual entry), matching tests
 5. LLM search fallback (optional)
-   - If enabled via llm.use_llm_search, use ai/llm.py.
-   - Provider priority in toolkit: SearxNG > Exa > Brave > Tavily.
+   - If enabled via plexsync.use_llm_search, use ai/llm.py
+   - Provider priority in toolkit: SearxNG > Exa > Brave > Tavily
+   - Brave Search is rate-limited to ~1 request/second
 
 ## Smart Playlists
-- Types: daily_discovery, forgotten_gems, recent_hits, fresh_favorites, 70s80s_flashback, highly_rated, most_played.
-- Filters: history_days, exclusion_days, discovery_ratio, include/exclude genres, include/exclude years, min_rating.
-- Prefers beets metadata for genres/years when configured; falls back to Plex.
+- Built in PlexSync.plex_smartplaylists command supports:
+  - System playlists: daily_discovery, forgotten_gems, recent_hits, fresh_favorites, 70s80s_flashback, highly_rated, most_played
+  - Imported playlists from providers and M3U8 files
+  - Flags:
+    - --only: restrict to a comma-separated list of playlist IDs
+    - --import-failed/--log-file: retry manual imports using generated logs
 
 ## Testing
-- **Environment requirement**: All testing must be carried out in the `py311` conda environment, which has all dependencies installed.
-  ```bash
-  conda activate py311
-  ```
-- **Official unit tests**: Located in `tests/` directory (use for regression testing and CI).
+- Run unit tests:
   ```bash
   python3 -m unittest discover -s ./tests -p "test_*.py" -v
   ```
-- **Debug and validation scripts**: For temporary testing, validation, or debugging purposes, place scripts under `test_scripts/` directory. These are not part of the formal test suite and are excluded from CI.
 - Compile modules quickly:
   ```bash
   python3 - << 'PY'
 import os, py_compile
-for root, _, files in os.walk('harmony'):
+for root, _, files in os.walk('beetsplug'):
     for f in files:
         if f.endswith('.py'):
             py_compile.compile(os.path.join(root, f))
