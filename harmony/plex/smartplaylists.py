@@ -11,7 +11,9 @@ import json
 logger = logging.getLogger("harmony.plex.smartplaylists")
 
 
-# Scoring weights for different playlist types
+# Scoring weights for different playlist types.
+# Weights apply to z-scored track attributes; higher values increase selection likelihood,
+# negative values penalize the attribute, and totals are relative (not required to sum to 1).
 DEFAULT_SCORING_WEIGHTS = {
     "forgotten_gems": {
         "rated_weights": {

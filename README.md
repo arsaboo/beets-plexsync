@@ -303,17 +303,17 @@ playlists:
       type: daily_discovery
       num_tracks: 50
       enabled: true
-    
+
     - name: "Forgotten Gems"
       type: forgotten_gems
       num_tracks: 40
       enabled: true
-    
+
     - name: "Recent Hits"
       type: recent_hits
       num_tracks: 30
       enabled: true
-    
+
     - name: "Fresh Favorites"
       type: fresh_favorites
       num_tracks: 30
@@ -333,10 +333,6 @@ harmony smart-playlists --all
 # Or generate specific ones
 harmony smart-playlists "Daily Discovery" "Forgotten Gems"
 ```
-
-**⚡ Performance Benefit**: 
-- Individual commands: 5 playlists × 1.5 min = **7.5 minutes**
-- Batch command: 1 cache build + 5 generations = **~2 minutes** (5x faster!)
 
 ### LLM (AI Playlists & Search Enhancement)
 
