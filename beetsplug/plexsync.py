@@ -1,3 +1,13 @@
+
+# Monkey-patch for pydantic.typing.Annotated compatibility (for jiosaavn-python)
+try:
+    import pydantic.typing
+    if not hasattr(pydantic.typing, 'Annotated'):
+        from typing import Annotated
+        pydantic.typing.Annotated = Annotated
+except ImportError:
+    pass
+
 """Update and sync Plex music library.
 
 Plex users enter the Plex Token to enable updating.
@@ -198,7 +208,7 @@ class PlexSync(BeetsPlugin):
         config["llm"]["api_key"].redact = True
 
         config["plex"]["token"].redact = True
-        
+
         # Call the setup methods after defaults are added
         try:
             self.setup_llm()
@@ -208,7 +218,7 @@ class PlexSync(BeetsPlugin):
             self._log.error("Failed to set up LLM client: {}", e)
             self.llm_client = None
             self.search_llm = None
-        
+
         baseurl = (
             "http://"
             + config["plex"]["host"].get()
