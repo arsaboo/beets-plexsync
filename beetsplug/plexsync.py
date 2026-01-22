@@ -59,6 +59,11 @@ from beetsplug.core.matching import clean_string, plex_track_distance, get_fuzzy
 from beetsplug.core.vector_index import BeetsVectorIndex
 from beetsplug.providers.apple import import_apple_playlist
 from beetsplug.providers.jiosaavn import import_jiosaavn_playlist
+from beetsplug.plex.queues import (
+    LLMEnhancementQueue,
+    ManualPromptQueue,
+    PromptLogBuffer,
+)
 from beetsplug.utils.helpers import (
     parse_title,
     clean_album_name,
@@ -183,6 +188,13 @@ class PlexSync(BeetsPlugin):
                 "history_days": 15,  # Days to look back for base tracks
                 "discovery_ratio": 30,  # Percentage of discovery tracks (0-100)
                 "use_llm_search": False,  # Enable/disable LLM search cleaning
+                "llm": {
+                    "background_enhancement": True,
+                },
+                "search": {
+                    "manual_prompt_queue_enabled": True,
+                    "manual_prompt_queue_limit": 15,
+                },
             }
         )
         self.plexsync_token = config["plexsync"]["tokenfile"].get(
@@ -218,6 +230,15 @@ class PlexSync(BeetsPlugin):
             self._log.error("Failed to set up LLM client: {}", e)
             self.llm_client = None
             self.search_llm = None
+
+        self._llm_enhancement_queue = None
+        self._manual_prompt_queue = None
+        if get_plexsync_config(["llm", "background_enhancement"], bool, True):
+            if get_plexsync_config("use_llm_search", bool, False):
+                self._llm_enhancement_queue = LLMEnhancementQueue(self.cache, log=self._log)
+        if get_plexsync_config(["search", "manual_prompt_queue_enabled"], bool, True):
+            limit = get_plexsync_config(["search", "manual_prompt_queue_limit"], int, 15)
+            self._manual_prompt_queue = ManualPromptQueue(limit=limit, log=self._log)
 
         baseurl = (
             "http://"
@@ -1084,6 +1105,94 @@ class PlexSync(BeetsPlugin):
         """Manually search for a track in the Plex library."""
         return manual_search.manual_track_search(self, original_query)
 
+    def _wait_for_llm_enhancements(self, playlist_id: Optional[str]) -> None:
+        if not playlist_id:
+            return
+        queue = getattr(self, "_llm_enhancement_queue", None)
+        if queue is None:
+            return
+        queue.drain(playlist_id)
+
+    def _drain_manual_prompt_queue(self, playlist_id: Optional[str]):
+        if not playlist_id:
+            return []
+        prompt_queue = getattr(self, "_manual_prompt_queue", None)
+        if prompt_queue is None:
+            return []
+        items = prompt_queue.drain(playlist_id)
+        if not items:
+            return []
+
+        prompt_buffer = PromptLogBuffer("beets.plexsync")
+        resolved = []
+
+        with prompt_buffer.buffer():
+            for item in items:
+                song = item.song or {}
+                cache_key = item.cache_key
+                candidates = list(item.candidates or [])
+                action = None
+                selection = None
+
+                if candidates:
+                    selection = manual_search.review_candidate_confirmations(
+                        self,
+                        candidates,
+                        song,
+                        current_cache_key=cache_key,
+                    )
+                    action = selection.get("action") if selection else None
+
+                if not candidates or action in (None, "skip"):
+                    self._log.info(
+                        "\nTrack {} - {} - {} not found in Plex (tried strategies: {})",
+                        song.get("album", "Unknown"),
+                        song.get("artist", "Unknown"),
+                        song.get("title", "Unknown"),
+                        ", ".join(item.search_strategies_tried or []) or "none",
+                    )
+                    prompt = ui.colorize("text_highlight", "\nSearch manually?") + " (Y/n)"
+                    if ui.input_yn(prompt):
+                        result = self.manual_track_search(song)
+                        if result is not None:
+                            self._log.debug(
+                                "Manual search succeeded, caching for original query: {}",
+                                song,
+                            )
+                            self._cache_result(cache_key, result)
+                            resolved.append(result)
+                    else:
+                        manual_search._store_negative_cache(self, song, song)
+                    continue
+
+                if action == "selected":
+                    track = selection.get("track") if selection else None
+                    if track is not None:
+                        chosen_cache_key = selection.get("cache_key") or cache_key
+                        self._cache_result(chosen_cache_key, track)
+                        resolved.append(track)
+                    continue
+
+                if action == "manual":
+                    manual_query = selection.get("original_song") if selection else None
+                    result = self.manual_track_search(manual_query or song)
+                    if result is not None:
+                        self._cache_result(cache_key, result)
+                        resolved.append(result)
+                    continue
+
+                if action == "abort":
+                    self._log.info(
+                        "Manual prompt aborted; skipping remaining prompts for {}",
+                        playlist_id,
+                    )
+                    break
+
+                if action == "skip":
+                    manual_search._store_negative_cache(self, song, song)
+
+        return resolved
+
 
     def search_plex_song(
         self,
@@ -1091,6 +1200,7 @@ class PlexSync(BeetsPlugin):
         manual_search=None,
         llm_attempted=False,
         use_local_candidates=True,
+        playlist_id=None,
     ):
         return plex_search.search_plex_song(
             self,
@@ -1098,6 +1208,7 @@ class PlexSync(BeetsPlugin):
             manual_search,
             llm_attempted,
             use_local_candidates=use_local_candidates,
+            playlist_id=playlist_id,
         )
 
     def _process_matches(self, tracks, song, manual_search):
