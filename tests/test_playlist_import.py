@@ -186,7 +186,7 @@ class PluginStub:
         self.last_manual = None
         self.cache = CacheStub()
 
-    def search_plex_song(self, song, manual_search=False):
+    def search_plex_song(self, song, manual_search=False, playlist_id=None):
         self.last_manual = manual_search
         return f"match-{song['title']}"
 
@@ -242,7 +242,7 @@ class PlaylistImportTest(unittest.TestCase):
         logger = DummyLogger()
 
         class EmptyPlugin(PluginStub):
-            def search_plex_song(self, song, manual_search=False):
+            def search_plex_song(self, song, manual_search=False, playlist_id=None):
                 self.last_manual = manual_search
                 return None
 

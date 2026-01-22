@@ -9,6 +9,7 @@ from beetsplug.core.config import get_plexsync_config
 from beetsplug.ai.llm import search_track_info
 from beetsplug.core.matching import clean_text_for_matching, get_fuzzy_score
 from beetsplug.plex import manual_search as manual_search_ui
+from beetsplug.plex.queues import LLMEnhancementItem, ManualPromptItem
 
 
 _ARTIST_JOINER_RE = re.compile(r"\s*(?:,|;|&| and |\+|/)\s*")
@@ -87,7 +88,14 @@ def _log_cache_match_details(plugin, cache_key: str, track) -> None:
         plugin._log.debug("Caching result for key '{}' but failed to collect metadata: {}", cache_key, exc)
 
 
-def search_plex_song(plugin, song, manual_search=None, llm_attempted=False, use_local_candidates=True):
+def search_plex_song(
+    plugin,
+    song,
+    manual_search=None,
+    llm_attempted=False,
+    use_local_candidates=True,
+    playlist_id=None,
+):
     """Fetch a Plex track using multi-strategy search for the given song.
 
     Parameters mirror the original PlexSync.search_plex_song method but
@@ -577,32 +585,73 @@ def search_plex_song(plugin, song, manual_search=None, llm_attempted=False, use_
         if song.get('album'):
             search_query += f" from {song['album']}"
 
-        plugin._log.debug(
-            "Attempting LLM cleanup for: {} using strategies: {}",
-            search_query,
-            ", ".join(search_strategies_tried),
-        )
-        cleaned_metadata = search_track_info(search_query)
-        if cleaned_metadata:
-            cleaned_song = {
-                "title": cleaned_metadata.get("title", song["title"]),
-                "album": cleaned_metadata.get("album", song.get("album")),
-                "artist": cleaned_metadata.get("artist", song.get("artist")),
-            }
-            plugin._log.debug("Using LLM cleaned metadata: {}", cleaned_song)
-
-            result = search_plex_song(plugin, cleaned_song, False, llm_attempted=True)
-            if result is not None:
-                plugin._log.debug(
-                    "LLM-cleaned search succeeded, caching for original query: {}",
-                    song,
+        llm_queue = getattr(plugin, "_llm_enhancement_queue", None)
+        background_enabled = get_plexsync_config(["llm", "background_enhancement"], bool, True)
+        if playlist_id and llm_queue is not None and background_enabled:
+            plugin._log.debug(
+                "Enqueueing LLM cleanup for: {} using strategies: {}",
+                search_query,
+                ", ".join(search_strategies_tried),
+            )
+            llm_queue.enqueue(
+                LLMEnhancementItem(
+                    cache_key=cache_key,
+                    search_query=search_query,
+                    song=dict(song),
+                    playlist_id=str(playlist_id),
                 )
-                _log_cache_match_details(plugin, cache_key, result)
-                plugin._cache_result(cache_key, result)
-                return _finish(result)
-            cleaned_metadata_for_negative = cleaned_song
+            )
+        else:
+            plugin._log.debug(
+                "Attempting LLM cleanup for: {} using strategies: {}",
+                search_query,
+                ", ".join(search_strategies_tried),
+            )
+            cleaned_metadata = search_track_info(search_query)
+            if cleaned_metadata:
+                cleaned_song = {
+                    "title": cleaned_metadata.get("title", song["title"]),
+                    "album": cleaned_metadata.get("album", song.get("album")),
+                    "artist": cleaned_metadata.get("artist", song.get("artist")),
+                }
+                plugin._log.debug("Using LLM cleaned metadata: {}", cleaned_song)
+
+                result = search_plex_song(plugin, cleaned_song, False, llm_attempted=True)
+                if result is not None:
+                    plugin._log.debug(
+                        "LLM-cleaned search succeeded, caching for original query: {}",
+                        song,
+                    )
+                    _log_cache_match_details(plugin, cache_key, result)
+                    plugin._cache_result(cache_key, result)
+                    return _finish(result)
+                cleaned_metadata_for_negative = cleaned_song
 
     if manual_search:
+        manual_queue = getattr(plugin, "_manual_prompt_queue", None)
+        manual_queue_enabled = get_plexsync_config(
+            ["search", "manual_prompt_queue_enabled"],
+            bool,
+            True,
+        )
+        if playlist_id and manual_queue is not None and manual_queue_enabled:
+            candidate_queue = getattr(plugin, "_candidate_confirmations", None)
+            candidates = list(candidate_queue or [])
+            if hasattr(plugin, "_candidate_confirmations"):
+                plugin._candidate_confirmations = []
+            should_drain = manual_queue.enqueue(
+                ManualPromptItem(
+                    song=dict(song),
+                    cache_key=cache_key,
+                    candidates=candidates,
+                    search_strategies_tried=list(search_strategies_tried),
+                    playlist_id=str(playlist_id),
+                )
+            )
+            if should_drain and hasattr(plugin, "_drain_manual_prompt_queue"):
+                plugin._drain_manual_prompt_queue(str(playlist_id))
+            return _finish(None)
+
         manual_prompt_needed = True
         candidate_queue = getattr(plugin, "_candidate_confirmations", None)
         if candidate_queue:

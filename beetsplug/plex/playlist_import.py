@@ -75,11 +75,15 @@ def add_songs_to_plex(plugin, playlist, songs, manual_search=None):
     )
 
     song_list = []
+    unmatched = []
+    playlist_id = str(playlist) if playlist is not None else None
     try:
         for song in songs_to_process:
-            found = plugin.search_plex_song(song, manual_search)
+            found = plugin.search_plex_song(song, manual_search, playlist_id=playlist_id)
             if found is not None:
                 song_list.append(found)
+            else:
+                unmatched.append(song)
             if progress is not None:
                 progress.update()
     finally:
@@ -89,11 +93,32 @@ def add_songs_to_plex(plugin, playlist, songs, manual_search=None):
             except Exception:  # noqa: BLE001 - progress is optional feedback
                 plugin._log.debug("Unable to close progress counter for playlist {}", playlist)
 
-    if not song_list:
+    if playlist_id and hasattr(plugin, "_wait_for_llm_enhancements"):
+        plugin._wait_for_llm_enhancements(playlist_id)
+
+    if unmatched:
+        for song in unmatched:
+            found = plugin.search_plex_song(song, manual_search, playlist_id=playlist_id)
+            if found is not None:
+                song_list.append(found)
+
+    if playlist_id and hasattr(plugin, "_drain_manual_prompt_queue"):
+        song_list.extend(plugin._drain_manual_prompt_queue(playlist_id) or [])
+
+    unique_list = []
+    seen = set()
+    for track in song_list:
+        key = getattr(track, "ratingKey", None) or id(track)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_list.append(track)
+
+    if not unique_list:
         plugin._log.warning("No songs found to add to playlist {}", playlist)
         return
 
-    plugin._plex_add_playlist_item(song_list, playlist)
+    plugin._plex_add_playlist_item(unique_list, playlist)
 
 
 def import_search(plugin, playlist, search, limit=10):
@@ -269,6 +294,8 @@ def generate_imported_playlist(plugin, lib, playlist_config, plex_lookup=None):
     plugin._log.info("Found {} unique tracks across sources", len(unique_tracks))
     
     matched_songs = []
+    unmatched = []
+    playlist_id = str(playlist_name) if playlist_name is not None else None
     match_progress = plugin.create_progress_counter(
         total=len(unique_tracks),
         desc=f"{playlist_name[:18]} match",
@@ -277,9 +304,11 @@ def generate_imported_playlist(plugin, lib, playlist_config, plex_lookup=None):
     
     try:
         for song in unique_tracks:
-            found = plugin.search_plex_song(song, manual_search)
+            found = plugin.search_plex_song(song, manual_search, playlist_id=playlist_id)
             if found is not None:
                 matched_songs.append(found)
+            else:
+                unmatched.append(song)
             if match_progress is not None:
                 try:
                     match_progress.update()
@@ -292,6 +321,18 @@ def generate_imported_playlist(plugin, lib, playlist_config, plex_lookup=None):
             except Exception:
                 plugin._log.debug("Failed to close match progress for {}", playlist_name)
     
+    if playlist_id and hasattr(plugin, "_wait_for_llm_enhancements"):
+        plugin._wait_for_llm_enhancements(playlist_id)
+
+    if unmatched:
+        for song in unmatched:
+            found = plugin.search_plex_song(song, manual_search, playlist_id=playlist_id)
+            if found is not None:
+                matched_songs.append(found)
+
+    if playlist_id and hasattr(plugin, "_drain_manual_prompt_queue"):
+        matched_songs.extend(plugin._drain_manual_prompt_queue(playlist_id) or [])
+
     plugin._log.info("Matched {} tracks in Plex", len(matched_songs))
     
     if max_tracks:
@@ -305,7 +346,7 @@ def generate_imported_playlist(plugin, lib, playlist_config, plex_lookup=None):
     unique_matched = []
     seen_keys = set()
     for track in matched_songs:
-        key = getattr(track, 'ratingKey', None)
+        key = getattr(track, 'ratingKey', None) or id(track)
         if key and key not in seen_keys:
             seen_keys.add(key)
             unique_matched.append(track)
