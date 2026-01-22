@@ -1,6 +1,16 @@
 import logging
 import re
 import asyncio
+import sys
+import logging
+# Monkey-patch for pydantic.typing.Annotated compatibility
+try:
+    import pydantic.typing
+    if not hasattr(pydantic.typing, 'Annotated'):
+        from typing import Annotated
+        pydantic.typing.Annotated = Annotated
+except ImportError:
+    pass
 from jiosaavn import JioSaavn
 from beetsplug.utils.helpers import parse_title, clean_album_name
 
