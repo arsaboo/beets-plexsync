@@ -135,7 +135,7 @@ def search_plex_song(
             if rating_key == -1 or rating_key is None:
                 if cleaned_metadata and not llm_attempted:
                     plugin._log.debug("Using cached cleaned metadata: {}", cleaned_metadata)
-                    result = search_plex_song(plugin, cleaned_metadata, False, llm_attempted=True)
+                    result = search_plex_song(plugin, cleaned_metadata, False, llm_attempted=True, playlist_id=playlist_id)
                     if result is not None:
                         plugin._log.debug(
                             "Cached cleaned metadata search succeeded, updating original cache: {}",
@@ -236,6 +236,7 @@ def search_plex_song(
                     manual_search=False,
                     llm_attempted=True,
                     use_local_candidates=False,
+                    playlist_id=playlist_id,
                 )
             except RecursionError as exc:  # pragma: no cover - defensive
                 plugin._log.debug("Variant recursion failed for {}: {}", variant_song, exc)
@@ -617,7 +618,7 @@ def search_plex_song(
                 }
                 plugin._log.debug("Using LLM cleaned metadata: {}", cleaned_song)
 
-                result = search_plex_song(plugin, cleaned_song, False, llm_attempted=True)
+                result = search_plex_song(plugin, cleaned_song, False, llm_attempted=True, playlist_id=playlist_id)
                 if result is not None:
                     plugin._log.debug(
                         "LLM-cleaned search succeeded, caching for original query: {}",
