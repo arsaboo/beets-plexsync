@@ -562,6 +562,35 @@ def search_plex_song(
         )
 
         if manual_search and sorted_tracks:
+            manual_queue = getattr(plugin, "_manual_prompt_queue", None)
+            manual_queue_enabled = get_plexsync_config(
+                ["search", "manual_prompt_queue_enabled"],
+                bool,
+                True,
+            )
+            if playlist_id and manual_queue is not None and manual_queue_enabled:
+                # Convert sorted_tracks to candidate format and queue
+                candidates = [
+                    {
+                        "track": track,
+                        "similarity": score,
+                        "cache_key": cache_key,
+                        "source": ", ".join(search_strategies_tried),
+                        "song": dict(song),
+                    }
+                    for track, score in sorted_tracks
+                ]
+                manual_queue.enqueue(
+                    ManualPromptItem(
+                        song=dict(song),
+                        cache_key=cache_key,
+                        candidates=candidates,
+                        search_strategies_tried=list(search_strategies_tried),
+                        playlist_id=str(playlist_id),
+                    )
+                )
+                return _finish(None)
+            # Fallback: show prompt immediately
             result = plugin._handle_manual_search(sorted_tracks, song, original_query=song)
             if result is not None:
                 _log_cache_match_details(plugin, cache_key, result)
