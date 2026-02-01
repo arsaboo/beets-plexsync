@@ -1058,22 +1058,50 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
     # Convert beets items to Plex tracks for special playlists
     if special_handling:
         plex_tracks = []
+        # Collect items with rating keys for batch fetch
+        items_with_keys = []
+        items_without_keys = []
         for item in selected_items:
             if hasattr(item, "plex_ratingkey") and item.plex_ratingkey:
-                try:
-                    plex_track = ps.plex.fetchItem(item.plex_ratingkey)
-                    plex_tracks.append(plex_track)
-                except Exception as e:
-                    ps._log.debug("Could not fetch Plex track for item: {} - Error: {}", item, e)
-                    # Fallback: try to find by metadata
+                items_with_keys.append(item)
+            else:
+                items_without_keys.append(item)
+
+        # Batch fetch items with rating keys
+        if items_with_keys:
+            rating_keys = [str(item.plex_ratingkey) for item in items_with_keys]
+            try:
+                ekey = f'/library/metadata/{",".join(rating_keys)}'
+                fetched_tracks = ps.plex.fetchItems(ekey)
+                # Create lookup by ratingKey to preserve order
+                fetched_by_key = {str(t.ratingKey): t for t in fetched_tracks}
+                for item in items_with_keys:
+                    track = fetched_by_key.get(str(item.plex_ratingkey))
+                    if track:
+                        plex_tracks.append(track)
+                    else:
+                        # Track not found in batch result, add to fallback list
+                        items_without_keys.append(item)
+            except Exception as e:
+                ps._log.debug("Batch fetch failed, falling back to individual fetches. Error: {}", e)
+                # Fallback to individual fetches
+                for item in items_with_keys:
                     try:
-                        tracks = ps.music.searchTracks(title=getattr(item, 'title', ''),
-                                                      artist=getattr(item, 'artist', ''),
-                                                      album=getattr(item, 'album', ''))
-                        if tracks:
-                            plex_tracks.append(tracks[0])
+                        plex_track = ps.plex.fetchItem(item.plex_ratingkey)
+                        plex_tracks.append(plex_track)
                     except Exception:
-                        continue
+                        items_without_keys.append(item)
+
+        # Fallback: try to find items without keys by metadata
+        for item in items_without_keys:
+            try:
+                tracks = ps.music.searchTracks(title=getattr(item, 'title', ''),
+                                              artist=getattr(item, 'artist', ''),
+                                              album=getattr(item, 'album', ''))
+                if tracks:
+                    plex_tracks.append(tracks[0])
+            except Exception:
+                continue
 
         if not plex_tracks:
             ps._log.warning("Could not find any Plex tracks for {} playlist", playlist_name)

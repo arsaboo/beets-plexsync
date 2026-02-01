@@ -640,7 +640,7 @@ def search_plex_song(
             candidates = list(candidate_queue or [])
             if hasattr(plugin, "_candidate_confirmations"):
                 plugin._candidate_confirmations = []
-            should_drain = manual_queue.enqueue(
+            manual_queue.enqueue(
                 ManualPromptItem(
                     song=dict(song),
                     cache_key=cache_key,
@@ -649,8 +649,6 @@ def search_plex_song(
                     playlist_id=str(playlist_id),
                 )
             )
-            if should_drain and hasattr(plugin, "_drain_manual_prompt_queue"):
-                plugin._drain_manual_prompt_queue(str(playlist_id))
             return _finish(None)
 
         manual_prompt_needed = True

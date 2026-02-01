@@ -27,18 +27,41 @@ def _resolve_plex_items(plex, items: Iterable, logger):
     """Normalize incoming items to Plex items via rating key.
 
     Supports objects with either `plex_ratingkey` or `ratingKey` attributes.
+    Uses batch fetching via fetchItems for efficiency.
     """
-    plex_set = set()
+    # Collect rating keys first
+    rating_keys = []
+    items_without_keys = []
     for item in items:
-        try:
-            rating_key = getattr(item, 'plex_ratingkey', None) or getattr(item, 'ratingKey', None)
-            if rating_key:
-                plex_set.add(plex.fetchItem(rating_key))
-            else:
-                logger.warning("{} does not have plex_ratingkey or ratingKey attribute. Item details: {}", item, vars(item))
-        except (exceptions.NotFound, AttributeError) as e:
-            logger.warning("{} not found in Plex library. Error: {}", item, e)
-            continue
+        rating_key = getattr(item, 'plex_ratingkey', None) or getattr(item, 'ratingKey', None)
+        if rating_key:
+            rating_keys.append(str(rating_key))
+        else:
+            items_without_keys.append(item)
+
+    # Warn about items without rating keys
+    for item in items_without_keys:
+        logger.warning("{} does not have plex_ratingkey or ratingKey attribute. Item details: {}", item, vars(item))
+
+    if not rating_keys:
+        return set()
+
+    # Batch fetch all items at once
+    plex_set = set()
+    try:
+        ekey = f'/library/metadata/{",".join(rating_keys)}'
+        fetched_items = plex.fetchItems(ekey)
+        plex_set.update(fetched_items)
+    except (exceptions.NotFound, AttributeError) as e:
+        logger.warning("Batch fetch failed, falling back to individual fetches. Error: {}", e)
+        # Fallback to individual fetches
+        for rating_key in rating_keys:
+            try:
+                plex_set.add(plex.fetchItem(int(rating_key)))
+            except (exceptions.NotFound, AttributeError) as e:
+                logger.warning("Item with ratingKey {} not found in Plex library. Error: {}", rating_key, e)
+                continue
+
     return plex_set
 
 
@@ -112,15 +135,33 @@ def plex_remove_playlist_item(plex, items: Iterable, playlist_name: str, logger)
         logger.error("{} playlist not found", playlist_name)
         return
 
-    plex_set = set()
     from requests.exceptions import ConnectionError, ContentDecodingError
 
+    # Collect rating keys for batch fetch
+    rating_keys = []
     for item in items:
-        try:
-            plex_set.add(plex.fetchItem(item.plex_ratingkey))
-        except (exceptions.NotFound, AttributeError, ContentDecodingError, ConnectionError) as e:
-            logger.warning("{} not found in Plex library. Error: {}", item, e)
-            continue
+        rating_key = getattr(item, 'plex_ratingkey', None)
+        if rating_key:
+            rating_keys.append(str(rating_key))
+
+    if not rating_keys:
+        return
+
+    # Batch fetch all items at once
+    plex_set = set()
+    try:
+        ekey = f'/library/metadata/{",".join(rating_keys)}'
+        fetched_items = plex.fetchItems(ekey)
+        plex_set.update(fetched_items)
+    except (exceptions.NotFound, AttributeError, ContentDecodingError, ConnectionError) as e:
+        logger.warning("Batch fetch failed, falling back to individual fetches. Error: {}", e)
+        # Fallback to individual fetches
+        for item in items:
+            try:
+                plex_set.add(plex.fetchItem(item.plex_ratingkey))
+            except (exceptions.NotFound, AttributeError, ContentDecodingError, ConnectionError) as e:
+                logger.warning("{} not found in Plex library. Error: {}", item, e)
+                continue
 
     to_remove = plex_set.intersection(playlist_set)
     logger.info("Removing {} tracks from {} playlist", len(to_remove), playlist_name)
