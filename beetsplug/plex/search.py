@@ -636,6 +636,13 @@ def search_plex_song(
             bool,
             True,
         )
+        # DEBUG: Log condition values to diagnose queue bypass
+        plugin._log.debug(
+            "Manual prompt queue check: playlist_id={}, manual_queue={}, manual_queue_enabled={}",
+            playlist_id,
+            "initialized" if manual_queue is not None else "None",
+            manual_queue_enabled,
+        )
         if playlist_id and manual_queue is not None and manual_queue_enabled:
             candidate_queue = getattr(plugin, "_candidate_confirmations", None)
             candidates = list(candidate_queue or [])
@@ -695,7 +702,15 @@ def search_plex_song(
             elif action == "abort":
                 return _finish(None)
             elif action == "skip":
-                manual_prompt_needed = False
+                # User chose to skip - cache negative result and return immediately
+                plugin._log.debug(
+                    "User skipped candidate review for: {}", song.get("title", "")
+                )
+                if cleaned_metadata_for_negative is not None:
+                    plugin._cache_result(cache_key, None, cleaned_metadata_for_negative)
+                else:
+                    plugin._cache_result(cache_key, None)
+                return _finish(None)
             else:
                 manual_prompt_needed = True
         else:
