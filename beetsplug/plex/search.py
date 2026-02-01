@@ -6,6 +6,7 @@ import re
 from beets import ui
 
 from beetsplug.core.config import get_plexsync_config
+from beetsplug.utils.prompt_logging import prompt_guard
 from beetsplug.ai.llm import search_track_info
 from beetsplug.core.matching import clean_text_for_matching, get_fuzzy_score
 from beetsplug.plex import manual_search as manual_search_ui
@@ -711,15 +712,16 @@ def search_plex_song(
                 ", ".join(search_strategies_tried) if search_strategies_tried else "none",
             )
             prompt = ui.colorize('text_highlight', "\nSearch manually?") + " (Y/n)"
-            if ui.input_yn(prompt):
-                result = plugin.manual_track_search(song)
-                if result is not None:
-                    plugin._log.debug(
-                        "Manual search succeeded, caching for original query: {}", song
-                    )
-                    _log_cache_match_details(plugin, cache_key, result)
-                    plugin._cache_result(cache_key, result)
-                    return _finish(result)
+            with prompt_guard():
+                if ui.input_yn(prompt):
+                    result = plugin.manual_track_search(song)
+                    if result is not None:
+                        plugin._log.debug(
+                            "Manual search succeeded, caching for original query: {}", song
+                        )
+                        _log_cache_match_details(plugin, cache_key, result)
+                        plugin._cache_result(cache_key, result)
+                        return _finish(result)
 
     plugin._log.debug(
         "All search strategies failed for: {} (tried: {})",

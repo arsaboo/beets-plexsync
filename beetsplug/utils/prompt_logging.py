@@ -3,57 +3,65 @@
 from __future__ import annotations
 
 import logging
-import sys
 import threading
 from contextlib import contextmanager
+from typing import List, Set
 
 _lock = threading.Lock()
 _prompt_active = False
-_buffer: list[logging.LogRecord] = []
-_handler: "PromptAwareHandler | None" = None
+_buffer: List[logging.LogRecord] = []
+_installed_filters: Set[int] = set()  # Track handler IDs with filter installed
 
 
-class PromptAwareHandler(logging.Handler):
-    """Logging handler that buffers records during prompts."""
+class _PromptAwareFilter(logging.Filter):
+    """Filter that buffers log records during prompts."""
 
-    def __init__(self, stream=None) -> None:
-        super().__init__()
-        self._stream_handler = logging.StreamHandler(stream or sys.stderr)
-
-    def setFormatter(self, fmt) -> None:
-        self._stream_handler.setFormatter(fmt)
-
-    def emit(self, record: logging.LogRecord) -> None:
+    def filter(self, record: logging.LogRecord) -> bool:
         with _lock:
             if _prompt_active:
                 _buffer.append(record)
-                return
-        self._stream_handler.handle(record)
-
-    def flush(self) -> None:
-        self._stream_handler.flush()
+                return False  # Don't emit - we've buffered it
+        return True  # Emit normally
 
 
-def configure_prompt_logging(level: int = logging.WARNING, stream=None) -> PromptAwareHandler:
-    """Configure root logging with a prompt-aware handler."""
-    global _handler
+# Single global filter instance
+_filter = _PromptAwareFilter()
 
-    handler = PromptAwareHandler(stream or sys.stderr)
-    formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-    handler.setFormatter(formatter)
 
-    root = logging.getLogger()
-    root.addHandler(handler)
-    root.setLevel(level)
+def install_prompt_filter(logger_names: List[str] | None = None) -> None:
+    """Install the prompt-aware filter on handlers of specified loggers.
 
-    _handler = handler
-    return handler
+    This is idempotent - safe to call multiple times.
+
+    Args:
+        logger_names: Logger names to install filter on.
+                      Defaults to ['beets', 'beets.plexsync', ''] if None.
+                      '' means the root logger.
+    """
+    if logger_names is None:
+        logger_names = ['beets', 'beets.plexsync', '']
+
+    for name in logger_names:
+        logger = logging.getLogger(name)
+        for handler in logger.handlers:
+            handler_id = id(handler)
+            if handler_id not in _installed_filters:
+                handler.addFilter(_filter)
+                _installed_filters.add(handler_id)
 
 
 @contextmanager
 def prompt_guard():
-    """Buffer logs while awaiting user input, then flush on exit."""
+    """Buffer logs while awaiting user input, then flush on exit.
+
+    Usage:
+        with prompt_guard():
+            user_input = input("Enter choice: ")
+    """
     global _prompt_active
+
+    # Ensure filter is installed on first use (idempotent)
+    install_prompt_filter()
 
     with _lock:
         _prompt_active = True
@@ -65,9 +73,8 @@ def prompt_guard():
             buffered = list(_buffer)
             _buffer.clear()
 
-        if _handler is None:
-            for record in buffered:
-                logging.getLogger(record.name).handle(record)
-        else:
-            for record in buffered:
-                _handler._stream_handler.handle(record)
+        # Replay buffered records - they'll pass through the filter now
+        # since _prompt_active is False
+        for record in buffered:
+            logger = logging.getLogger(record.name)
+            logger.handle(record)
