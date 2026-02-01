@@ -131,16 +131,16 @@ class ManualPromptQueue:
         self._seen: Dict[str, set[str]] = {}
         self._log = log or logging.getLogger("beets.plexsync")
 
-    def enqueue(self, item: ManualPromptItem) -> bool:
+    def enqueue(self, item: ManualPromptItem) -> None:
+        """Queue a manual prompt item silently. Drain happens at end of processing."""
         if not item.playlist_id:
-            return False
+            return
         seen_keys = self._seen.setdefault(item.playlist_id, set())
         if item.cache_key in seen_keys:
-            return False
+            return
         queue_items = self._queues.setdefault(item.playlist_id, [])
         queue_items.append(item)
         seen_keys.add(item.cache_key)
-        return len(queue_items) >= self._limit
 
     def drain(self, playlist_id: str) -> List[ManualPromptItem]:
         if not playlist_id:
