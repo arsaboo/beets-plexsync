@@ -62,8 +62,8 @@ from beetsplug.providers.jiosaavn import import_jiosaavn_playlist
 from beetsplug.plex.queues import (
     LLMEnhancementQueue,
     ManualPromptQueue,
-    PromptLogBuffer,
 )
+from beetsplug.utils.prompt_logging import prompt_guard
 from beetsplug.utils.helpers import (
     parse_title,
     clean_album_name,
@@ -1111,7 +1111,7 @@ class PlexSync(BeetsPlugin):
         queue = getattr(self, "_llm_enhancement_queue", None)
         if queue is None:
             return
-        queue.drain(playlist_id)
+        queue.wait_for_playlist(playlist_id)
 
     def _drain_manual_prompt_queue(self, playlist_id: Optional[str]):
         if not playlist_id:
@@ -1123,73 +1123,73 @@ class PlexSync(BeetsPlugin):
         if not items:
             return []
 
-        prompt_buffer = PromptLogBuffer("beets.plexsync")
         resolved = []
 
-        with prompt_buffer.buffer():
-            for item in items:
-                song = item.song or {}
-                cache_key = item.cache_key
-                candidates = list(item.candidates or [])
-                action = None
-                selection = None
+        for item in items:
+            song = item.song or {}
+            cache_key = item.cache_key
+            candidates = list(item.candidates or [])
+            action = None
+            selection = None
 
-                if candidates:
-                    selection = manual_search.review_candidate_confirmations(
-                        self,
-                        candidates,
-                        song,
-                        current_cache_key=cache_key,
-                    )
-                    action = selection.get("action") if selection else None
+            if candidates:
+                selection = manual_search.review_candidate_confirmations(
+                    self,
+                    candidates,
+                    song,
+                    current_cache_key=cache_key,
+                )
+                action = selection.get("action") if selection else None
 
-                if not candidates or action in (None, "skip"):
-                    self._log.info(
-                        "\nTrack {} - {} - {} not found in Plex (tried strategies: {})",
-                        song.get("album", "Unknown"),
-                        song.get("artist", "Unknown"),
-                        song.get("title", "Unknown"),
-                        ", ".join(item.search_strategies_tried or []) or "none",
-                    )
-                    prompt = ui.colorize("text_highlight", "\nSearch manually?") + " (Y/n)"
-                    if ui.input_yn(prompt):
-                        result = self.manual_track_search(song)
-                        if result is not None:
-                            self._log.debug(
-                                "Manual search succeeded, caching for original query: {}",
-                                song,
-                            )
-                            self._cache_result(cache_key, result)
-                            resolved.append(result)
-                    else:
-                        manual_search._store_negative_cache(self, song, song)
-                    continue
-
-                if action == "selected":
-                    track = selection.get("track") if selection else None
-                    if track is not None:
-                        chosen_cache_key = selection.get("cache_key") or cache_key
-                        self._cache_result(chosen_cache_key, track)
-                        resolved.append(track)
-                    continue
-
-                if action == "manual":
-                    manual_query = selection.get("original_song") if selection else None
-                    result = self.manual_track_search(manual_query or song)
+            if not candidates or action in (None, "skip"):
+                self._log.info(
+                    "\nTrack {} - {} - {} not found in Plex (tried strategies: {})",
+                    song.get("album", "Unknown"),
+                    song.get("artist", "Unknown"),
+                    song.get("title", "Unknown"),
+                    ", ".join(item.search_strategies_tried or []) or "none",
+                )
+                prompt = ui.colorize("text_highlight", "\nSearch manually?") + " (Y/n)"
+                with prompt_guard():
+                    user_wants_search = ui.input_yn(prompt)
+                if user_wants_search:
+                    result = self.manual_track_search(song)
                     if result is not None:
+                        self._log.debug(
+                            "Manual search succeeded, caching for original query: {}",
+                            song,
+                        )
                         self._cache_result(cache_key, result)
                         resolved.append(result)
-                    continue
-
-                if action == "abort":
-                    self._log.info(
-                        "Manual prompt aborted; skipping remaining prompts for {}",
-                        playlist_id,
-                    )
-                    break
-
-                if action == "skip":
+                else:
                     manual_search._store_negative_cache(self, song, song)
+                continue
+
+            if action == "selected":
+                track = selection.get("track") if selection else None
+                if track is not None:
+                    chosen_cache_key = selection.get("cache_key") or cache_key
+                    self._cache_result(chosen_cache_key, track)
+                    resolved.append(track)
+                continue
+
+            if action == "manual":
+                manual_query = selection.get("original_song") if selection else None
+                result = self.manual_track_search(manual_query or song)
+                if result is not None:
+                    self._cache_result(cache_key, result)
+                    resolved.append(result)
+                continue
+
+            if action == "abort":
+                self._log.info(
+                    "Manual prompt aborted; skipping remaining prompts for {}",
+                    playlist_id,
+                )
+                break
+
+            if action == "skip":
+                manual_search._store_negative_cache(self, song, song)
 
         return resolved
 

@@ -5,10 +5,8 @@ from __future__ import annotations
 import logging
 import queue
 import threading
-import time
-from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 from beetsplug.ai.llm import search_track_info
 
@@ -29,7 +27,9 @@ class LLMEnhancementQueue:
         self._log = log or logging.getLogger("beets.plexsync")
         self._queue: queue.Queue[LLMEnhancementItem] = queue.Queue()
         self._pending: Dict[str, int] = {}
+        self._in_flight: Set[str] = set()
         self._lock = threading.Lock()
+        self._condition = threading.Condition(self._lock)
         self._shutdown = threading.Event()
         self._workers: List[threading.Thread] = []
 
@@ -42,31 +42,37 @@ class LLMEnhancementQueue:
             worker.start()
             self._workers.append(worker)
 
-    def enqueue(self, item: LLMEnhancementItem) -> None:
+    def enqueue(self, item: LLMEnhancementItem) -> bool:
+        """Enqueue an item for LLM enhancement.
+
+        Returns True if the item was actually queued, False if it was
+        already in-flight or invalid.
+        """
         if not item.cache_key or not item.search_query:
-            return
+            return False
         playlist_id = item.playlist_id or "__global__"
         with self._lock:
+            if item.cache_key in self._in_flight:
+                return False
+            self._in_flight.add(item.cache_key)
             self._pending[playlist_id] = self._pending.get(playlist_id, 0) + 1
         self._queue.put(item)
+        return True
 
-    def drain(self, playlist_id: str, timeout: float = 60.0) -> None:
+    def wait_for_playlist(self, playlist_id: str, timeout: float = 60.0) -> None:
+        """Wait for all pending items for a playlist to complete."""
         if not playlist_id:
             return
-        deadline = time.time() + timeout
-        while True:
-            with self._lock:
-                pending = self._pending.get(playlist_id, 0)
-            if pending <= 0:
-                return
-            if time.time() >= deadline:
+        with self._condition:
+            def _done():
+                return self._pending.get(playlist_id, 0) <= 0
+
+            if not self._condition.wait_for(_done, timeout=timeout):
                 self._log.debug(
                     "Timed out waiting for LLM enhancements to finish for {} (pending={})",
                     playlist_id,
-                    pending,
+                    self._pending.get(playlist_id, 0),
                 )
-                return
-            time.sleep(0.1)
 
     def shutdown(self, timeout: float = 2.0) -> None:
         self._shutdown.set()
@@ -96,12 +102,14 @@ class LLMEnhancementQueue:
                 )
             finally:
                 playlist_id = item.playlist_id or "__global__"
-                with self._lock:
+                with self._condition:
+                    self._in_flight.discard(item.cache_key)
                     remaining = self._pending.get(playlist_id, 0) - 1
                     if remaining <= 0:
                         self._pending.pop(playlist_id, None)
                     else:
                         self._pending[playlist_id] = remaining
+                    self._condition.notify_all()
                 self._queue.task_done()
 
 
@@ -142,35 +150,3 @@ class ManualPromptQueue:
         return items
 
 
-class PromptLogBuffer:
-    """Capture logs during prompts to avoid interleaving output."""
-
-    def __init__(self, logger_name: str = "beets.plexsync") -> None:
-        self._logger = logging.getLogger(logger_name)
-        self._handler = None
-        self._records: List[logging.LogRecord] = []
-
-    def _emit(self, record: logging.LogRecord) -> None:
-        self._records.append(record)
-
-    @contextmanager
-    def buffer(self):
-        handler = logging.Handler()
-        handler.emit = self._emit  # type: ignore[assignment]
-        handler.setLevel(logging.DEBUG)
-        self._handler = handler
-        self._logger.addHandler(handler)
-        try:
-            yield
-        finally:
-            self._logger.removeHandler(handler)
-            self._handler = None
-            self.flush()
-
-    def flush(self) -> None:
-        for record in self._records:
-            try:
-                self._logger.handle(record)
-            except Exception:
-                continue
-        self._records = []

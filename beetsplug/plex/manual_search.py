@@ -8,6 +8,7 @@ from beets import ui
 from beets.ui import input_, print_
 
 from beetsplug.utils.helpers import highlight_matches
+from beetsplug.utils.prompt_logging import prompt_guard
 from beetsplug.core.matching import get_fuzzy_score
 
 
@@ -136,11 +137,12 @@ def review_candidate_confirmations(
     print_(ui.colorize('text_highlight_minor', '  #: Select match by number'))
     print_(_render_actions())
 
-    selection = ui.input_options(
-        ("aBort", "Skip", "Enter manual search"),
-        numrange=(1, len(aggregated)),
-        default=1,
-    )
+    with prompt_guard():
+        selection = ui.input_options(
+            ("aBort", "Skip", "Enter manual search"),
+            numrange=(1, len(aggregated)),
+            default=1,
+        )
 
     if isinstance(selection, int) and selection > 0:
         entry = aggregated[selection - 1]
@@ -222,7 +224,8 @@ def handle_manual_search(plugin, sorted_tracks, song, original_query=None):
     print_(ui.colorize('text_highlight_minor', '  #: Select match by number'))
     print_(_render_actions())
 
-    sel = ui.input_options(("aBort", "Skip", "Enter"), numrange=(1, len(sorted_tracks)), default=1)
+    with prompt_guard():
+        sel = ui.input_options(("aBort", "Skip", "Enter"), numrange=(1, len(sorted_tracks)), default=1)
 
     if sel in ("b", "B"):
         return None
@@ -243,9 +246,10 @@ def manual_track_search(plugin, original_query=None):
     print_(ui.colorize('text_highlight', '\nManual Search'))
     print_('Enter search criteria (empty to skip):')
 
-    title = input_(ui.colorize('text_highlight_minor', 'Title: ')).strip()
-    album = input_(ui.colorize('text_highlight_minor', 'Album: ')).strip()
-    artist = input_(ui.colorize('text_highlight_minor', 'Artist: ')).strip()
+    with prompt_guard():
+        title = input_(ui.colorize('text_highlight_minor', 'Title: ')).strip()
+        album = input_(ui.colorize('text_highlight_minor', 'Album: ')).strip()
+        artist = input_(ui.colorize('text_highlight_minor', 'Artist: ')).strip()
 
     plugin._log.debug("Searching with title='{}', album='{}', artist='{}'", title, album, artist)
 
@@ -294,7 +298,8 @@ def manual_track_search(plugin, original_query=None):
     print_(ui.colorize('text_highlight_minor', '  #: Select match by number'))
     print_(_render_actions())
 
-    sel = ui.input_options(("aBort", "Skip", "Enter"), numrange=(1, len(sorted_tracks)), default=1)
+    with prompt_guard():
+        sel = ui.input_options(("aBort", "Skip", "Enter"), numrange=(1, len(sorted_tracks)), default=1)
 
     if sel in ("b", "B"):
         return None
