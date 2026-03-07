@@ -30,29 +30,6 @@ class SpotifyTransferTest(unittest.TestCase):
                 self.parentTitle = parent_title
                 self.title = title
 
-        class Plugin:
-            def __init__(self):
-                self._log = logger
-                self.plex = types.SimpleNamespace(playlist=lambda name: Playlist([
-                    PlexItem(1, 'Album', 'Song'),
-                ]))
-                self.called_auth = False
-                self.sp = types.SimpleNamespace(track=lambda track_id: {
-                    'is_playable': True,
-                    'available_markets': ['US'],
-                })
-
-            def authenticate_spotify(self):
-                self.called_auth = True
-
-            def add_tracks_to_spotify_playlist(self, playlist, tracks):
-                self.sent = (playlist, tracks)
-
-            def _search_spotify_track(self, beets_item):  # pragma: no cover
-                return 'alt-track'
-
-        plugin = Plugin()
-
         class LibraryItem:
             def __init__(self, rating_key, spotify_id, artist, album, title):
                 self.plex_ratingkey = rating_key
@@ -61,10 +38,41 @@ class SpotifyTransferTest(unittest.TestCase):
                 self.album = album
                 self.title = title
 
+        beets_item = LibraryItem(1, 'spotify:track:123', 'Artist', 'Album', 'Song')
+
+        class Plugin:
+            def __init__(self):
+                self._log = logger
+                self.plex = types.SimpleNamespace(playlist=lambda name: Playlist([
+                    PlexItem(1, 'Album', 'Song'),
+                ]))
+                self.called_auth = False
+                self.sp = types.SimpleNamespace(
+                    tracks=lambda ids: {'tracks': [
+                        {'id': tid, 'is_playable': True, 'available_markets': ['US']}
+                        for tid in ids
+                    ]},
+                )
+
+            def authenticate_spotify(self):
+                self.called_auth = True
+
+            def _build_plex_lookup_and_vector_index(self, lib):
+                return {1: beets_item}
+
+            def add_tracks_to_spotify_playlist(self, playlist, tracks):
+                self.sent = (playlist, tracks)
+
+            def _search_spotify_track(self, beets_item):  # pragma: no cover
+                return 'alt-track'
+
+            def create_progress_counter(self, *a, **kw):
+                return None
+
+        plugin = Plugin()
+
         lib = types.SimpleNamespace(
-            items=lambda *args, **kwargs: [
-                LibraryItem(1, 'spotify:track:123', 'Artist', 'Album', 'Song')
-            ]
+            items=lambda *args, **kwargs: [beets_item]
         )
         self.transfer.plex_to_spotify(plugin, lib, 'Mix')
 
@@ -74,26 +82,6 @@ class SpotifyTransferTest(unittest.TestCase):
     def test_falls_back_to_search_when_unplayable(self):
         logger = DummyLogger()
 
-        class Plugin:
-            def __init__(self):
-                self._log = logger
-                self.plex = types.SimpleNamespace(playlist=lambda name: types.SimpleNamespace(items=lambda: [types.SimpleNamespace(ratingKey=1, parentTitle='Alb', title='Song')]))
-                self.sp = types.SimpleNamespace(track=lambda _id: {
-                    'is_playable': False,
-                    'available_markets': [],
-                })
-
-            def authenticate_spotify(self):
-                pass
-
-            def _search_spotify_track(self, beets_item):
-                return 'fallback'
-
-            def add_tracks_to_spotify_playlist(self, playlist, tracks):
-                self.sent = tracks
-
-        plugin = Plugin()
-
         class LibraryItem:
             def __init__(self, rating_key, spotify_id, artist, album, title):
                 self.plex_ratingkey = rating_key
@@ -102,10 +90,38 @@ class SpotifyTransferTest(unittest.TestCase):
                 self.album = album
                 self.title = title
 
+        beets_item = LibraryItem(1, 'orig', 'Art', 'Alb', 'Song')
+
+        class Plugin:
+            def __init__(self):
+                self._log = logger
+                self.plex = types.SimpleNamespace(playlist=lambda name: types.SimpleNamespace(items=lambda: [types.SimpleNamespace(ratingKey=1, parentTitle='Alb', title='Song')]))
+                self.sp = types.SimpleNamespace(
+                    tracks=lambda ids: {'tracks': [
+                        {'id': tid, 'is_playable': False, 'available_markets': []}
+                        for tid in ids
+                    ]},
+                )
+
+            def authenticate_spotify(self):
+                pass
+
+            def _build_plex_lookup_and_vector_index(self, lib):
+                return {1: beets_item}
+
+            def _search_spotify_track(self, beets_item):
+                return 'fallback'
+
+            def add_tracks_to_spotify_playlist(self, playlist, tracks):
+                self.sent = tracks
+
+            def create_progress_counter(self, *a, **kw):
+                return None
+
+        plugin = Plugin()
+
         lib = types.SimpleNamespace(
-            items=lambda *args, **kwargs: [
-                LibraryItem(1, 'orig', 'Art', 'Alb', 'Song')
-            ]
+            items=lambda *args, **kwargs: [beets_item]
         )
         self.transfer.plex_to_spotify(plugin, lib, 'Mix')
 
