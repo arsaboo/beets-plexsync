@@ -285,8 +285,18 @@ def _spotify_search_cache_key(beets_item) -> str:
     return f"spotify_search|{title}|{artist}|{album}"
 
 
-# In-memory cache for Spotify search results (persists for the plugin lifetime)
+_SPOTIFY_SEARCH_CACHE_MAX = 5000
 _spotify_search_result_cache: Dict[str, Optional[str]] = {}
+
+
+def _cache_spotify_result(key: str, value: Optional[str]) -> None:
+    """Store a result in the search cache, evicting oldest entries if full."""
+    if len(_spotify_search_result_cache) >= _SPOTIFY_SEARCH_CACHE_MAX:
+        # Evict ~20% of entries (dict preserves insertion order in 3.7+)
+        to_remove = list(_spotify_search_result_cache.keys())[:_SPOTIFY_SEARCH_CACHE_MAX // 5]
+        for k in to_remove:
+            del _spotify_search_result_cache[k]
+    _spotify_search_result_cache[key] = value
 
 
 def search_spotify_track(plugin, beets_item) -> Optional[str]:
@@ -334,13 +344,13 @@ def search_spotify_track(plugin, beets_item) -> Optional[str]:
                         if title_match and artist_match:
                             plugin._log.debug("Found playable match: {} - {} (strategy {})",
                                               track['name'], track['artists'][0]['name'], i)
-                            _spotify_search_result_cache[cache_key] = track['id']
+                            _cache_spotify_result(cache_key, track['id'])
                             return track['id']
                         elif i >= 5:
                             if title_match or artist_match:
                                 plugin._log.debug("Found loose match: {} - {} (strategy {})",
                                                   track['name'], track['artists'][0]['name'], i)
-                                _spotify_search_result_cache[cache_key] = track['id']
+                                _cache_spotify_result(cache_key, track['id'])
                                 return track['id']
 
                 plugin._log.debug("Found {} results but no good matches for strategy {}",
@@ -352,7 +362,7 @@ def search_spotify_track(plugin, beets_item) -> Optional[str]:
             plugin._log.debug("Error in search strategy {}: {}", i, e)
             continue
 
-    _spotify_search_result_cache[cache_key] = None
+    _cache_spotify_result(cache_key, None)
     return None
 
 

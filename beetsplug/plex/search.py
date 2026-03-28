@@ -665,7 +665,6 @@ def search_plex_song(
             bool,
             True,
         )
-        # DEBUG: Log condition values to diagnose queue bypass
         plugin._log.debug(
             "Manual prompt queue check: playlist_id={}, manual_queue={}, manual_queue_enabled={}",
             playlist_id,

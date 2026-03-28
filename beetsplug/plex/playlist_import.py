@@ -62,26 +62,35 @@ def import_playlist(plugin, playlist, playlist_url=None, listenbrainz=False):
     add_songs_to_plex(plugin, playlist, songs)
 
 
-def add_songs_to_plex(plugin, playlist, songs, manual_search=None):
-    """Add a list of songs to a Plex playlist via the plugin."""
-    if manual_search is None:
-        manual_search = get_plexsync_config("manual_search", bool, False)
+def _deduplicate_plex_tracks(tracks):
+    """Deduplicate Plex tracks by ratingKey, preserving order."""
+    seen = set()
+    unique = []
+    for track in tracks:
+        key = getattr(track, "ratingKey", None) or id(track)
+        if key not in seen:
+            seen.add(key)
+            unique.append(track)
+    return unique
 
+
+def _match_retry_and_drain(plugin, songs, manual_search, playlist_id, progress_desc):
+    """Match songs to Plex tracks with LLM retry and manual prompt draining.
+
+    Returns a deduplicated list of matched Plex tracks.
+    """
     songs_to_process = list(songs or [])
     progress = plugin.create_progress_counter(
-        len(songs_to_process),
-        f"Matching Plex tracks for {playlist}",
-        unit="song",
+        len(songs_to_process), progress_desc, unit="song",
     )
 
-    song_list = []
+    matched = []
     unmatched = []
-    playlist_id = str(playlist) if playlist is not None else None
     try:
         for song in songs_to_process:
             found = plugin.search_plex_song(song, manual_search, playlist_id=playlist_id)
             if found is not None:
-                song_list.append(found)
+                matched.append(found)
             else:
                 unmatched.append(song)
             if progress is not None:
@@ -91,7 +100,7 @@ def add_songs_to_plex(plugin, playlist, songs, manual_search=None):
             try:
                 progress.close()
             except Exception:  # noqa: BLE001 - progress is optional feedback
-                plugin._log.debug("Unable to close progress counter for playlist {}", playlist)
+                plugin._log.debug("Unable to close progress counter for {}", progress_desc)
 
     if playlist_id and hasattr(plugin, "_wait_for_llm_enhancements"):
         plugin._wait_for_llm_enhancements(playlist_id)
@@ -100,19 +109,24 @@ def add_songs_to_plex(plugin, playlist, songs, manual_search=None):
         for song in unmatched:
             found = plugin.search_plex_song(song, manual_search, playlist_id=playlist_id)
             if found is not None:
-                song_list.append(found)
+                matched.append(found)
 
     if playlist_id and hasattr(plugin, "_drain_manual_prompt_queue"):
-        song_list.extend(plugin._drain_manual_prompt_queue(playlist_id) or [])
+        matched.extend(plugin._drain_manual_prompt_queue(playlist_id) or [])
 
-    unique_list = []
-    seen = set()
-    for track in song_list:
-        key = getattr(track, "ratingKey", None) or id(track)
-        if key in seen:
-            continue
-        seen.add(key)
-        unique_list.append(track)
+    return _deduplicate_plex_tracks(matched)
+
+
+def add_songs_to_plex(plugin, playlist, songs, manual_search=None):
+    """Add a list of songs to a Plex playlist via the plugin."""
+    if manual_search is None:
+        manual_search = get_plexsync_config("manual_search", bool, False)
+
+    playlist_id = str(playlist) if playlist is not None else None
+    unique_list = _match_retry_and_drain(
+        plugin, songs, manual_search, playlist_id,
+        f"Matching Plex tracks for {playlist}",
+    )
 
     if not unique_list:
         plugin._log.warning("No songs found to add to playlist {}", playlist)
@@ -293,63 +307,22 @@ def generate_imported_playlist(plugin, lib, playlist_config, plex_lookup=None):
     
     plugin._log.info("Found {} unique tracks across sources", len(unique_tracks))
     
-    matched_songs = []
-    unmatched = []
     playlist_id = str(playlist_name) if playlist_name is not None else None
-    match_progress = plugin.create_progress_counter(
-        total=len(unique_tracks),
-        desc=f"{playlist_name[:18]} match",
-        unit="track",
+    matched_songs = _match_retry_and_drain(
+        plugin, unique_tracks, manual_search, playlist_id,
+        f"{playlist_name[:18]} match",
     )
-    
-    try:
-        for song in unique_tracks:
-            found = plugin.search_plex_song(song, manual_search, playlist_id=playlist_id)
-            if found is not None:
-                matched_songs.append(found)
-            else:
-                unmatched.append(song)
-            if match_progress is not None:
-                try:
-                    match_progress.update()
-                except Exception:
-                    plugin._log.debug("Failed to update match progress for {}", playlist_name)
-    finally:
-        if match_progress is not None:
-            try:
-                match_progress.close()
-            except Exception:
-                plugin._log.debug("Failed to close match progress for {}", playlist_name)
-    
-    if playlist_id and hasattr(plugin, "_wait_for_llm_enhancements"):
-        plugin._wait_for_llm_enhancements(playlist_id)
-
-    if unmatched:
-        for song in unmatched:
-            found = plugin.search_plex_song(song, manual_search, playlist_id=playlist_id)
-            if found is not None:
-                matched_songs.append(found)
-
-    if playlist_id and hasattr(plugin, "_drain_manual_prompt_queue"):
-        matched_songs.extend(plugin._drain_manual_prompt_queue(playlist_id) or [])
 
     plugin._log.info("Matched {} tracks in Plex", len(matched_songs))
-    
+
     if max_tracks:
         matched_songs = matched_songs[:max_tracks]
-    
-    # Apply filters to matched songs if filters are defined in the playlist config
+
     filters = playlist_config.get("filters", {})
     if filters:
         matched_songs = smartplaylists.apply_playlist_filters(plugin, matched_songs, filters)
-        
-    unique_matched = []
-    seen_keys = set()
-    for track in matched_songs:
-        key = getattr(track, 'ratingKey', None) or id(track)
-        if key and key not in seen_keys:
-            seen_keys.add(key)
-            unique_matched.append(track)
+
+    unique_matched = _deduplicate_plex_tracks(matched_songs)
     
     with open(log_file, 'a', encoding='utf-8') as f:
         f.write("\nImport Summary:\n")
