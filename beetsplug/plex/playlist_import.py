@@ -27,12 +27,12 @@ def import_playlist(plugin, playlist, playlist_url=None, listenbrainz=False):
             return
 
         plugin._log.info("Importing weekly jams playlist")
-        weekly_jams = lb.get_weekly_jams()
+        weekly_jams = lb.get_weekly_playlist("Jams")
         plugin._log.info("Importing {} songs from Weekly Jams", len(weekly_jams))
         add_songs_to_plex(plugin, "Weekly Jams", weekly_jams)
 
         plugin._log.info("Importing weekly exploration playlist")
-        weekly_exploration = lb.get_weekly_exploration()
+        weekly_exploration = lb.get_weekly_playlist("Exploration")
         plugin._log.info(
             "Importing {} songs from Weekly Exploration", len(weekly_exploration)
         )
