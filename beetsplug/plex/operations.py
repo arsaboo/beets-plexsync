@@ -45,8 +45,7 @@ def sort_plex_playlist(plex, playlist_name: str, sort_field: str, logger) -> Non
         reverse=True,
     )
     playlist.removeItems(items)
-    for item in sorted_items:
-        playlist.addItems(item)
+    playlist.addItems(sorted_items)
 
 
 def _resolve_plex_items(plex, items: Iterable, logger):
