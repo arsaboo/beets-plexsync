@@ -106,8 +106,12 @@ def _match_retry_and_drain(plugin, songs, manual_search, playlist_id, progress_d
         plugin._wait_for_llm_enhancements(playlist_id)
 
     if unmatched:
+        # Retry with manual_search=False: LLM cache may now be warm, but these songs are
+        # already queued in ManualPromptQueue from the first pass — re-enqueuing would be
+        # silently dropped by _seen dedup, and immediate manual prompts would interrupt the
+        # drain phase ordering.
         for song in unmatched:
-            found = plugin.search_plex_song(song, manual_search, playlist_id=playlist_id)
+            found = plugin.search_plex_song(song, False, playlist_id=playlist_id)
             if found is not None:
                 matched.append(found)
 

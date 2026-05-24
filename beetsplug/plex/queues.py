@@ -133,7 +133,7 @@ class ManualPromptQueue:
 
     def enqueue(self, item: ManualPromptItem) -> None:
         """Queue a manual prompt item silently. Drain happens at end of processing."""
-        if not item.playlist_id:
+        if not item.playlist_id or not item.cache_key:
             return
         seen_keys = self._seen.setdefault(item.playlist_id, set())
         if item.cache_key in seen_keys:

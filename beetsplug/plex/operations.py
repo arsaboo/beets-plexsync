@@ -30,7 +30,7 @@ def batch_fetch_plex_items(plex, rating_keys: Sequence[str], logger,
         for rating_key in rating_keys:
             try:
                 plex_set.add(plex.fetchItem(int(rating_key)))
-            except catch as e:
+            except (*catch, ValueError) as e:
                 logger.warning("Item with ratingKey {} not found in Plex library. Error: {}", rating_key, e)
     return plex_set
 

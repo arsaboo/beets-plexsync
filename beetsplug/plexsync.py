@@ -1133,15 +1133,31 @@ class PlexSync(BeetsPlugin):
             selection = None
 
             if candidates:
-                selection = manual_search.review_candidate_confirmations(
-                    self,
-                    candidates,
-                    song,
-                    current_cache_key=cache_key,
-                )
-                action = selection.get("action") if selection else None
+                # Only show the review UI when at least one candidate has a resolvable track.
+                # If all entries have track=None (Plex object went stale), skip the UI and
+                # let the item fall through to the "not found" / manual-search branch below.
+                has_visible = any(c.get("track") is not None for c in candidates)
+                if has_visible:
+                    selection = manual_search.review_candidate_confirmations(
+                        self,
+                        candidates,
+                        song,
+                        current_cache_key=cache_key,
+                    )
+                    action = selection.get("action") if selection else None
 
-            if not candidates or action in (None, "skip"):
+            if action == "skip":
+                # User explicitly dismissed the candidate list — write negative cache under
+                # the item's pre-computed key (not re-derived from song, which may differ
+                # when LLM-cleaned metadata was used to build the original cache_key).
+                # Guard against empty-metadata songs that produce a degenerate key '||'
+                # which would poison the cache for all future empty-metadata lookups.
+                self._log.debug("User skipped in drain, storing negative cache for: {}", song)
+                if song.get("title") and str(song["title"]).strip():
+                    self._cache_result(cache_key, None)
+                continue
+
+            if not candidates or action is None:
                 self._log.info(
                     "\nTrack {} - {} - {} not found in Plex (tried strategies: {})",
                     song.get("album", "Unknown"),
@@ -1187,9 +1203,6 @@ class PlexSync(BeetsPlugin):
                     playlist_id,
                 )
                 break
-
-            if action == "skip":
-                manual_search._store_negative_cache(self, song, song)
 
         return resolved
 

@@ -58,9 +58,29 @@ def _track_matches_artist_variants(track, variants: list[str]) -> bool:
         artist_name = ""
     artist_name = artist_name or ""
     lower_artist = artist_name.lower()
+
+    # Exact substring match first (fastest)
     for variant in variants:
         if variant and variant.lower() in lower_artist:
             return True
+
+    # Fuzzy fallback: split compound artist strings (feat., &, etc.) and compare each segment
+    # so that "Beyonce" matches "Beyoncé feat. Jay-Z" via its first segment
+    artist_segments = [
+        seg.strip()
+        for part in _FEATURE_SPLIT_RE.split(artist_name)
+        for seg in _ARTIST_JOINER_RE.split(part)
+        if seg.strip()
+    ]
+    for variant in variants:
+        if not variant or len(variant) < 4:
+            continue
+        for segment in artist_segments:
+            # Skip segments shorter than 4 chars — sub-4-char strings can hit 0.85
+            # on unrelated names (e.g. "Cher" vs "Che" = 0.857).
+            if len(segment) >= 4 and get_fuzzy_score(variant, segment) >= 0.85:
+                return True
+
     return False
 
 
@@ -182,6 +202,20 @@ def search_plex_song(
         except Exception as exc:  # noqa: BLE001
             plugin._log.debug("Local beets candidate lookup failed for {}: {}", song, exc)
             local_candidates = []
+
+        # If no candidates, retry with swapped title/artist (handles misparse from providers)
+        if not local_candidates and song.get("title") and song.get("artist"):
+            swapped = {"title": song["artist"], "artist": song["title"], "album": song.get("album")}
+            try:
+                local_candidates = plugin.get_local_beets_candidates(swapped)
+                if local_candidates:
+                    plugin._log.debug(
+                        "Retrying local candidate search with swapped title/artist for '{}'",
+                        song.get("title", ""),
+                    )
+            except Exception as exc:  # noqa: BLE001
+                plugin._log.debug("Swapped title/artist candidate lookup failed: {}", exc)
+                local_candidates = []
 
         if local_candidates:
             summary = [
@@ -607,10 +641,16 @@ def search_plex_song(
         )
 
     cleaned_metadata_for_negative = None
+    _candidate_confirmations = getattr(plugin, "_candidate_confirmations", None)
+    _has_good_candidates = bool(
+        _candidate_confirmations
+        and any(c.get("similarity", 0) >= 0.7 for c in _candidate_confirmations)
+    )
     if (
         not llm_attempted
         and plugin.search_llm
         and get_plexsync_config("use_llm_search", bool, False)
+        and not _has_good_candidates
     ):
         search_query = f"{song['title']} by {song['artist']}"
         if song.get('album'):

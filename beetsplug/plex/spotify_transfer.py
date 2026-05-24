@@ -23,7 +23,10 @@ def _batch_check_availability(plugin, track_ids):
                 playable = (
                     track_info.get("is_playable", True)
                     and track_info.get("restrictions", {}).get("reason") != "unavailable"
-                    and bool(track_info.get("available_markets"))
+                    # available_markets is omitted by Spotify for OAuth token requests;
+                    # treat a missing key as "assume available"
+                    and ("available_markets" not in track_info
+                         or bool(track_info["available_markets"]))
                 )
                 availability[tid] = playable
         except Exception as exc:
@@ -163,7 +166,8 @@ def _resolve_spotify_track(plugin, beets_item, availability=None):
                         not track_info
                         or not track_info.get('is_playable', True)
                         or track_info.get('restrictions', {}).get('reason') == 'unavailable'
-                        or not track_info.get('available_markets')
+                        or ('available_markets' in track_info
+                            and not track_info['available_markets'])
                     ):
                         plugin._log.debug(
                             "Track {} is not playable or not available, searching for alternatives",
