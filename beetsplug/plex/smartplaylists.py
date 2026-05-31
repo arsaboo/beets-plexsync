@@ -812,24 +812,14 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
 
             # Apply genre filters if they exist
             if include_item and filters.get('include', {}).get('genres'):
-                item_genres = set()
-                if item.genre:
-                    if isinstance(item.genre, str):
-                        item_genres = set(g.lower().strip() for g in item.genre.split(','))
-                    else:
-                        item_genres = set(str(g).lower().strip() for g in item.genre)
+                item_genres = set(g.lower().strip() for g in (item.genres or []))
                 include_genres = set(g.lower().strip() for g in filters['include']['genres'])
                 if not (item_genres & include_genres):
                     include_item = False
 
             # Apply exclude filters
             if include_item and filters.get('exclude', {}).get('genres'):
-                item_genres = set()
-                if item.genre:
-                    if isinstance(item.genre, str):
-                        item_genres = set(g.lower().strip() for g in item.genre.split(','))
-                    else:
-                        item_genres = set(str(g).lower().strip() for g in item.genre)
+                item_genres = set(g.lower().strip() for g in (item.genres or []))
                 exclude_genres = set(g.lower().strip() for g in filters['exclude']['genres'])
                 if item_genres & exclude_genres:
                     include_item = False
