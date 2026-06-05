@@ -43,7 +43,6 @@ from beets.dbcore.query import MatchQuery
 from beets.dbcore.types import DateType
 from beets.library import Item  # Added Item to import
 from beets.plugins import BeetsPlugin
-from beets.autotag.distance import Distance
 from bs4 import BeautifulSoup
 from jiosaavn import JioSaavn
 from openai import OpenAI
@@ -90,8 +89,6 @@ _FROM_CLAUSE_RE = re.compile(r'\(from\s+"?([^")]+)"?\)', re.IGNORECASE)
 
 class PlexSync(BeetsPlugin):
     """Define plexsync class."""
-
-    data_source = "Plex"
 
     item_types = {
         "plex_guid": types.STRING,
@@ -644,7 +641,7 @@ class PlexSync(BeetsPlugin):
     def commands(self):
         """Add beet UI commands to interact with Plex."""
         plexupdate_cmd = ui.Subcommand(
-            "plexupdate", help=f"Update {self.data_source} library"
+            "plexupdate", help="Update Plex library"
         )
 
         def func(lib, opts, args):
@@ -1789,20 +1786,4 @@ class PlexSync(BeetsPlugin):
         """Clean up when plugin is disabled."""
         if self.loop and not self.loop.is_closed():
             self.close()
-
-    def album_for_id(self, album_id):
-        """Metadata plugin interface method - PlexSync doesn't provide album metadata."""
-        return None
-
-    def track_distance(self, item, info):
-        """Metadata plugin interface method - PlexSync doesn't provide track distance."""
-        return Distance()
-
-    def candidates(self, album, artist, album_name, threshold):
-        """Metadata plugin interface method - PlexSync doesn't provide album candidates."""
-        return []
-
-    def item_candidates(self, item, threshold):
-        """Metadata plugin interface method - PlexSync doesn't provide item candidates."""
-        return []
 
