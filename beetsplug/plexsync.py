@@ -37,7 +37,7 @@ from typing import Dict, List, Optional, Tuple
 
 import dateutil.parser
 import requests
-from beets import config, ui
+from beets import config, context, ui
 from beets.dbcore import types
 from beets.dbcore.query import MatchQuery
 from beets.dbcore.types import DateType
@@ -965,10 +965,6 @@ class PlexSync(BeetsPlugin):
         except exceptions.PlexApiException:
             self._log.warning("{} Update failed", self.config["plex"]["library_name"])
 
-    def _write_item_tags(self, item):
-        """Write tags using beets' resolved absolute file path."""
-        item.try_write(path=item.filepath)
-
     def _fetch_plex_info(self, items, write, force):
         """Obtain track information from Plex."""
         items_len = len(items)
@@ -993,25 +989,26 @@ class PlexSync(BeetsPlugin):
 
     def _process_item(self, index, item, write, force, items_len, progress=None):
         try:
-            self._log.info("Processing {}/{} tracks - {} ", index, items_len, item)
-            if not force and "plex_userrating" in item:
-                self._log.debug("Plex rating already present for: {}", item)
-                return
-            plex_track = self.search_plex_track(item)
-            if plex_track is None:
-                self._log.info("No track found for: {}", item)
-                return
-            item.plex_guid = plex_track.guid
-            item.plex_ratingkey = plex_track.ratingKey
-            item.plex_userrating = plex_track.userRating
-            item.plex_skipcount = plex_track.skipCount
-            item.plex_viewcount = plex_track.viewCount
-            item.plex_lastviewedat = plex_track.lastViewedAt
-            item.plex_lastratedat = plex_track.lastRatedAt
-            item.plex_updated = time.time()
-            item.store()
-            if write:
-                self._write_item_tags(item)
+            with context.music_dir(item._db.directory):
+                self._log.info("Processing {}/{} tracks - {} ", index, items_len, item)
+                if not force and "plex_userrating" in item:
+                    self._log.debug("Plex rating already present for: {}", item)
+                    return
+                plex_track = self.search_plex_track(item)
+                if plex_track is None:
+                    self._log.info("No track found for: {}", item)
+                    return
+                item.plex_guid = plex_track.guid
+                item.plex_ratingkey = plex_track.ratingKey
+                item.plex_userrating = plex_track.userRating
+                item.plex_skipcount = plex_track.skipCount
+                item.plex_viewcount = plex_track.viewCount
+                item.plex_lastviewedat = plex_track.lastViewedAt
+                item.plex_lastratedat = plex_track.lastRatedAt
+                item.plex_updated = time.time()
+                item.store()
+                if write:
+                    item.try_write()
         finally:
             if progress is not None:
                 try:
@@ -1082,7 +1079,8 @@ class PlexSync(BeetsPlugin):
                     )
                     beets_item.plex_updated = time.time()
                     beets_item.store()
-                    self._write_item_tags(beets_item)
+                    with context.music_dir(beets_item._db.directory):
+                        beets_item.try_write()
                 except exceptions.NotFound:
                     self._log.debug("Track not found in Plex: {}", beets_item)
                     continue
