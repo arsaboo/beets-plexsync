@@ -965,6 +965,10 @@ class PlexSync(BeetsPlugin):
         except exceptions.PlexApiException:
             self._log.warning("{} Update failed", self.config["plex"]["library_name"])
 
+    def _write_item_tags(self, item):
+        """Write tags using beets' resolved absolute file path."""
+        item.try_write(path=item.filepath)
+
     def _fetch_plex_info(self, items, write, force):
         """Obtain track information from Plex."""
         items_len = len(items)
@@ -1007,7 +1011,7 @@ class PlexSync(BeetsPlugin):
             item.plex_updated = time.time()
             item.store()
             if write:
-                item.try_write()
+                self._write_item_tags(item)
         finally:
             if progress is not None:
                 try:
@@ -1078,7 +1082,7 @@ class PlexSync(BeetsPlugin):
                     )
                     beets_item.plex_updated = time.time()
                     beets_item.store()
-                    beets_item.try_write()
+                    self._write_item_tags(beets_item)
                 except exceptions.NotFound:
                     self._log.debug("Track not found in Plex: {}", beets_item)
                     continue
