@@ -186,7 +186,7 @@ class PluginStub:
         self.last_manual = None
         self.cache = CacheStub()
 
-    def search_plex_song(self, song, manual_search=False):
+    def search_plex_song(self, song, manual_search=False, playlist_id=None):
         self.last_manual = manual_search
         return f"match-{song['title']}"
 
@@ -242,7 +242,7 @@ class PlaylistImportTest(unittest.TestCase):
         logger = DummyLogger()
 
         class EmptyPlugin(PluginStub):
-            def search_plex_song(self, song, manual_search=False):
+            def search_plex_song(self, song, manual_search=False, playlist_id=None):
                 self.last_manual = manual_search
                 return None
 
@@ -278,6 +278,44 @@ class PlaylistImportTest(unittest.TestCase):
 
         with self.assertRaises(self.UserError):
             self.module.import_playlist(plugin, 'Test', None)
+
+    def test_import_playlist_listenbrainz_flow(self):
+        logger = DummyLogger()
+        plugin = PluginStub(logger)
+
+        listenbrainz_module = types.ModuleType('beetsplug.listenbrainz')
+
+        class ListenBrainzPluginStub:
+            def get_weekly_playlist(self, playlist_type, most_recent=True):
+                if playlist_type == 'Jams':
+                    return [{'title': 'Jam Track'}]
+                if playlist_type == 'Exploration':
+                    return [{'title': 'Explore Track'}]
+                raise AssertionError(f'unexpected playlist type: {playlist_type}')
+
+        listenbrainz_module.ListenBrainzPlugin = ListenBrainzPluginStub
+        sys.modules['beetsplug.listenbrainz'] = listenbrainz_module
+
+        added_calls = []
+        original_add = self.module.add_songs_to_plex
+
+        def _capture_add(plugin_obj, playlist_name, songs, manual_search=None):
+            added_calls.append((playlist_name, songs, manual_search))
+
+        self.module.add_songs_to_plex = _capture_add
+        try:
+            self.module.import_playlist(plugin, 'Ignored', listenbrainz=True)
+        finally:
+            self.module.add_songs_to_plex = original_add
+            sys.modules.pop('beetsplug.listenbrainz', None)
+
+        self.assertEqual(
+            added_calls,
+            [
+                ('Weekly Jams', [{'title': 'Jam Track'}], None),
+                ('Weekly Exploration', [{'title': 'Explore Track'}], None),
+            ],
+        )
 
     def test_import_search(self):
         logger = DummyLogger()

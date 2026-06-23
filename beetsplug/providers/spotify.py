@@ -99,7 +99,12 @@ def authenticate(plugin) -> None:
                 else:
                     raise
 
-    plugin.sp = spotipy.Spotify(auth=plugin.token_info.get("access_token"))
+    plugin.sp = spotipy.Spotify(
+        auth=plugin.token_info.get("access_token"),
+        retries=3,
+        backoff_factor=0.5,
+        status_forcelist=(429, 500, 502, 503, 504),
+    )
 
 
 def process_spotify_track(track: Dict[str, Any], logger) -> Optional[Dict[str, Any]]:
@@ -272,8 +277,36 @@ def _fuzzy_score(a: str, b: str) -> float:
     return SequenceMatcher(None, a.lower(), b.lower()).ratio()
 
 
+def _spotify_search_cache_key(beets_item) -> str:
+    """Build a deterministic cache key for Spotify search results."""
+    title = (beets_item.title or "").strip().lower()
+    artist = (beets_item.artist or "").strip().lower()
+    album = (beets_item.album or "").strip().lower()
+    return f"spotify_search|{title}|{artist}|{album}"
+
+
+_SPOTIFY_SEARCH_CACHE_MAX = 5000
+_spotify_search_result_cache: Dict[str, Optional[str]] = {}
+
+
+def _cache_spotify_result(key: str, value: Optional[str]) -> None:
+    """Store a result in the search cache, evicting oldest entries if full."""
+    if len(_spotify_search_result_cache) >= _SPOTIFY_SEARCH_CACHE_MAX:
+        # Evict ~20% of entries (dict preserves insertion order in 3.7+)
+        to_remove = list(_spotify_search_result_cache.keys())[:_SPOTIFY_SEARCH_CACHE_MAX // 5]
+        for k in to_remove:
+            del _spotify_search_result_cache[k]
+    _spotify_search_result_cache[key] = value
+
+
 def search_spotify_track(plugin, beets_item) -> Optional[str]:
     """Search for a track on Spotify with fallback strategies."""
+    cache_key = _spotify_search_cache_key(beets_item)
+    if cache_key in _spotify_search_result_cache:
+        cached = _spotify_search_result_cache[cache_key]
+        plugin._log.debug("Spotify search cache hit for {}: {}", cache_key, cached)
+        return cached
+
     search_strategies = [
         lambda: f"track:{beets_item.title} album:{beets_item.album} artist:{beets_item.artist}",
         lambda: f"track:{beets_item.title} album:{beets_item.album}",
@@ -311,11 +344,13 @@ def search_spotify_track(plugin, beets_item) -> Optional[str]:
                         if title_match and artist_match:
                             plugin._log.debug("Found playable match: {} - {} (strategy {})",
                                               track['name'], track['artists'][0]['name'], i)
+                            _cache_spotify_result(cache_key, track['id'])
                             return track['id']
                         elif i >= 5:
                             if title_match or artist_match:
                                 plugin._log.debug("Found loose match: {} - {} (strategy {})",
                                                   track['name'], track['artists'][0]['name'], i)
+                                _cache_spotify_result(cache_key, track['id'])
                                 return track['id']
 
                 plugin._log.debug("Found {} results but no good matches for strategy {}",
@@ -327,6 +362,7 @@ def search_spotify_track(plugin, beets_item) -> Optional[str]:
             plugin._log.debug("Error in search strategy {}: {}", i, e)
             continue
 
+    _cache_spotify_result(cache_key, None)
     return None
 
 
@@ -339,12 +375,16 @@ def add_tracks_to_spotify_playlist(plugin, playlist_name: str, track_uris: List[
     - Uses non-overlapping 100-size chunks to avoid duplication.
     """
     user_id = plugin.sp.current_user()["id"]
-    playlists = plugin.sp.user_playlists(user_id)
     playlist_id = None
-    for playlist in playlists["items"]:
-        if playlist["name"].lower() == playlist_name.lower():
-            playlist_id = playlist["id"]
+    playlists_response = plugin.sp.user_playlists(user_id, limit=50)
+    while playlists_response:
+        for playlist in playlists_response["items"]:
+            if playlist["name"].lower() == playlist_name.lower():
+                playlist_id = playlist["id"]
+                break
+        if playlist_id or not playlists_response.get("next"):
             break
+        playlists_response = plugin.sp.next(playlists_response)
     if not playlist_id:
         playlist = plugin.sp.user_playlist_create(
             user_id, playlist_name, public=False

@@ -812,24 +812,14 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
 
             # Apply genre filters if they exist
             if include_item and filters.get('include', {}).get('genres'):
-                item_genres = set()
-                if item.genre:
-                    if isinstance(item.genre, str):
-                        item_genres = set(g.lower().strip() for g in item.genre.split(','))
-                    else:
-                        item_genres = set(str(g).lower().strip() for g in item.genre)
+                item_genres = set(g.lower().strip() for g in (item.genres or []))
                 include_genres = set(g.lower().strip() for g in filters['include']['genres'])
                 if not (item_genres & include_genres):
                     include_item = False
 
             # Apply exclude filters
             if include_item and filters.get('exclude', {}).get('genres'):
-                item_genres = set()
-                if item.genre:
-                    if isinstance(item.genre, str):
-                        item_genres = set(g.lower().strip() for g in item.genre.split(','))
-                    else:
-                        item_genres = set(str(g).lower().strip() for g in item.genre)
+                item_genres = set(g.lower().strip() for g in (item.genres or []))
                 exclude_genres = set(g.lower().strip() for g in filters['exclude']['genres'])
                 if item_genres & exclude_genres:
                     include_item = False
@@ -1057,23 +1047,33 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
 
     # Convert beets items to Plex tracks for special playlists
     if special_handling:
+        from beetsplug.plex.operations import batch_fetch_plex_items
+
+        items_with_keys = [i for i in selected_items if getattr(i, "plex_ratingkey", None)]
+        items_without_keys = [i for i in selected_items if not getattr(i, "plex_ratingkey", None)]
+
+        # Batch fetch, preserving order
         plex_tracks = []
-        for item in selected_items:
-            if hasattr(item, "plex_ratingkey") and item.plex_ratingkey:
-                try:
-                    plex_track = ps.plex.fetchItem(item.plex_ratingkey)
-                    plex_tracks.append(plex_track)
-                except Exception as e:
-                    ps._log.debug("Could not fetch Plex track for item: {} - Error: {}", item, e)
-                    # Fallback: try to find by metadata
-                    try:
-                        tracks = ps.music.searchTracks(title=getattr(item, 'title', ''),
-                                                      artist=getattr(item, 'artist', ''),
-                                                      album=getattr(item, 'album', ''))
-                        if tracks:
-                            plex_tracks.append(tracks[0])
-                    except Exception:
-                        continue
+        if items_with_keys:
+            rating_keys = [str(item.plex_ratingkey) for item in items_with_keys]
+            fetched = batch_fetch_plex_items(ps.plex, rating_keys, ps._log)
+            fetched_by_key = {str(t.ratingKey): t for t in fetched}
+            for item in items_with_keys:
+                track = fetched_by_key.get(str(item.plex_ratingkey))
+                if track:
+                    plex_tracks.append(track)
+                else:
+                    items_without_keys.append(item)
+
+        for item in items_without_keys:
+            try:
+                tracks = ps.music.searchTracks(title=getattr(item, 'title', ''),
+                                              artist=getattr(item, 'artist', ''),
+                                              album=getattr(item, 'album', ''))
+                if tracks:
+                    plex_tracks.append(tracks[0])
+            except Exception:
+                continue
 
         if not plex_tracks:
             ps._log.warning("Could not find any Plex tracks for {} playlist", playlist_name)

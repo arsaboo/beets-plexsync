@@ -4,9 +4,35 @@ These helpers encapsulate low-level Plex operations and log consistently.
 They are intentionally thin to avoid behavior changes.
 """
 
-from typing import Iterable
+from typing import Iterable, Sequence, Set, Tuple
 
 from plexapi import exceptions
+
+
+def batch_fetch_plex_items(plex, rating_keys: Sequence[str], logger,
+                           extra_exceptions: Tuple = ()) -> Set:
+    """Batch-fetch Plex items by rating key with individual-fetch fallback.
+
+    Returns a set of fetched Plex items.  *extra_exceptions* is appended to
+    the default (NotFound, AttributeError) tuple for both the batch call and
+    the per-item fallback.
+    """
+    if not rating_keys:
+        return set()
+
+    catch = (exceptions.NotFound, AttributeError) + extra_exceptions
+    plex_set: Set = set()
+    try:
+        ekey = f'/library/metadata/{",".join(rating_keys)}'
+        plex_set.update(plex.fetchItems(ekey))
+    except catch as e:
+        logger.warning("Batch fetch failed, falling back to individual fetches. Error: {}", e)
+        for rating_key in rating_keys:
+            try:
+                plex_set.add(plex.fetchItem(int(rating_key)))
+            except (*catch, ValueError) as e:
+                logger.warning("Item with ratingKey {} not found in Plex library. Error: {}", rating_key, e)
+    return plex_set
 
 
 def sort_plex_playlist(plex, playlist_name: str, sort_field: str, logger) -> None:
@@ -19,27 +45,28 @@ def sort_plex_playlist(plex, playlist_name: str, sort_field: str, logger) -> Non
         reverse=True,
     )
     playlist.removeItems(items)
-    for item in sorted_items:
-        playlist.addItems(item)
+    playlist.addItems(sorted_items)
 
 
 def _resolve_plex_items(plex, items: Iterable, logger):
     """Normalize incoming items to Plex items via rating key.
 
     Supports objects with either `plex_ratingkey` or `ratingKey` attributes.
+    Uses batch fetching via fetchItems for efficiency.
     """
-    plex_set = set()
+    rating_keys = []
+    items_without_keys = []
     for item in items:
-        try:
-            rating_key = getattr(item, 'plex_ratingkey', None) or getattr(item, 'ratingKey', None)
-            if rating_key:
-                plex_set.add(plex.fetchItem(rating_key))
-            else:
-                logger.warning("{} does not have plex_ratingkey or ratingKey attribute. Item details: {}", item, vars(item))
-        except (exceptions.NotFound, AttributeError) as e:
-            logger.warning("{} not found in Plex library. Error: {}", item, e)
-            continue
-    return plex_set
+        rating_key = getattr(item, 'plex_ratingkey', None) or getattr(item, 'ratingKey', None)
+        if rating_key:
+            rating_keys.append(str(rating_key))
+        else:
+            items_without_keys.append(item)
+
+    for item in items_without_keys:
+        logger.warning("{} does not have plex_ratingkey or ratingKey attribute. Item details: {}", item, vars(item))
+
+    return batch_fetch_plex_items(plex, rating_keys, logger)
 
 
 def plex_add_playlist_item(plex, items: Iterable, playlist_name: str, logger) -> None:
@@ -112,15 +139,17 @@ def plex_remove_playlist_item(plex, items: Iterable, playlist_name: str, logger)
         logger.error("{} playlist not found", playlist_name)
         return
 
-    plex_set = set()
     from requests.exceptions import ConnectionError, ContentDecodingError
 
-    for item in items:
-        try:
-            plex_set.add(plex.fetchItem(item.plex_ratingkey))
-        except (exceptions.NotFound, AttributeError, ContentDecodingError, ConnectionError) as e:
-            logger.warning("{} not found in Plex library. Error: {}", item, e)
-            continue
+    rating_keys = [str(k) for item in items
+                   if (k := getattr(item, 'plex_ratingkey', None))]
+    if not rating_keys:
+        return
+
+    plex_set = batch_fetch_plex_items(
+        plex, rating_keys, logger,
+        extra_exceptions=(ContentDecodingError, ConnectionError),
+    )
 
     to_remove = plex_set.intersection(playlist_set)
     logger.info("Removing {} tracks from {} playlist", len(to_remove), playlist_name)
