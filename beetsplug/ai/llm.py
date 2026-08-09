@@ -155,7 +155,7 @@ class MusicSearchTools:
         if self.provider == 'ollama':
             # Use Ollama model
             model = Ollama(id=self.model_id, host=self.ollama_host, timeout=30)
-            logger.debug(f"Initializing Ollama agent with model {self.model_id} at {self.ollama_host}")
+            logger.debug("Initializing Ollama agent with model {} at {}", self.model_id, self.ollama_host)
             return model
         else:
             # Use OpenAI-compatible model
@@ -170,7 +170,7 @@ class MusicSearchTools:
                 if self.base_url:
                     model_args["base_url"] = self.base_url
                 model = OpenAILike(**model_args)
-                logger.debug(f"Initializing OpenAI-compatible agent with model {self.model_id}")
+                logger.debug("Initializing OpenAI-compatible agent with model {}", self.model_id)
                 return model
 
     def _init_llm_agent(self) -> None:
@@ -201,9 +201,9 @@ class MusicSearchTools:
                 # Wrap with instructor
                 self.instructor_client = instructor.from_openai(base_client)
                 provider_type = "OpenAI-compatible" if self.provider != 'ollama' else "Ollama"
-                logger.debug(f"Initialized instructor client with {provider_type} provider")
+                logger.debug("Initialized instructor client with {} provider", provider_type)
             except Exception as e:
-                logger.warning(f"Failed to initialize instructor client: {e}. Falling back to Agno.")
+                logger.warning("Failed to initialize instructor client: {}. Falling back to Agno.", e)
                 self.instructor_client = None
         
         # Initialize Agno agent as fallback or if instructor unavailable
@@ -216,7 +216,7 @@ class MusicSearchTools:
                 output_schema=SongBasicInfo,  # Use output_schema for structured output
             )
         except Exception as e:
-            logger.error(f"Failed to initialize LLM agent: {e}")
+            logger.error("Failed to initialize LLM agent: {}", e)
             self.ollama_agent = None
 
     def _enforce_brave_rate_limit(self) -> None:
@@ -226,7 +226,7 @@ class MusicSearchTools:
             time_since_last_request = current_time - self._last_brave_request_time
             if time_since_last_request < 1.0:  # Less than 1 second since last request
                 sleep_time = 1.0 - time_since_last_request
-                logger.debug(f"Rate limiting Brave Search. Sleeping for {sleep_time:.2f} seconds.")
+                logger.debug("Rate limiting Brave Search. Sleeping for {:.2f} seconds.", sleep_time)
                 time.sleep(sleep_time)
             self._last_brave_request_time = time.time()
 
@@ -239,21 +239,21 @@ class MusicSearchTools:
             try:
                 tools.append(Searxng(host=searxng_host, fixed_max_results=5))
             except Exception as e:
-                logger.warning(f"Failed to initialize SearxNG tool: {e}")
+                logger.warning("Failed to initialize SearxNG tool: {}", e)
 
         # Exa
         if exa_api_key and EXA_AVAILABLE:
             try:
                 tools.append(ExaTools(api_key=exa_api_key, timeout=15))
             except Exception as e:
-                logger.warning(f"Failed to initialize Exa tool: {e}")
+                logger.warning("Failed to initialize Exa tool: {}", e)
 
         # Brave Search (with rate limiting)
         if brave_api_key and BRAVE_AVAILABLE:
             try:
                 tools.append(BraveSearchTools(api_key=brave_api_key, fixed_max_results=5))
             except Exception as e:
-                logger.warning(f"Failed to initialize Brave Search tool: {e}")
+                logger.warning("Failed to initialize Brave Search tool: {}", e)
 
         # Tavily (lowest priority)
         if tavily_api_key and TAVILY_AVAILABLE:
@@ -265,7 +265,7 @@ class MusicSearchTools:
                     format="json"
                 ))
             except Exception as e:
-                logger.warning(f"Failed to initialize Tavily tool: {e}")
+                logger.warning("Failed to initialize Tavily tool: {}", e)
 
         if tools:
             try:
@@ -277,7 +277,7 @@ class MusicSearchTools:
                     tools=tools
                 )
             except Exception as e:
-                logger.error(f"Failed to initialize search agent with tools: {e}")
+                logger.error("Failed to initialize search agent with tools: {}", e)
                 self.search_agent = None
 
     def _log_available_providers(self) -> None:
@@ -444,7 +444,7 @@ class MusicSearchTools:
                 logger.debug("Successfully extracted song info using instructor")
                 return response
             except Exception as e:
-                logger.warning(f"instructor extraction failed: {e}. Falling back to Agno.")
+                logger.warning("instructor extraction failed: {}. Falling back to Agno.", e)
                 # Fall through to Agno fallback
         
         # Fallback to Agno agent (less reliable structured output)
@@ -461,7 +461,7 @@ class MusicSearchTools:
                 return response.content
             else:
                 # Agno didn't return structured output, use fallback
-                logger.warning(f"Agno agent did not return SongBasicInfo, got {type(response.content)}. Using fallback.")
+                logger.warning("Agno agent did not return SongBasicInfo, got {}. Using fallback.", type(response.content))
                 return self._create_fallback_song(song_name)
         except Exception as e:
             logger.error("LLM extraction failed: {0}", e)
@@ -521,7 +521,7 @@ def initialize_search_toolkit():
     if not provider:
         # If main llm has an api_key, default to OpenAI; otherwise use Ollama
         provider = "openai" if main_api_key else "ollama"
-        logger.debug(f"Auto-detected provider: {provider}")
+        logger.debug("Auto-detected provider: {}", provider)
 
     # Get API key - prefer search-specific, fall back to main llm config
     api_key = config["llm"]["search"]["api_key"].get()
@@ -568,7 +568,7 @@ def initialize_search_toolkit():
             base_url=base_url
         )
     except Exception as e:
-        logger.error(f"Failed to initialize search toolkit: {e}")
+        logger.error("Failed to initialize search toolkit: {}", e)
         return None
 
 
