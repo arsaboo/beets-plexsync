@@ -116,12 +116,20 @@ def search_plex_song(
     llm_attempted=False,
     use_local_candidates=True,
     playlist_id=None,
+    use_cache=True,
 ):
     """Fetch a Plex track using multi-strategy search for the given song.
 
     Parameters mirror the original PlexSync.search_plex_song method but
     take the plugin instance explicitly so this function can be reused by other
     callers.
+
+    ``use_cache=False`` skips the initial cache *read* only - a successful
+    result is still written to cache via ``plugin._cache_result`` so other
+    callers benefit from it. Callers that need a fresh, authoritative search
+    against live Plex state (e.g. a forced library resync) should pass
+    ``use_cache=False`` rather than relying on a cache table populated by
+    unrelated features (playlist import, etc.).
     """
     if manual_search is None:
         manual_search = get_plexsync_config("manual_search", bool, False)
@@ -143,8 +151,10 @@ def search_plex_song(
                 plugin._candidate_confirmations = []
         return result
 
-    cached_result = plugin.cache.get(cache_key)
-    if cached_result is not None:
+    cached_result = plugin.cache.get(cache_key) if use_cache else None
+    if not use_cache:
+        plugin._log.debug("Cache read bypassed for key: '{}'", cache_key)
+    elif cached_result is not None:
         plugin._log.debug("Cache HIT for key: '{}' -> result: {}", cache_key, cached_result)
     else:
         plugin._log.debug("Cache MISS for key: '{}'", cache_key)

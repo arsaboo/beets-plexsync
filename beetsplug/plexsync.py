@@ -1017,35 +1017,38 @@ class PlexSync(BeetsPlugin):
                     self._log.debug("Progress counter update failed: {}", exc)
 
     def search_plex_track(self, item):
-        """Fetch the Plex track key."""
-        tracks = self.music.searchTracks(
-            **{"album.title": item.album, "track.title": item.title}, limit=50
+        """Fetch the Plex track key.
+
+        Delegates to the multi-strategy, confidence-thresholded
+        ``search_plex_song`` pipeline (beetsplug/plex/search.py) instead of a
+        single brittle album+title query. That pipeline already:
+        - tries several search strategies (title-only, artist+fuzzy-title,
+          album-only, fuzzy-title-only, ...) so album-name variants between
+          beets and Plex (e.g. "Rang De Basanti" vs "Rang De") still resolve;
+        - rejects low-confidence best-guesses and returns None instead of a
+          wrong ratingKey, so beets items with no real Plex counterpart (e.g.
+          a different song of the same title/album by an unrelated artist)
+          end up unmatched rather than colliding with other items.
+
+        local-candidate borrowing is disabled (this query is already a
+        canonical beets item, not an external query needing to borrow a
+        similar item's cached match) and the cache read is bypassed so a
+        forced resync always re-checks live Plex state; the resolved result
+        is still written to cache for other callers to reuse. Runs
+        non-interactively (no manual-search prompts) since this is called
+        from a ThreadPoolExecutor.
+        """
+        song = {"title": item.title, "album": item.album, "artist": item.artist}
+        track = self.search_plex_song(
+            song,
+            manual_search=False,
+            use_local_candidates=False,
+            use_cache=False,
+            playlist_id=None,
         )
-        if len(tracks) == 1:
-            return tracks[0]
-        elif len(tracks) > 1:
-            exact = [
-                track
-                for track in tracks
-                if track.parentTitle == item.album and track.title == item.title
-            ]
-            if len(exact) == 1:
-                return exact[0]
-            # Multiple tracks share the same title+album (e.g. covers or
-            # remakes by different artists) - disambiguate by artist.
-            candidates = exact or tracks
-            ranked = self.find_closest_match(
-                {
-                    "title": item.title,
-                    "album": item.album,
-                    "artist": item.artist,
-                },
-                candidates,
-            )
-            return ranked[0][0] if ranked else candidates[0]
-        else:
+        if track is None:
             self._log.debug("Track {} not found in Plex library", item)
-            return None
+        return track
 
     def sort_plex_playlist(self, playlist_name, sort_field):
         """Sort a Plex playlist by a given field."""
@@ -1229,6 +1232,7 @@ class PlexSync(BeetsPlugin):
         llm_attempted=False,
         use_local_candidates=True,
         playlist_id=None,
+        use_cache=True,
     ):
         return plex_search.search_plex_song(
             self,
@@ -1237,6 +1241,7 @@ class PlexSync(BeetsPlugin):
             llm_attempted,
             use_local_candidates=use_local_candidates,
             playlist_id=playlist_id,
+            use_cache=use_cache,
         )
 
     def _process_matches(self, tracks, song, manual_search):
