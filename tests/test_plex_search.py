@@ -473,7 +473,7 @@ class PlexSearchTests(unittest.TestCase):
         self.assertFalse(plugin._candidate_confirmations)
         self.assertGreaterEqual(len(music.search_calls), 1)
 
-    def test_use_cache_false_bypasses_cache_read_but_still_writes(self):
+    def test_use_cache_false_bypasses_cache_read_and_write(self):
         stale_track = types.SimpleNamespace(ratingKey=1, title='Stale')
         fresh_track = types.SimpleNamespace(ratingKey=2, title='Fresh', parentTitle='Album')
 
@@ -495,14 +495,21 @@ class PlexSearchTests(unittest.TestCase):
         plugin.music = Music()
         plugin.search_llm = None
         plugin.manual_track_search = lambda song: None
-        plugin._cache_result = lambda key, result, cleaned=None: recorded.append((key, result))
+
+        def cache_result(key, result, cleaned=None):
+            recorded.append((key, result))
+            raise AssertionError('cache should not be written when use_cache=False')
+
+        plugin._cache_result = cache_result
 
         result = self.search.search_plex_song(plugin, song, manual_search=False, use_cache=False)
 
         self.assertIs(result, fresh_track)
-        # A fresh, live search still writes its result to cache for reuse.
-        self.assertTrue(recorded)
-        self.assertIs(recorded[0][1], fresh_track)
+        # use_cache=False must skip the write too - a bulk resync shouldn't
+        # pay for a SQLite write (new connection + commit) per item; those
+        # writes serialize under thread concurrency and can dominate
+        # wall-clock time (observed live: ~5 tracks/s -> ~0.05 tracks/s).
+        self.assertFalse(recorded)
 
     def test_variant_rejected_when_similarity_low(self):
         variant_track = types.SimpleNamespace(

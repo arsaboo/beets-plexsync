@@ -124,15 +124,19 @@ def search_plex_song(
     take the plugin instance explicitly so this function can be reused by other
     callers.
 
-    ``use_cache=False`` skips the initial cache *read* only - a successful
-    result is still written to cache via ``plugin._cache_result`` so other
-    callers benefit from it. Callers that need a fresh, authoritative search
+    ``use_cache=False`` skips both the initial cache *read* and every cache
+    *write* for this call. Callers that need a fresh, authoritative search
     against live Plex state (e.g. a forced library resync) should pass
     ``use_cache=False`` rather than relying on a cache table populated by
-    unrelated features (playlist import, etc.).
+    unrelated features (playlist import, etc.) - and, importantly, rather
+    than paying for a SQLite write (new connection + commit, no WAL) on
+    every single item: under a threaded bulk resync those writes serialize
+    on the cache db's write lock and can dominate wall-clock time.
     """
     if manual_search is None:
         manual_search = get_plexsync_config("manual_search", bool, False)
+
+    cache_result = plugin._cache_result if use_cache else (lambda *a, **k: None)
 
     cache_key = plugin.cache._make_cache_key(song)
     plugin._log.debug("Generated cache key: '{}' for song: {}", cache_key, song)
@@ -171,7 +175,7 @@ def search_plex_song(
                             "Cached cleaned metadata search succeeded, updating original cache: {}",
                             song,
                         )
-                        plugin._cache_result(cache_key, result)
+                        cache_result(cache_key, result)
                         return _finish(result)
                     plugin._log.debug(
                         "Cached cleaned metadata search also failed, respecting original skip for: {}",
@@ -245,7 +249,7 @@ def search_plex_song(
                             song.get("title", ""),
                         )
                         _log_cache_match_details(plugin, cache_key, direct_match)
-                        plugin._cache_result(cache_key, direct_match)
+                        cache_result(cache_key, direct_match)
                         return _finish(direct_match)
 
             if hasattr(plugin, "_prepare_candidate_variants"):
@@ -318,7 +322,7 @@ def search_plex_song(
                     title,
                 )
                 _log_cache_match_details(plugin, cache_key, variant_result)
-                plugin._cache_result(cache_key, variant_result)
+                cache_result(cache_key, variant_result)
                 return _finish(variant_result)
 
         if variant_attempted:
@@ -593,7 +597,7 @@ def search_plex_song(
                 accept_result = False
         if accept_result:
             _log_cache_match_details(plugin, cache_key, result)
-            plugin._cache_result(cache_key, result)
+            cache_result(cache_key, result)
             return _finish(result)
         tracks = []
     if len(tracks) > 1:
@@ -638,13 +642,13 @@ def search_plex_song(
             result = plugin._handle_manual_search(sorted_tracks, song, original_query=song)
             if result is not None:
                 _log_cache_match_details(plugin, cache_key, result)
-                plugin._cache_result(cache_key, result)
+                cache_result(cache_key, result)
             return _finish(result)
 
         best_match = sorted_tracks[0]
         if best_match[1] >= 0.7:
             _log_cache_match_details(plugin, cache_key, best_match[0])
-            plugin._cache_result(cache_key, best_match[0])
+            cache_result(cache_key, best_match[0])
             return _finish(best_match[0])
         plugin._log.debug(
             "Best match score {} below threshold for: {}", best_match[1], song["title"]
@@ -704,7 +708,7 @@ def search_plex_song(
                         song,
                     )
                     _log_cache_match_details(plugin, cache_key, result)
-                    plugin._cache_result(cache_key, result)
+                    cache_result(cache_key, result)
                     return _finish(result)
                 cleaned_metadata_for_negative = cleaned_song
 
@@ -764,7 +768,7 @@ def search_plex_song(
                         original_song.get("title", ""),
                     )
                     _log_cache_match_details(plugin, chosen_cache_key, track)
-                    plugin._cache_result(chosen_cache_key, track)
+                    cache_result(chosen_cache_key, track)
                     return _finish(track)
             elif action == "manual":
                 manual_prompt_needed = False
@@ -775,7 +779,7 @@ def search_plex_song(
                         "Manual search succeeded, caching for original query: {}", manual_query
                     )
                     _log_cache_match_details(plugin, cache_key, result)
-                    plugin._cache_result(cache_key, result)
+                    cache_result(cache_key, result)
                     return _finish(result)
             elif action == "abort":
                 return _finish(None)
@@ -785,9 +789,9 @@ def search_plex_song(
                     "User skipped candidate review for: {}", song.get("title", "")
                 )
                 if cleaned_metadata_for_negative is not None:
-                    plugin._cache_result(cache_key, None, cleaned_metadata_for_negative)
+                    cache_result(cache_key, None, cleaned_metadata_for_negative)
                 else:
-                    plugin._cache_result(cache_key, None)
+                    cache_result(cache_key, None)
                 return _finish(None)
             else:
                 manual_prompt_needed = True
@@ -812,7 +816,7 @@ def search_plex_song(
                             "Manual search succeeded, caching for original query: {}", song
                         )
                         _log_cache_match_details(plugin, cache_key, result)
-                        plugin._cache_result(cache_key, result)
+                        cache_result(cache_key, result)
                         return _finish(result)
 
     plugin._log.debug(
@@ -821,7 +825,7 @@ def search_plex_song(
         ", ".join(search_strategies_tried) if search_strategies_tried else "none",
     )
     if cleaned_metadata_for_negative is not None:
-        plugin._cache_result(cache_key, None, cleaned_metadata_for_negative)
+        cache_result(cache_key, None, cleaned_metadata_for_negative)
     else:
-        plugin._cache_result(cache_key, None)
+        cache_result(cache_key, None)
     return _finish(None)

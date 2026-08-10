@@ -1032,11 +1032,15 @@ class PlexSync(BeetsPlugin):
 
         local-candidate borrowing is disabled (this query is already a
         canonical beets item, not an external query needing to borrow a
-        similar item's cached match) and the cache read is bypassed so a
-        forced resync always re-checks live Plex state; the resolved result
-        is still written to cache for other callers to reuse. Runs
-        non-interactively (no manual-search prompts) since this is called
-        from a ThreadPoolExecutor.
+        similar item's cached match) and the cache is bypassed entirely
+        (no read, no write) so a forced resync always re-checks live Plex
+        state and doesn't pay for a SQLite write per item - under a
+        threaded bulk resync those writes serialize on the cache db's lock
+        (no WAL, fresh connection per write) and can dominate wall-clock
+        time; live testing on a 63k-track library showed throughput drop
+        from ~5 tracks/s to ~0.05 tracks/s with per-item cache writes
+        enabled. Runs non-interactively (no manual-search prompts) since
+        this is called from a ThreadPoolExecutor.
 
         The LLM web-search cleanup fallback is also skipped (llm_attempted=
         True) even when ``use_llm_search`` is enabled: live testing showed it
