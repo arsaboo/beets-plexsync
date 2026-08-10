@@ -1067,11 +1067,15 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
 
         for item in items_without_keys:
             try:
-                tracks = ps.music.searchTracks(title=getattr(item, 'title', ''),
-                                              artist=getattr(item, 'artist', ''),
-                                              album=getattr(item, 'album', ''))
-                if tracks:
-                    plex_tracks.append(tracks[0])
+                # Use the same confidence-thresholded, multi-strategy matcher
+                # as the library sync (search_plex_track) instead of taking
+                # Plex's raw first search hit unconditionally - an
+                # unconditional tracks[0] can silently add the wrong track
+                # (or the same wrong track for two different items) when
+                # title/artist/album aren't an exact match.
+                track = ps.search_plex_track(item)
+                if track is not None:
+                    plex_tracks.append(track)
             except Exception:
                 continue
 

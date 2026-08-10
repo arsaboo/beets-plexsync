@@ -45,6 +45,38 @@ class CacheTests(unittest.TestCase):
         self.cache.clear()
         self.assertIsNone(self.cache.get(key))
 
+    def test_connect_enables_wal_and_closes_connection(self):
+        # WAL mode lets readers proceed alongside a writer instead of every
+        # write taking an exclusive lock on the whole file - the main fix
+        # for the threaded plexsync -f slowdown.
+        with self.cache._connect() as conn:
+            mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+        self.assertEqual(mode.lower(), 'wal')
+
+        # A bare `with sqlite3.connect(...) as conn:` never closes the
+        # connection (only commits/rolls back) - _connect() must actually
+        # close it, or every cache call leaks a connection object.
+        with self.cache._connect() as conn:
+            pass
+        with self.assertRaises(sqlite3.ProgrammingError):
+            conn.execute("SELECT 1")
+
+    def test_flexible_match_uses_index_with_case_sensitive_like(self):
+        # get()'s flexible title|artist|% match relies on case_sensitive_like
+        # so the prefix LIKE can use the `query` primary key index instead of
+        # a full table scan. Cache keys are always lowercased via
+        # normalize_text(), so this must not change which rows match.
+        self.cache.set('song|artist|album one', 111)
+        result = self.cache.get({'title': 'Song', 'artist': 'Artist', 'album': 'Album Two'})
+        self.assertEqual(result, (111, None))
+
+    def test_smart_playlist_style_dict_query_roundtrip(self):
+        # Sanity check that dict-style queries (as used by search_plex_song)
+        # still round-trip correctly through the new connection handling.
+        song = {'title': 'Roundtrip', 'artist': 'Artist', 'album': 'Album'}
+        self.cache.set(song, 456)
+        self.assertEqual(self.cache.get(song), (456, None))
+
 
 if __name__ == '__main__':
     unittest.main()

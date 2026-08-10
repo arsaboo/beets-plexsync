@@ -2,6 +2,7 @@ import json
 import logging
 import re
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 
 from plexapi.audio import Track
@@ -57,10 +58,47 @@ class Cache:
         self._initialize_db()
         self._initialize_spotify_cache()
 
+    @contextmanager
+    def _connect(self):
+        """Yield a SQLite connection, always closed on exit.
+
+        Sets WAL journal mode (readers don't block behind a writer, instead
+        of every write taking an exclusive lock on the whole file) and a
+        generous busy_timeout (retry-and-wait instead of raising "database
+        is locked" under contention). This matters under concurrent access
+        (e.g. plexsync -f's ThreadPoolExecutor): the original bare
+        ``sqlite3.connect(...)`` (default rollback-journal, 5s timeout, one
+        connection per call) serialized dozens of worker threads on the
+        cache db's write lock and was a major contributor to a measured
+        ~5 tracks/s -> ~0.05 tracks/s slowdown.
+
+        Also sets case_sensitive_like=ON so get()'s prefix-LIKE flexible
+        match can use the `query` primary key's index instead of a full
+        table scan - safe because cache keys are always lowercased via
+        normalize_text() before use, so case sensitivity changes nothing
+        about which rows match.
+
+        Note: a bare ``with sqlite3.connect(...) as conn:`` only
+        commits/rolls back on exit, it never closes the connection - every
+        prior call site was leaking a connection object. This closes it.
+        """
+        conn = sqlite3.connect(self.db_path, timeout=30)
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=30000")
+            conn.execute("PRAGMA case_sensitive_like=ON")
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
     def _initialize_db(self):
         """Initialize the SQLite database."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 cursor = conn.cursor()
 
                 # Create the tables if they don't exist
@@ -121,7 +159,7 @@ class Cache:
     def _initialize_spotify_cache(self):
         """Initialize Spotify-specific cache tables."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 cursor = conn.cursor()
 
                 # Check if tables exist
@@ -163,7 +201,7 @@ class Cache:
         try:
             import random
 
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 cursor = conn.cursor()
 
                 # Get all entries
@@ -198,7 +236,7 @@ class Cache:
     def clear_expired_playlist_cache(self, max_age_hours=72):
         """Clear expired playlist cache entries."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 cursor = conn.cursor()
                 expiry = datetime.now() - timedelta(hours=max_age_hours)
 
@@ -218,7 +256,7 @@ class Cache:
     def _cleanup_expired(self, days=7):
         """Remove negative cache entries older than specified days."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 cursor = conn.cursor()
                 expiry = datetime.now() - timedelta(days=days)
                 cursor.execute(
@@ -284,7 +322,7 @@ class Cache:
     def get(self, query):
         """Retrieve cached result for a given query."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 cursor = conn.cursor()
 
                 # Generate cache key
@@ -341,7 +379,7 @@ class Cache:
             # Generate cache key using the same method as get()
             cache_key = self._make_cache_key(query)
 
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
                     'REPLACE INTO cache (query, plex_ratingkey, cleaned_query) VALUES (?, ?, ?)',
@@ -361,7 +399,7 @@ class Cache:
             # Clear expired entries first
             self.clear_expired_playlist_cache()
 
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
                     "SELECT data FROM playlist_cache WHERE playlist_id = ? AND source = ?",
@@ -383,7 +421,7 @@ class Cache:
     def set_playlist_cache(self, playlist_id, source, data):
         """Store playlist data in cache for any source."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 cursor = conn.cursor()
 
                 # Convert datetime objects to ISO format strings
@@ -417,7 +455,7 @@ class Cache:
     def clear(self):
         """Clear all cached entries."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 cursor = conn.cursor()
                 cursor.execute("SELECT COUNT(*) FROM cache")
                 count_before = cursor.fetchone()[0]
@@ -432,7 +470,7 @@ class Cache:
     def clear_negative_cache_entries(self, pattern=None):
         """Clear negative cache entries, optionally matching a pattern."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 cursor = conn.cursor()
 
                 if pattern:
@@ -457,7 +495,7 @@ class Cache:
     def clear_old_format_entries(self):
         """Clear all old format cache entries (JSON and list formats)."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 cursor = conn.cursor()
 
                 # Delete entries that don't use the new pipe format
