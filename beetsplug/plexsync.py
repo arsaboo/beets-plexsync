@@ -1024,9 +1024,25 @@ class PlexSync(BeetsPlugin):
         if len(tracks) == 1:
             return tracks[0]
         elif len(tracks) > 1:
-            for track in tracks:
-                if track.parentTitle == item.album and track.title == item.title:
-                    return track
+            exact = [
+                track
+                for track in tracks
+                if track.parentTitle == item.album and track.title == item.title
+            ]
+            if len(exact) == 1:
+                return exact[0]
+            # Multiple tracks share the same title+album (e.g. covers or
+            # remakes by different artists) - disambiguate by artist.
+            candidates = exact or tracks
+            ranked = self.find_closest_match(
+                {
+                    "title": item.title,
+                    "album": item.album,
+                    "artist": item.artist,
+                },
+                candidates,
+            )
+            return ranked[0][0] if ranked else candidates[0]
         else:
             self._log.debug("Track {} not found in Plex library", item)
             return None
