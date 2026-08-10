@@ -511,6 +511,67 @@ class PlexSearchTests(unittest.TestCase):
         # wall-clock time (observed live: ~5 tracks/s -> ~0.05 tracks/s).
         self.assertFalse(recorded)
 
+    def test_exact_title_match_preferred_over_fuzzy_tie(self):
+        # Regression test: "Ram Aur Shyam Theme, Pt. 1..6 - Instrumental" all
+        # tied at the same find_closest_match score (0.950) live, because the
+        # "Pt. N" digit barely moves fuzzy title distance when artist+album
+        # are identical across all parts. A stable sort then always returned
+        # Pt. 1 regardless of which part was queried. An exact title match
+        # must be preferred over that fuzzy tie.
+        parts = [
+            types.SimpleNamespace(
+                ratingKey=100 + n,
+                title=f'Ram Aur Shyam Theme, Pt. {n} - Instrumental',
+                parentTitle='Ram Aur Shyam',
+                artist=lambda: types.SimpleNamespace(title='Naushad'),
+            )
+            for n in range(1, 7)
+        ]
+
+        class Music:
+            def searchTracks(self, **kwargs):
+                return list(parts)
+
+            def fetchItem(self, key):
+                raise AssertionError('fetchItem should not be called without a rating key')
+
+        cache = CacheStub()
+        music = Music()
+
+        plugin = types.SimpleNamespace()
+        plugin._log = DummyLogger()
+        plugin.cache = cache
+        plugin.music = music
+        plugin.search_llm = None
+        plugin.manual_track_search = lambda song: None
+        plugin._cache_result = lambda *args, **kwargs: None
+        plugin.get_local_beets_candidates = lambda song: []
+        plugin._try_candidate_direct_match = lambda cand, query, cache_key=None: None
+        plugin._prepare_candidate_variants = lambda candidates, song: []
+
+        seen_candidate_titles = []
+
+        def fake_find_closest_match(song, tracks):
+            seen_candidate_titles.append(sorted(t.title for t in tracks))
+            # Mimic the real tie: every candidate scores identically, so a
+            # stable sort would always put whichever came first (Pt. 1) on
+            # top if narrowing to the exact match hadn't already happened.
+            return [(t, 0.95) for t in tracks]
+
+        plugin.find_closest_match = fake_find_closest_match
+
+        song = {
+            'title': 'Ram Aur Shyam Theme, Pt. 5 - Instrumental',
+            'album': 'Ram Aur Shyam',
+            'artist': 'Naushad',
+        }
+        result = self.search.search_plex_song(plugin, song, manual_search=False)
+
+        self.assertIs(result, parts[4])  # Pt. 5, not Pt. 1
+        # find_closest_match must only have seen the exact-title candidate,
+        # not all 6 tied parts.
+        self.assertEqual(seen_candidate_titles, [['Ram Aur Shyam Theme, Pt. 5 - Instrumental']])
+
     def test_variant_rejected_when_similarity_low(self):
         variant_track = types.SimpleNamespace(
             ratingKey=512,

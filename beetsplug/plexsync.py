@@ -997,6 +997,31 @@ class PlexSync(BeetsPlugin):
                 plex_track = self.search_plex_track(item)
                 if plex_track is None:
                     self._log.info("No track found for: {}", item)
+                    # Clear any stale Plex fields from a previous (possibly
+                    # wrong) match. Without this, an item whose old match
+                    # collided with another item - or whose Plex track was
+                    # since removed/retagged - keeps its bogus
+                    # plex_ratingkey forever: search_plex_track now
+                    # correctly returns None here, but returning early
+                    # without clearing meant `-f` could never actually fix
+                    # it, since the stale key was never overwritten.
+                    cleared = False
+                    for field in (
+                        "plex_guid",
+                        "plex_ratingkey",
+                        "plex_userrating",
+                        "plex_skipcount",
+                        "plex_viewcount",
+                        "plex_lastviewedat",
+                        "plex_lastratedat",
+                        "plex_updated",
+                    ):
+                        if field in item:
+                            del item[field]
+                            cleared = True
+                    if cleared:
+                        item.store()
+                        self._log.debug("Cleared stale Plex fields for: {}", item)
                     return
                 item.plex_guid = plex_track.guid
                 item.plex_ratingkey = plex_track.ratingKey

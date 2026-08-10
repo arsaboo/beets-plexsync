@@ -96,5 +96,120 @@ class SearchPlexTrackTests(unittest.TestCase):
         self.assertIsNone(result_b)
 
 
+class FakeBeetsItem:
+    """Minimal stand-in for a beets Item supporting the subset of the
+    Model/flex-attribute protocol _process_item relies on: `in`, `del`,
+    attribute get/set, plus store()/try_write() call tracking."""
+
+    def __init__(self, **fields):
+        self._fields = dict(fields)
+        self._db = types.SimpleNamespace(directory=b"/music")
+        self.store_calls = 0
+        self.try_write_calls = 0
+
+    def __contains__(self, key):
+        return key in self._fields
+
+    def __delitem__(self, key):
+        del self._fields[key]
+
+    def __setattr__(self, name, value):
+        if name in ("_fields", "_db", "store_calls", "try_write_calls"):
+            object.__setattr__(self, name, value)
+        else:
+            self._fields[name] = value
+
+    def __getattr__(self, name):
+        # Only called when normal attribute lookup fails (i.e. not one of
+        # the real instance attributes set via object.__setattr__ above).
+        try:
+            return self._fields[name]
+        except KeyError:
+            raise AttributeError(name)
+
+    def store(self):
+        self.store_calls += 1
+
+    def try_write(self):
+        self.try_write_calls += 1
+
+    def __str__(self):
+        return self._fields.get("title", "<item>")
+
+
+class ProcessItemStaleFieldClearingTests(unittest.TestCase):
+    """Regression tests for _process_item leaving a stale plex_ratingkey in
+    place when search_plex_track now correctly returns None.
+
+    Before this fix: a beets item whose old (buggy) match collided with
+    another item, or whose Plex track was since removed/retagged, kept its
+    bogus plex_ratingkey forever - search_plex_track returning None just
+    caused an early return, never overwriting the stale value. So `-f`
+    could never actually fix these items even though the matcher itself was
+    already correct.
+    """
+
+    PLEX_FIELDS = (
+        "plex_guid",
+        "plex_ratingkey",
+        "plex_userrating",
+        "plex_skipcount",
+        "plex_viewcount",
+        "plex_lastviewedat",
+        "plex_lastratedat",
+        "plex_updated",
+    )
+
+    def _make_plugin(self, search_result=None):
+        return types.SimpleNamespace(
+            _log=DummyLogger(),
+            search_plex_track=lambda item: search_result,
+        )
+
+    def test_clears_stale_plex_fields_when_no_longer_matched(self):
+        item = FakeBeetsItem(
+            title="Kurja",
+            plex_ratingkey=595890,
+            plex_guid="old-guid",
+            plex_userrating=8.0,
+        )
+        plugin = self._make_plugin(search_result=None)
+
+        PlexSync._process_item(plugin, 1, item, write=False, force=True, items_len=1)
+
+        for field in ("plex_ratingkey", "plex_guid", "plex_userrating"):
+            self.assertNotIn(field, item)
+        self.assertEqual(item.store_calls, 1)
+
+    def test_does_not_store_when_nothing_to_clear(self):
+        """An item that never had Plex fields shouldn't trigger a needless
+        store() just because the search returned None."""
+        item = FakeBeetsItem(title="Never Synced")
+        plugin = self._make_plugin(search_result=None)
+
+        PlexSync._process_item(plugin, 1, item, write=False, force=True, items_len=1)
+
+        self.assertEqual(item.store_calls, 0)
+
+    def test_successful_match_still_sets_all_fields_normally(self):
+        track = types.SimpleNamespace(
+            guid="new-guid",
+            ratingKey=12345,
+            userRating=9.0,
+            skipCount=0,
+            viewCount=3,
+            lastViewedAt=None,
+            lastRatedAt=None,
+        )
+        item = FakeBeetsItem(title="Found Song")
+        plugin = self._make_plugin(search_result=track)
+
+        PlexSync._process_item(plugin, 1, item, write=False, force=True, items_len=1)
+
+        self.assertEqual(item.plex_ratingkey, 12345)
+        self.assertEqual(item.plex_guid, "new-guid")
+        self.assertEqual(item.store_calls, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -84,6 +84,34 @@ def _track_matches_artist_variants(track, variants: list[str]) -> bool:
     return False
 
 
+def _exact_title_matches(tracks, query_title: str, artist_variants: list[str]):
+    """Return the subset of tracks whose title exactly equals the query.
+
+    Fuzzy title distance barely moves for near-identical titles that differ
+    by only a short suffix (e.g. "..., Pt. 1" vs "..., Pt. 2" of the same
+    medley/theme), so multiple distinct tracks can tie at the same
+    find_closest_match score - and a stable sort then always returns
+    whichever part happened to come first from Plex, regardless of which
+    part was actually queried. An exact (case/whitespace-insensitive) title
+    match - further narrowed by artist when available - must win before
+    falling back to fuzzy ranking, or a request for Pt. 3 can silently
+    resolve to Pt. 1.
+    """
+    normalized_query = (query_title or "").strip().lower()
+    if not normalized_query:
+        return []
+    exact = [
+        track
+        for track in tracks
+        if (getattr(track, "title", "") or "").strip().lower() == normalized_query
+    ]
+    if len(exact) > 1 and artist_variants:
+        artist_filtered = [t for t in exact if _track_matches_artist_variants(t, artist_variants)]
+        if artist_filtered:
+            exact = artist_filtered
+    return exact
+
+
 def _log_cache_match_details(plugin, cache_key: str, track) -> None:
     """Log the Plex track metadata before caching the match."""
     if track is None:
@@ -601,6 +629,17 @@ def search_plex_song(
             return _finish(result)
         tracks = []
     if len(tracks) > 1:
+        exact_title_matches = _exact_title_matches(
+            tracks, song.get("title", ""), _split_artist_variants(song.get("artist"))
+        )
+        if exact_title_matches:
+            plugin._log.debug(
+                "Narrowed {} candidates to {} exact title match(es) for '{}' before fuzzy ranking",
+                len(tracks),
+                len(exact_title_matches),
+                song.get("title", ""),
+            )
+            tracks = exact_title_matches
         sorted_tracks = plugin.find_closest_match(song, tracks)
         plugin._log.debug(
             "Found {} tracks for {} using strategies: {}",
