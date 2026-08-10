@@ -1037,11 +1037,20 @@ class PlexSync(BeetsPlugin):
         is still written to cache for other callers to reuse. Runs
         non-interactively (no manual-search prompts) since this is called
         from a ThreadPoolExecutor.
+
+        The LLM web-search cleanup fallback is also skipped (llm_attempted=
+        True) even when ``use_llm_search`` is enabled: live testing showed it
+        can confidently return a wrong track for short/generic titles (e.g.
+        "Ghoomar") that the deterministic multi-strategy matcher correctly
+        scores below threshold and abstains on. A library resync should stay
+        deterministic rather than trade one class of wrong guesses for
+        another.
         """
         song = {"title": item.title, "album": item.album, "artist": item.artist}
         track = self.search_plex_song(
             song,
             manual_search=False,
+            llm_attempted=True,
             use_local_candidates=False,
             use_cache=False,
             playlist_id=None,

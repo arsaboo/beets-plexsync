@@ -54,6 +54,9 @@ class SearchPlexTrackTests(unittest.TestCase):
         )
         # Non-interactive: no manual prompts from a ThreadPoolExecutor worker.
         self.assertEqual(kwargs["manual_search"], False)
+        # Skip the LLM web-search cleanup fallback: a full-library resync
+        # should stay deterministic (see live-testing note in the docstring).
+        self.assertEqual(kwargs["llm_attempted"], True)
         # Don't let unrelated beets items borrow each other's cached match.
         self.assertEqual(kwargs["use_local_candidates"], False)
         # Force resync should re-check live Plex state, not a stale cache
