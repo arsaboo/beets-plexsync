@@ -1,3 +1,5 @@
+
+
 # beets-plexsync
 A plugin for [beets][beets] to sync with your Plex server.
 
@@ -7,7 +9,7 @@ A plugin for [beets][beets] to sync with your Plex server.
 - **AI-Generated Playlists**: Use `beet plexsonic -p "YOUR_PROMPT"` to create a playlist based on YOUR_PROMPT. Modify the playlist name using `-m` flag, change the number of tracks requested with `-n` flag, and clear the playlist before adding new songs with `-c` flag.
 
 ### Smart Playlists
-Use `beet plex_smartplaylists [-o ONLY]` to generate or manage custom playlists in Plex. The plugin currently supports various types of playlists:
+Use `beet plex_smartplaylists [-o PLAYLIST_IDS]` to generate or manage custom playlists in Plex. The plugin currently supports various types of playlists:
 
 You can use the `-o` or `--only` option to specify a comma-separated list of playlist IDs to update. This is useful for updating only certain playlists (e.g., just the AI playlists) on a schedule:
 
