@@ -77,7 +77,13 @@ def _deduplicate_plex_tracks(tracks):
 def _match_retry_and_drain(plugin, songs, manual_search, playlist_id, progress_desc):
     """Match songs to Plex tracks with LLM retry and manual prompt draining.
 
-    Returns a deduplicated list of matched Plex tracks.
+    Returns (matched, unmatched): a deduplicated list of matched Plex tracks,
+    and the list of source song dicts that were never matched. Songs picked
+    up later by `_drain_manual_prompt_queue` can't be attributed back to a
+    specific source dict (the queue only returns Plex track objects), so a
+    song queued there is left in `unmatched` even if it was ultimately added
+    to the playlist -- callers logging "not found" should treat this list as
+    an upper bound, not an exact one.
     """
     songs_to_process = list(songs or [])
     progress = plugin.create_progress_counter(
@@ -110,15 +116,19 @@ def _match_retry_and_drain(plugin, songs, manual_search, playlist_id, progress_d
         # already queued in ManualPromptQueue from the first pass — re-enqueuing would be
         # silently dropped by _seen dedup, and immediate manual prompts would interrupt the
         # drain phase ordering.
+        still_unmatched = []
         for song in unmatched:
             found = plugin.search_plex_song(song, False, playlist_id=playlist_id)
             if found is not None:
                 matched.append(found)
+            else:
+                still_unmatched.append(song)
+        unmatched = still_unmatched
 
     if playlist_id and hasattr(plugin, "_drain_manual_prompt_queue"):
         matched.extend(plugin._drain_manual_prompt_queue(playlist_id) or [])
 
-    return _deduplicate_plex_tracks(matched)
+    return _deduplicate_plex_tracks(matched), unmatched
 
 
 def add_songs_to_plex(plugin, playlist, songs, manual_search=None):
@@ -127,7 +137,7 @@ def add_songs_to_plex(plugin, playlist, songs, manual_search=None):
         manual_search = get_plexsync_config("manual_search", bool, False)
 
     playlist_id = str(playlist) if playlist is not None else None
-    unique_list = _match_retry_and_drain(
+    unique_list, _unmatched = _match_retry_and_drain(
         plugin, songs, manual_search, playlist_id,
         f"Matching Plex tracks for {playlist}",
     )
@@ -312,7 +322,7 @@ def generate_imported_playlist(plugin, lib, playlist_config, plex_lookup=None):
     plugin._log.info("Found {} unique tracks across sources", len(unique_tracks))
     
     playlist_id = str(playlist_name) if playlist_name is not None else None
-    matched_songs = _match_retry_and_drain(
+    matched_songs, unmatched_songs = _match_retry_and_drain(
         plugin, unique_tracks, manual_search, playlist_id,
         f"{playlist_name[:18]} match",
     )
@@ -327,8 +337,15 @@ def generate_imported_playlist(plugin, lib, playlist_config, plex_lookup=None):
         matched_songs = smartplaylists.apply_playlist_filters(plugin, matched_songs, filters)
 
     unique_matched = _deduplicate_plex_tracks(matched_songs)
-    
+
     with open(log_file, 'a', encoding='utf-8') as f:
+        if unmatched_songs:
+            f.write("\nTracks not found in Plex library:\n")
+            for song in unmatched_songs:
+                artist = song.get('artist') or 'Unknown'
+                album = song.get('album') or 'Unknown'
+                title = song.get('title') or 'Unknown'
+                f.write(f"Not found: {artist} - {album} - {title}\n")
         f.write("\nImport Summary:\n")
         f.write(f"Total tracks fetched from sources: {len(all_tracks)}\n")
         f.write(f"Unique tracks after de-duplication: {len(unique_tracks)}\n")

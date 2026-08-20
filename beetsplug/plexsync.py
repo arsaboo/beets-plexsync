@@ -1696,27 +1696,27 @@ class PlexSync(BeetsPlugin):
             tracks_to_import = []
             track_lines_to_remove = set()
             in_not_found_section = False
+            seen_not_found_marker = False
             header_lines = []
             summary_lines = []
-            not_found_start = -1
 
             # First pass: collect tracks and identify sections
             for i, line in enumerate(log_content):
                 if "Tracks not found in Plex library:" in line:
                     in_not_found_section = True
-                    not_found_start = i
+                    seen_not_found_marker = True
                     continue
                 elif "Import Summary:" in line:
                     in_not_found_section = False
                     summary_lines = log_content[i:]
                     break
 
-                if i < not_found_start:
+                if not seen_not_found_marker:
                     header_lines.append(line)
                 elif in_not_found_section and line.startswith("Not found:"):
                     track_info = parse_track_info(line)
                     if track_info:
-                        track_info["line_num"] = i
+                        track_info["_line_num"] = i
                         tracks_to_import.append(track_info)
 
             if tracks_to_import:
@@ -1725,10 +1725,11 @@ class PlexSync(BeetsPlugin):
 
                 matched_tracks = []
                 for track in tracks_to_import:
+                    line_num = track.pop("_line_num")
                     found = self.search_plex_song(track, manual_search=True)
                     if found:
                         matched_tracks.append(found)
-                        track_lines_to_remove.add(track["line_num"])
+                        track_lines_to_remove.add(line_num)
                         total_imported += 1
                     else:
                         total_failed += 1
