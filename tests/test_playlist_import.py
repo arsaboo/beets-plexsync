@@ -54,7 +54,31 @@ class CacheStub:
 
 
 
-def ensure_stubs(data):
+_STUB_MODULE_NAMES = (
+    'beets', 'beets.ui', 'beets.library', 'beets.autotag', 'beets.autotag.distance',
+    'plexapi', 'plexapi.audio', 'confuse',
+)
+
+
+def ensure_stubs(data, test_case=None):
+    """Install lightweight stub modules for beets/plexapi/confuse.
+
+    If `test_case` is given, the previous sys.modules entries (real modules
+    or earlier stubs) are snapshotted and restored via addCleanup, so this
+    call doesn't leak into later tests run in the same process.
+    """
+    if test_case is not None:
+        saved = {name: sys.modules.get(name) for name in _STUB_MODULE_NAMES}
+
+        def _restore():
+            for name, mod in saved.items():
+                if mod is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = mod
+
+        test_case.addCleanup(_restore)
+
     config = DummyConfig()
     config.set_data(data)
 
@@ -211,7 +235,7 @@ class PluginStub:
 
 class PlaylistImportTest(unittest.TestCase):
     def setUp(self):
-        self.config, self.UserError = ensure_stubs({'plexsync': {'manual_search': False}})
+        self.config, self.UserError = ensure_stubs({'plexsync': {'manual_search': False}}, self)
         if 'beetsplug.plex.playlist_import' in sys.modules:
             importlib.reload(sys.modules['beetsplug.plex.playlist_import'])
         else:

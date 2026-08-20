@@ -44,12 +44,21 @@ class PlexSearchTests(unittest.TestCase):
             def decorator(func):
                 return func
             return decorator
+        _saved_pydantic = sys.modules.get('pydantic')
+
+        def _restore_pydantic():
+            if _saved_pydantic is None:
+                sys.modules.pop('pydantic', None)
+            else:
+                sys.modules['pydantic'] = _saved_pydantic
+
+        self.addCleanup(_restore_pydantic)
         sys.modules['pydantic'] = types.SimpleNamespace(
             BaseModel=SimpleBaseModel,
             Field=Field,
             field_validator=field_validator,
         )
-        ensure_stubs({'plexsync': {}, 'llm': {'search': {}}})
+        ensure_stubs({'plexsync': {}, 'llm': {'search': {}}}, self)
         if 'beetsplug.plex.search' in sys.modules:
             importlib.reload(sys.modules['beetsplug.plex.search'])
         else:

@@ -10,7 +10,7 @@ from tests.test_playlist_import import DummyLogger, ensure_stubs
 
 class CacheTests(unittest.TestCase):
     def setUp(self):
-        ensure_stubs({'plexsync': {}})
+        ensure_stubs({'plexsync': {}}, self)
         import sys
         sys.modules.setdefault('plexapi.audio', types.SimpleNamespace(Track=object))
         sys.modules.setdefault('plexapi.video', types.SimpleNamespace(Video=object))

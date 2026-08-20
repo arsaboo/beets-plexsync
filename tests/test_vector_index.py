@@ -2,6 +2,8 @@ import os
 import tempfile
 import types
 
+from beets.library import Item
+
 from beetsplug.core.vector_index import BeetsVectorIndex
 from beetsplug.plexsync import PlexSync
 
@@ -22,6 +24,7 @@ def _build_plugin(index, info):
         _vector_index_info=info,
         register_listener=lambda *args, **kwargs: None,
         _extract_vector_metadata=_extract_meta,
+        _plexupdate=lambda *args, **kwargs: None,
     )
 
 
@@ -61,12 +64,11 @@ def test_listen_for_db_change_upserts_into_index():
     info = {"db_path": db_path, "mtime": os.path.getmtime(db_path), "size": len(index)}
     plugin = _build_plugin(index, info)
 
-    model = types.SimpleNamespace(
+    model = Item(
         id=10,
         title="New Track",
         album="Fresh Album",
         artist="New Artist",
-        plex_ratingkey=None,
     )
     lib = types.SimpleNamespace(path=db_path)
 

@@ -9,7 +9,16 @@ from tests.test_playlist_import import ensure_stubs, DummyLogger
 class ManualSearchTest(unittest.TestCase):
     def setUp(self):
         # set up beets/confuse stubs and load manual_search
-        self.config, _ = ensure_stubs({'plexsync': {'manual_search': False}})
+        self.config, _ = ensure_stubs({'plexsync': {'manual_search': False}}, self)
+        _saved_matching = sys.modules.get('beetsplug.core.matching')
+
+        def _restore_matching():
+            if _saved_matching is None:
+                sys.modules.pop('beetsplug.core.matching', None)
+            else:
+                sys.modules['beetsplug.core.matching'] = _saved_matching
+
+        self.addCleanup(_restore_matching)
         sys.modules['beetsplug.core.matching'] = types.SimpleNamespace(
             get_fuzzy_score=lambda a, b: 1.0 if a and b and a.lower() == b.lower() else 0.5
         )

@@ -26,12 +26,37 @@ class LLMSearchTest(unittest.TestCase):
             def decorator(func):
                 return func
             return decorator
+        _saved_pydantic = sys.modules.get('pydantic')
+
+        def _restore_pydantic():
+            if _saved_pydantic is None:
+                sys.modules.pop('pydantic', None)
+            else:
+                sys.modules['pydantic'] = _saved_pydantic
+
+        self.addCleanup(_restore_pydantic)
         sys.modules['pydantic'] = types.SimpleNamespace(
             BaseModel=SimpleBaseModel,
             Field=Field,
             field_validator=field_validator,
         )
-        ensure_stubs({'llm': {'search': {}}})
+        ensure_stubs(
+            {
+                'llm': {
+                    'api_key': '',
+                    'model': 'gpt-3.5-turbo',
+                    'base_url': '',
+                    'search': {
+                        'provider': '',
+                        'api_key': '',
+                        'base_url': '',
+                        'model': '',
+                        'embedding_model': 'snowflake-arctic-embed2:latest',
+                    },
+                }
+            },
+            self,
+        )
         if 'beetsplug.ai.llm' in sys.modules:
             importlib.reload(sys.modules['beetsplug.ai.llm'])
         else:
@@ -56,9 +81,13 @@ class LLMSearchTest(unittest.TestCase):
         self.assertEqual(result, {'title': 'Found', 'artist': 'Artist', 'album': 'Album'})
 
     def test_instructor_available_flag(self):
-        """Test that INSTRUCTOR_AVAILABLE flag is properly set."""
-        # The flag should be False in test environment (no instructor installed)
-        self.assertFalse(self.llm.INSTRUCTOR_AVAILABLE)
+        """Test that INSTRUCTOR_AVAILABLE flag matches actual instructor availability."""
+        try:
+            import instructor  # noqa: F401
+            expected = True
+        except ImportError:
+            expected = False
+        self.assertEqual(self.llm.INSTRUCTOR_AVAILABLE, expected)
 
     def test_create_fallback_song(self):
         """Test fallback song creation."""

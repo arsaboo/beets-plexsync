@@ -7,7 +7,7 @@ from tests.test_playlist_import import ensure_stubs, DummyLogger
 
 class SpotifyTransferTest(unittest.TestCase):
     def setUp(self):
-        ensure_stubs({'plexsync': {}})
+        ensure_stubs({'plexsync': {}}, self)
         if 'beetsplug.plex.spotify_transfer' in importlib.sys.modules:
             importlib.reload(importlib.sys.modules['beetsplug.plex.spotify_transfer'])
         else:

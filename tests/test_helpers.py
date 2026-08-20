@@ -40,7 +40,22 @@ class ConfigValueError(Exception):
     pass
 
 
-def ensure_stubs(data):
+_STUB_MODULE_NAMES = ('beets', 'beets.ui', 'confuse')
+
+
+def ensure_stubs(data, test_case=None):
+    if test_case is not None:
+        saved = {name: sys.modules.get(name) for name in _STUB_MODULE_NAMES}
+
+        def _restore():
+            for name, mod in saved.items():
+                if mod is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = mod
+
+        test_case.addCleanup(_restore)
+
     config = DummyConfig()
     config.set_data(data)
 
@@ -67,26 +82,26 @@ def ensure_stubs(data):
 
 class GetPlexsyncConfigTest(unittest.TestCase):
     def setUp(self):
-        self.config = ensure_stubs({'plexsync': {}})
-        if 'beetsplug.helpers' in sys.modules:
-            importlib.reload(sys.modules['beetsplug.helpers'])
+        self.config = ensure_stubs({'plexsync': {}}, self)
+        if 'beetsplug.core.config' in sys.modules:
+            importlib.reload(sys.modules['beetsplug.core.config'])
         else:
-            importlib.import_module('beetsplug.helpers')
+            importlib.import_module('beetsplug.core.config')
 
     def test_default_value_returned(self):
-        helpers = importlib.import_module('beetsplug.helpers')
+        helpers = importlib.import_module('beetsplug.core.config')
         self.assertTrue(helpers.get_plexsync_config('manual_search', bool, True))
 
     def test_nested_lookup(self):
         self.config.set_data({'plexsync': {'playlists': {'items': [1, 2]}}})
-        helpers = importlib.import_module('beetsplug.helpers')
+        helpers = importlib.import_module('beetsplug.core.config')
         self.assertEqual(
             helpers.get_plexsync_config(['playlists', 'items'], list, []),
             [1, 2],
         )
 
     def test_missing_nested_returns_default(self):
-        helpers = importlib.import_module('beetsplug.helpers')
+        helpers = importlib.import_module('beetsplug.core.config')
         self.assertEqual(
             helpers.get_plexsync_config(['playlists', 'defaults'], dict, {'x': 1}),
             {'x': 1},
