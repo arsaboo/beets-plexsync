@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from beetsplug.plex import smartplaylists as sp_mod
-
 """Utilities for transferring Plex playlists to Spotify."""
 
 

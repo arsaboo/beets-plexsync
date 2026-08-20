@@ -8,20 +8,12 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from typing import Tuple
 import time
-import os
-import copy
 import copy
 
 import json
 
 from beets import config
 from beetsplug.core.config import get_config_value, get_plexsync_config
-from beetsplug.core.vector_index import BeetsVectorIndex
-from beetsplug.providers.gaana import import_gaana_playlist
-from beetsplug.providers.tidal import import_tidal_playlist
-from beetsplug.providers.youtube import import_yt_playlist
-from beetsplug.providers.m3u8 import import_m3u8_playlist
-from beetsplug.providers.http_post import import_post_playlist
 
 # Module-level random number generator to avoid global seeding
 import numpy as np
@@ -535,8 +527,6 @@ def calculate_track_score(ps, track, base_time=None, tracks_context=None, playli
 
 
 def select_tracks_weighted(ps, tracks, num_tracks, playlist_type=None):
-    import numpy as np
-    global _module_rng
     if not tracks:
         return []
 

@@ -1,5 +1,3 @@
-import re
-import json
 import logging
 
 _log = logging.getLogger('beets.plexsync.youtube')

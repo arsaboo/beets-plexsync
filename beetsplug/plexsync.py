@@ -20,41 +20,30 @@ Put something like the following in your config.yaml to configure:
 import logging
 import os
 import asyncio
-import random
 import re
 import time
 import json
-import spotipy
-import numpy as np
 import confuse
 import enlighten
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Dict, List, Optional, Tuple
 
-import dateutil.parser
-import requests
 from beets import config, context, ui
 from beets.dbcore import types
-from beets.dbcore.query import MatchQuery
 from beets.dbcore.types import DateType
 from beets.library import Item  # Added Item to import
 from beets.plugins import BeetsPlugin
-from bs4 import BeautifulSoup
-from jiosaavn import JioSaavn
 from openai import OpenAI
 from plexapi import exceptions
 from plexapi.server import PlexServer
-from pydantic import BaseModel, Field
-from requests.exceptions import ConnectionError, ContentDecodingError
-from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
 
 from beetsplug.core.cache import Cache
-from beetsplug.ai.llm import search_track_info, Song, SongRecommendations
-from beetsplug.core.matching import clean_string, plex_track_distance, get_fuzzy_score
+from beetsplug.ai.llm import SongRecommendations
+from beetsplug.core.matching import clean_string, plex_track_distance
 from beetsplug.core.vector_index import BeetsVectorIndex
 from beetsplug.providers.apple import import_apple_playlist
 from beetsplug.providers.jiosaavn import import_jiosaavn_playlist
@@ -63,14 +52,7 @@ from beetsplug.plex.queues import (
     ManualPromptQueue,
 )
 from beetsplug.utils.prompt_logging import prompt_guard
-from beetsplug.utils.helpers import (
-    parse_title,
-    clean_album_name,
-)
-from beetsplug.core.config import (
-    get_config_value,
-    get_plexsync_config,
-)
+from beetsplug.core.config import get_plexsync_config
 from beetsplug.plex import operations as plex_ops
 from beetsplug.providers import spotify as spotify_provider
 from beetsplug.plex import search as plex_search
@@ -1355,7 +1337,6 @@ class PlexSync(BeetsPlugin):
 
         # Preferred method: use server-level history filtered by date & section
         album_data = {}
-        used_server_history = False
         try:
             section_id = int(getattr(self.music, "key", 0)) or None
             history_entries = self.plex.history(
@@ -1363,7 +1344,6 @@ class PlexSync(BeetsPlugin):
                 librarySectionID=section_id,
                 maxresults=None,
             )
-            used_server_history = True
             self._log.debug("Using server history for section {} since {} ({} entries)", section_id, frm_dt.strftime('%Y-%m-%d'), len(history_entries))
 
             skipped_entries = 0

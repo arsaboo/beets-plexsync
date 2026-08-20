@@ -8,7 +8,7 @@ import unicodedata
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from typing import Counter as CounterType
-from typing import Dict, Iterable, Iterator, List, Mapping, MutableMapping, Optional, Tuple
+from typing import Dict, Iterator, List, Mapping, MutableMapping, Tuple
 
 from beetsplug.core.matching import clean_string
 

@@ -1,12 +1,10 @@
 """Collage creation helpers extracted from plexsync."""
 
 import os
-from datetime import datetime
 from io import BytesIO
 
 import requests
 from PIL import Image
-from plexapi import exceptions
 
 
 def create_collage(list_image_urls, dimension, logger):

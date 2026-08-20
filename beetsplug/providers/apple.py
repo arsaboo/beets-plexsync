@@ -23,7 +23,7 @@ def import_apple_playlist(url, cache=None, headers=None):
     if cache:
         cached_data = cache.get_playlist_cache(playlist_id, 'apple')
         if (cached_data):
-            _log.info(f"Using cached Apple Music playlist data")
+            _log.info("Using cached Apple Music playlist data")
             return cached_data
 
     if headers is None:
@@ -51,7 +51,7 @@ def import_apple_playlist(url, cache=None, headers=None):
         try:
             data = soup.find("script", id="serialized-server-data").text
         except AttributeError:
-            _log.debug(f"Error parsing Apple Music playlist")
+            _log.debug("Error parsing Apple Music playlist")
             return []
 
         # load the data as a JSON object
