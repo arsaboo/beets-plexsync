@@ -160,6 +160,6 @@ def plex_clear_playlist(plex, playlist_name: str) -> None:
     """Clear all items from a Plex playlist."""
     plist = plex.playlist(playlist_name)
     tracks = plist.items()
-    for track in tracks:
-        plist.removeItems(track)
+    if tracks:
+        plist.removeItems(tracks)
 

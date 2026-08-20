@@ -216,8 +216,11 @@ class Cache:
                             created_dt = datetime.fromisoformat(created_at)
                             expiry = created_dt + timedelta(hours=expiry_hours)
 
-                            # Check if expired
-                            if datetime.now() > expiry:
+                            # Check if expired. created_at comes from SQLite's
+                            # CURRENT_TIMESTAMP, which is UTC; compare against
+                            # UTC too (datetime.now() is local time and would
+                            # make expiry off by the local UTC offset).
+                            if datetime.utcnow() > expiry:
                                 cursor.execute(
                                     f"DELETE FROM {table_name} WHERE playlist_id = ?",
                                     (playlist_id,),
@@ -238,7 +241,8 @@ class Cache:
         try:
             with self._connect() as conn:
                 cursor = conn.cursor()
-                expiry = datetime.now() - timedelta(hours=max_age_hours)
+                # created_at is SQLite's CURRENT_TIMESTAMP (UTC); compare in UTC.
+                expiry = datetime.utcnow() - timedelta(hours=max_age_hours)
 
                 # Delete expired entries
                 cursor.execute(
@@ -258,7 +262,8 @@ class Cache:
         try:
             with self._connect() as conn:
                 cursor = conn.cursor()
-                expiry = datetime.now() - timedelta(days=days)
+                # created_at is SQLite's CURRENT_TIMESTAMP (UTC); compare in UTC.
+                expiry = datetime.utcnow() - timedelta(days=days)
                 cursor.execute(
                     "DELETE FROM cache WHERE plex_ratingkey = -1 AND created_at < ?",
                     (expiry.isoformat(),),
@@ -270,6 +275,11 @@ class Cache:
                 conn.commit()
         except Exception as e:
             logger.error("Failed to cleanup expired cache entries: {}", e)
+
+    @staticmethod
+    def _escape_like(text):
+        """Escape %, _ and the escape char itself for a SQLite LIKE pattern."""
+        return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
     def _sanitize_query_for_log(self, query):
         """Sanitize query for logging."""
@@ -343,14 +353,14 @@ class Cache:
                 # If no exact match, try flexible matching for new pipe format only
                 # This handles cases where album names might have slight variations
                 if isinstance(query, dict):
-                    normalized_title = self.normalize_text(query.get("title", ""))
-                    normalized_artist = self.normalize_text(query.get("artist", ""))
+                    normalized_title = self._escape_like(self.normalize_text(query.get("title", "")))
+                    normalized_artist = self._escape_like(self.normalize_text(query.get("artist", "")))
 
                     # Look for entries with same title and artist (new pipe format only)
                     cursor.execute(
                         '''SELECT plex_ratingkey, cleaned_query, query
                            FROM cache
-                           WHERE query LIKE ? AND query LIKE '%|%' ''',
+                           WHERE query LIKE ? ESCAPE '\\' AND query LIKE '%|%' ''',
                         (f'{normalized_title}|{normalized_artist}|%',)
                     )
 
