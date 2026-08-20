@@ -164,6 +164,18 @@ def search_plex_song(
     if manual_search is None:
         manual_search = get_plexsync_config("manual_search", bool, False)
 
+    # Normalize into a fresh dict with title/artist always present (as
+    # strings) so the direct song["title"]/song["artist"] indexing below
+    # can't raise KeyError on a song missing a key -- copied so we never
+    # mutate the caller's original dict.
+    if isinstance(song, dict):
+        song = dict(song)
+    else:
+        song = {"title": str(song)}
+    song["title"] = song.get("title") or ""
+    song["artist"] = song.get("artist") or ""
+    song.setdefault("album", None)
+
     cache_result = plugin._cache_result if use_cache else (lambda *a, **k: None)
 
     cache_key = plugin.cache._make_cache_key(song)

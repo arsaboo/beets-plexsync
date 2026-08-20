@@ -77,7 +77,10 @@ class PlexSearchTests(unittest.TestCase):
         plugin = types.SimpleNamespace()
         plugin._log = DummyLogger()
         cache = CacheStub()
-        cache.storage[cache._make_cache_key({'title': 'Song', 'artist': 'Artist'})] = (track.ratingKey, None)
+        # search_plex_song normalizes the incoming song dict to always include
+        # an 'album' key (defaulting to None) before computing the cache key,
+        # so the pre-populated key must match that same shape.
+        cache.storage[cache._make_cache_key({'title': 'Song', 'artist': 'Artist', 'album': None})] = (track.ratingKey, None)
         plugin.cache = cache
         plugin.music = Music()
         plugin.search_llm = None
