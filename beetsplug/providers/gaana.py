@@ -33,16 +33,16 @@ def import_gaana_playlist(url, cache=None):
             "Gaana plugin not installed. \
                         See https://github.com/arsaboo/beets-gaana"
         )
-        return None
+        return []
 
     try:
         gaana = GaanaPlugin()
     except Exception as e:
         _log.error(f"Unable to initialize Gaana plugin. Error: {e}")
-        return None
+        return []
 
     # Get songs from Gaana
-    song_list = gaana.import_gaana_playlist(url)
+    song_list = gaana.import_gaana_playlist(url) or []
 
     if not song_list:
         _log.warning(f"No tracks found in Gaana playlist {playlist_id}")

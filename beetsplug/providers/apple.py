@@ -50,7 +50,7 @@ def import_apple_playlist(url, cache=None, headers=None):
             data = soup.find("script", id="serialized-server-data").text
         except AttributeError:
             _log.debug(f"Error parsing Apple Music playlist")
-            return None
+            return []
 
         # load the data as a JSON object
         data = json.loads(data)
@@ -60,7 +60,7 @@ def import_apple_playlist(url, cache=None, headers=None):
             songs = data[0]["data"]["sections"][1]["items"]
         except (KeyError, IndexError) as e:
             _log.error(f"Failed to extract songs from Apple Music data: {e}")
-            return None
+            return []
 
         # Loop through each song element
         for song in songs:

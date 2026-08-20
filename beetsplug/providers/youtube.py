@@ -28,11 +28,11 @@ def import_yt_playlist(url, cache=None):
         from beetsplug.youtube import YouTubePlugin
     except ModuleNotFoundError:
         _log.error("YouTube plugin not installed")
-        return None
+        return []
 
     try:
         ytp = YouTubePlugin()
-        song_list = ytp.import_youtube_playlist(url)
+        song_list = ytp.import_youtube_playlist(url) or []
 
         # Cache successful results
         if cache and song_list:
@@ -42,7 +42,7 @@ def import_yt_playlist(url, cache=None):
         return song_list
     except Exception as e:
         _log.error("Unable to initialize YouTube plugin. Error: %s", e)
-        return None
+        return []
 
 
 def import_yt_search(query, limit, cache=None):

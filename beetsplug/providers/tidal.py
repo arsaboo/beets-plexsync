@@ -19,18 +19,18 @@ def import_tidal_playlist(url, cache=None):
     if cache:
         cached_data = cache.get_playlist_cache(playlist_id, 'tidal')
         if (cached_data):
-            _log.info(f"Using cached Tidal playlist data")
+            _log.info("Using cached Tidal playlist data")
             return cached_data
 
     try:
         from beetsplug.tidal import TidalPlugin
     except ModuleNotFoundError:
-        _log.error(f"Tidal plugin not installed")
-        return None
+        _log.error("Tidal plugin not installed")
+        return []
 
     try:
         tidal = TidalPlugin()
-        song_list = tidal.import_tidal_playlist(url)
+        song_list = tidal.import_tidal_playlist(url) or []
 
         # Cache successful results
         if cache and song_list:
@@ -40,4 +40,4 @@ def import_tidal_playlist(url, cache=None):
         return song_list
     except Exception as e:
         _log.error(f"Unable to initialize Tidal plugin. Error: {e}")
-        return None
+        return []
