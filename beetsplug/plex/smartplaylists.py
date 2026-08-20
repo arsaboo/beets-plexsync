@@ -712,6 +712,15 @@ def _get_with_cache(ps, cache_key, func):
 
 
 def _get_library_tracks(ps, preferred_genres, filters, exclusion_days):
+    """Fetch candidate library tracks, applying server-side filters when possible.
+
+    Returns (tracks, filtered_server_side). `filtered_server_side` is True only
+    when `adv_filters` were actually sent to and honored by Plex's searchTracks
+    -- callers must not skip client-side apply_playlist_filters() just because
+    filters existed, since the server-side call can fail and fall back to an
+    unfiltered full-library fetch.
+    """
+    filtered_server_side = False
 
     adv_filters = build_advanced_filters(filters, exclusion_days, preferred_genres)
     if adv_filters:
@@ -721,6 +730,7 @@ def _get_library_tracks(ps, preferred_genres, filters, exclusion_days):
             _t0 = time.time()
 
             tracks = _get_with_cache(ps, cache_key, lambda: ps.music.searchTracks(filters=adv_filters))
+            filtered_server_side = True
 
             ps._log.debug(
                 "Server-side filter fetched {} tracks in {:.2f}s",
@@ -755,7 +765,7 @@ def _get_library_tracks(ps, preferred_genres, filters, exclusion_days):
     except Exception:
         pass
 
-    return tracks
+    return tracks, filtered_server_side
 
 
 def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_genres, similar_tracks, playlist_type):
@@ -927,16 +937,13 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
                     continue
 
             ps._log.debug("Collecting additional tracks from library for discovery...")
-            all_library_tracks = _get_library_tracks(ps, preferred_genres, filters, exclusion_days)
+            all_library_tracks, filtered_server_side = _get_library_tracks(
+                ps, preferred_genres, filters, exclusion_days
+            )
 
-            # Filter library tracks
-            if filters:
-                try:
-                    adv = build_advanced_filters(filters, exclusion_days)
-                except Exception:
-                    adv = None
-                if not adv:
-                    all_library_tracks = apply_playlist_filters(ps, all_library_tracks, filters)
+            # Filter library tracks client-side unless the server already applied them
+            if filters and not filtered_server_side:
+                all_library_tracks = apply_playlist_filters(ps, all_library_tracks, filters)
 
             # Convert library tracks to beets items
             library_final_tracks = []
@@ -964,16 +971,13 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
                                         plex_lookup.get(key) if key and key in plex_lookup else track)
         else:
             # For other playlist types, use standard library tracks
-            all_library_tracks = _get_library_tracks(ps, preferred_genres, filters, exclusion_days)
+            all_library_tracks, filtered_server_side = _get_library_tracks(
+                ps, preferred_genres, filters, exclusion_days
+            )
 
-            # Skip redundant client-side filtering when server-side filters fully covered them
-            if filters:
-                try:
-                    adv = build_advanced_filters(filters, exclusion_days)
-                except Exception:
-                    adv = None
-                if not adv:
-                    all_library_tracks = apply_playlist_filters(ps, all_library_tracks, filters)
+            # Skip redundant client-side filtering only when the server actually applied them
+            if filters and not filtered_server_side:
+                all_library_tracks = apply_playlist_filters(ps, all_library_tracks, filters)
 
             unique_tracks = []
             for track in all_library_tracks:
