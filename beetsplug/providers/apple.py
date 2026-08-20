@@ -30,7 +30,9 @@ def import_apple_playlist(url, cache=None, headers=None):
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 0.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
             "Accept-Language": "en-US,en;q=0.9",
-            "Accept-Encoding": "gzip, deflate, br",
+            # No Accept-Encoding here: requests sets it automatically based on
+            # what it can actually decode. Forcing "br" without the optional
+            # brotli package installed causes ContentDecodingError.
             "Connection": "keep-alive",
             "Upgrade-Insecure-Requests": "1",
             "DNT": "1",  # Do Not Track Request Header
