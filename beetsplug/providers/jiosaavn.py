@@ -56,23 +56,10 @@ def import_jiosaavn_playlist(url, cache=None):
     song_list = []
 
     try:
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # If already running, schedule the coroutine and wait for result
-                import concurrent.futures
-                future = asyncio.ensure_future(get_playlist_songs(url))
-                # Use run_coroutine_threadsafe for thread-safe execution
-                data = asyncio.run_coroutine_threadsafe(get_playlist_songs(url), loop).result()
-            else:
-                # If not running, just run until complete
-                data = loop.run_until_complete(get_playlist_songs(url))
-        except (RuntimeError, AssertionError):
-            # No event loop or closed, create a new one
-            new_loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(new_loop)
-            data = new_loop.run_until_complete(get_playlist_songs(url))
-            new_loop.close()
+        # beets never runs an event loop on the calling thread (main thread
+        # or a ThreadPoolExecutor worker), so there's nothing to detect or
+        # hand off to -- just run a fresh loop for this call.
+        data = asyncio.run(get_playlist_songs(url))
 
         if not data or "data" not in data or "list" not in data["data"]:
             _log.error("Invalid response from JioSaavn API")
