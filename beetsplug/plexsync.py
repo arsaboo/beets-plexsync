@@ -612,6 +612,12 @@ class PlexSync(BeetsPlugin):
             self._vector_index_info = {}
             return
 
+        if not isinstance(model, Item):
+            # database_change fires for Album changes too; Albums have no
+            # title/artist tokens and share the same id namespace as Items,
+            # so indexing them would corrupt (or silently drop) the entry.
+            return
+
         item_id = getattr(model, "id", None)
         if item_id is None:
             return
@@ -1845,6 +1851,13 @@ class PlexSync(BeetsPlugin):
 
     def shutdown(self, lib):
         """Clean up when plugin is disabled."""
+        queue = getattr(self, "_llm_enhancement_queue", None)
+        if queue is not None:
+            try:
+                queue.shutdown()
+            except Exception as exc:  # noqa: BLE001 - best effort cleanup
+                self._log.debug("LLM enhancement queue shutdown failed: {}", exc)
+
         if self.loop and not self.loop.is_closed():
-            self.close()
+            self.loop.close()
 
