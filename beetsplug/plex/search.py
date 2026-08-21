@@ -180,7 +180,6 @@ def search_plex_song(
     cache_result = plugin._cache_result if use_cache else (lambda *a, **k: None)
 
     cache_key = plugin.cache._make_cache_key(song)
-    plugin._log.debug("Generated cache key: '{}' for song: {}", cache_key, song)
     if not hasattr(plugin, "_candidate_confirmations"):
         plugin._candidate_confirmations = []
     depth = getattr(plugin, "_candidate_confirmation_depth", 0)
@@ -197,12 +196,8 @@ def search_plex_song(
         return result
 
     cached_result = plugin.cache.get(cache_key) if use_cache else None
-    if not use_cache:
-        plugin._log.debug("Cache read bypassed for key: '{}'", cache_key)
-    elif cached_result is not None:
+    if cached_result is not None:
         plugin._log.debug("Cache HIT for key: '{}' -> result: {}", cache_key, cached_result)
-    else:
-        plugin._log.debug("Cache MISS for key: '{}'", cache_key)
 
     if cached_result is not None:
         if isinstance(cached_result, tuple):
@@ -408,15 +403,10 @@ def search_plex_song(
             
             # Optimization: If we have title-only results, filter them instead of making new API calls
             if title_only_tracks:
-                plugin._log.debug("Reusing Strategy 2 results for Strategy 3 (Artist+Title)")
                 filtered_tracks = [
                     track for track in title_only_tracks
                     if _track_matches_artist_variants(track, artist_variants)
                 ]
-                plugin._log.debug(
-                    "Strategy 3 (Artist+Title): Filtered {} tracks from Strategy 2 results",
-                    len(filtered_tracks),
-                )
                 # Deduplicate filtered tracks
                 for track in filtered_tracks:
                     rating_key = getattr(track, "ratingKey", None)
@@ -454,7 +444,6 @@ def search_plex_song(
                 
                 # Optimization: If we have title-only results, filter them instead of making new API calls
                 if title_only_tracks:
-                    plugin._log.debug("Reusing Strategy 2 results for Strategy 4 (Artist+Fuzzy Title)")
                     # Filter by artist and apply fuzzy matching to title
                     filtered_tracks = []
                     for track in title_only_tracks:
@@ -470,10 +459,6 @@ def search_plex_song(
                             except Exception:
                                 # If fuzzy matching fails, include the track
                                 filtered_tracks.append(track)
-                    plugin._log.debug(
-                        "Strategy 4 (Artist+Fuzzy Title): Filtered {} tracks from Strategy 2 results",
-                        len(filtered_tracks),
-                    )
                     # Deduplicate filtered tracks
                     for track in filtered_tracks:
                         rating_key = getattr(track, "ratingKey", None)
@@ -506,36 +491,22 @@ def search_plex_song(
                 if not tracks and artist_variants:
                     if title_only_tracks:
                         # Even more optimization: filter title-only results for relaxed search
-                        plugin._log.debug("Reusing Strategy 2 results for Strategy 4 relaxed search")
                         filtered_tracks = [
                             track
                             for track in title_only_tracks
                             if _track_matches_artist_variants(track, artist_variants)
                         ]
-                        plugin._log.debug(
-                            "Strategy 4 (Artist+Fuzzy Title relaxed): Filtered {} tracks from Strategy 2 results",
-                            len(filtered_tracks),
-                        )
                         tracks = filtered_tracks
                     else:
                         # Original approach
                         loose_candidates = plugin.music.searchTracks(
                             **{"track.title": fuzzy_query}, limit=100
                         )
-                        plugin._log.debug(
-                            "Strategy 4 (Artist+Fuzzy Title relaxed): Query '{}' -> {} tracks before filtering",
-                            fuzzy_query,
-                            len(loose_candidates),
-                        )
                         filtered_tracks = [
                             track
                             for track in loose_candidates
                             if _track_matches_artist_variants(track, artist_variants)
                         ]
-                        plugin._log.debug(
-                            "Strategy 4 (Artist+Fuzzy Title relaxed): Filtered to {} tracks",
-                            len(filtered_tracks),
-                        )
                         tracks = filtered_tracks
             except Exception as exc:  # noqa: BLE001 - log but continue
                 plugin._log.debug("Artist+fuzzy search strategy failed: {}", exc)
@@ -544,16 +515,11 @@ def search_plex_song(
             search_strategies_tried.append("album_only")
             # Optimization: Filter title-only results by album if available
             if title_only_tracks and song.get("album"):
-                plugin._log.debug("Reusing Strategy 2 results for Strategy 5 (Album-only)")
                 album_title = song["album"].lower()
                 filtered_tracks = [
                     track for track in title_only_tracks
                     if getattr(track, "parentTitle", "").lower() == album_title
                 ]
-                plugin._log.debug(
-                    "Strategy 5 (Album-only): Filtered {} tracks from Strategy 2 results",
-                    len(filtered_tracks),
-                )
                 tracks = filtered_tracks
             else:
                 # Original approach
@@ -570,7 +536,6 @@ def search_plex_song(
                 fuzzy_query = clean_text_for_matching(song["title"])
                 # Optimization: Apply fuzzy matching to title-only results if available
                 if title_only_tracks:
-                    plugin._log.debug("Reusing Strategy 2 results for Strategy 6 (Fuzzy Title)")
                     filtered_tracks = []
                     for track in title_only_tracks:
                         try:
@@ -583,10 +548,6 @@ def search_plex_song(
                         except Exception:
                             # If fuzzy matching fails, include the track
                             filtered_tracks.append(track)
-                    plugin._log.debug(
-                        "Strategy 6 (Fuzzy Title): Filtered {} tracks from Strategy 2 results",
-                        len(filtered_tracks),
-                    )
                     tracks = filtered_tracks
                 else:
                     # Original approach
@@ -616,11 +577,6 @@ def search_plex_song(
         similarity = None
         if hasattr(plugin, "_match_score_for_query"):
             similarity = plugin._match_score_for_query(song, result)
-            plugin._log.debug(
-                "Single-track search result similarity for '{}' -> {:.2f}",
-                song.get("title", ""),
-                similarity,
-            )
             if similarity < 0.8:
                 plugin._log.debug(
                     "Rejecting single-track result for '{}' due to low similarity ({:.2f})",

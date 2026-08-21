@@ -1293,8 +1293,6 @@ class PlexSync(BeetsPlugin):
         """Helper function to process multiple track matches."""
         artist = song["artist"].split(",")[0]
         sorted_tracks = self.find_closest_match(song, tracks)
-        self._log.debug("Found {} tracks for {}", len(sorted_tracks), song["title"])
-
         if manual_search and len(sorted_tracks) > 0:
             return self._handle_manual_search(sorted_tracks, song)
 
