@@ -758,6 +758,28 @@ def _get_library_tracks(ps, preferred_genres, filters, exclusion_days):
     return tracks, filtered_server_side
 
 
+def _dedupe_by_rating_key(tracks, plex_lookup):
+    """Dedupe a mixed list of Plex Tracks and beets Items by Plex rating key.
+
+    Plex Tracks (e.g. from sonic analysis) are normalized to their beets
+    Item equivalent via plex_lookup so downstream scoring always sees beets
+    items. Entries without a rating key or with no beets counterpart are
+    dropped. Order of first occurrence is preserved.
+    """
+    unique_tracks = []
+    seen_keys = set()
+    for track in tracks:
+        key = getattr(track, 'ratingKey', None) or getattr(track, 'plex_ratingkey', None)
+        if not key or key in seen_keys:
+            continue
+        seen_keys.add(key)
+        # Plex Track -> beets Item; beets Items pass through unchanged.
+        beets_item = plex_lookup.get(key) if hasattr(track, 'ratingKey') else track
+        if beets_item is not None:
+            unique_tracks.append(beets_item)
+    return unique_tracks
+
+
 def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_genres, similar_tracks, playlist_type):
     """
     Unified function to generate different types of smart playlists.
@@ -850,7 +872,11 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
             # Special handling for 70s80s_flashback - only include tracks from 1970-1989
             if playlist_type == "70s80s_flashback":
                 item_year = getattr(item, 'year', None)
-                if not (item_year and 1970 <= item_year <= 1990):
+                try:
+                    item_year = int(item_year) if item_year is not None else None
+                except (ValueError, TypeError):
+                    item_year = None
+                if not (item_year and 1970 <= item_year <= 1989):
                     include_item = False
 
             if include_item:
@@ -950,15 +976,11 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
             ps._log.debug("Found {} sonic analysis tracks and {} library tracks for discovery",
                           len(matched_sonic_tracks), len(library_final_tracks))
 
-            # Final track selection after removing duplicates
-            unique_tracks = []
-            seen_keys = set()
-            for track in all_potential_tracks:
-                key = getattr(track, 'ratingKey', None)
-                if key and key not in seen_keys:
-                    seen_keys.add(key)
-                    unique_tracks.append(track if hasattr(track, 'plex_userrating') else
-                                        plex_lookup.get(key) if key and key in plex_lookup else track)
+            # Final track selection after removing duplicates (by rating key,
+            # across both object types - beets Items only expose the key as
+            # plex_ratingkey, so keying on ratingKey alone would silently
+            # drop the entire library pool).
+            unique_tracks = _dedupe_by_rating_key(all_potential_tracks, plex_lookup)
         else:
             # For other playlist types, use standard library tracks
             all_library_tracks, filtered_server_side = _get_library_tracks(
