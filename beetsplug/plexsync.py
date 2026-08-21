@@ -24,7 +24,8 @@ import time
 import json
 import confuse
 import enlighten
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -972,21 +973,104 @@ class PlexSync(BeetsPlugin):
         except exceptions.PlexApiException:
             self._log.warning("{} Update failed", self.config["plex"]["library_name"])
 
+    _PLEX_ITEM_FIELDS = (
+        "plex_guid",
+        "plex_ratingkey",
+        "plex_userrating",
+        "plex_skipcount",
+        "plex_viewcount",
+        "plex_lastviewedat",
+        "plex_lastratedat",
+        "plex_updated",
+    )
+    # Sentinel: worker skipped this item (already synced, or search error).
+    _PLEX_SEARCH_SKIP = object()
+
+    def _apply_plex_result(self, item, plex_track) -> bool:
+        """Apply a Plex search result to ``item`` in memory.
+
+        Returns True if the item was mutated and should be stored.
+        Does not write tags or commit the database.
+        """
+        if plex_track is None:
+            # Clear stale Plex fields from a previous (possibly wrong) match.
+            # Without this, an item whose old match collided with another
+            # item - or whose Plex track was since removed/retagged - keeps
+            # its bogus plex_ratingkey forever: search_plex_track correctly
+            # returns None, but returning without clearing meant `-f` could
+            # never actually fix it.
+            cleared = False
+            for field in self._PLEX_ITEM_FIELDS:
+                if field in item:
+                    del item[field]
+                    cleared = True
+            if cleared:
+                self._log.debug("Cleared stale Plex fields for: {}", item)
+            return cleared
+
+        item.plex_guid = plex_track.guid
+        item.plex_ratingkey = plex_track.ratingKey
+        item.plex_userrating = plex_track.userRating
+        item.plex_skipcount = plex_track.skipCount
+        item.plex_viewcount = plex_track.viewCount
+        item.plex_lastviewedat = plex_track.lastViewedAt
+        item.plex_lastratedat = plex_track.lastRatedAt
+        item.plex_updated = time.time()
+        return True
+
+    def _search_plex_item(self, index, item, force, items_len):
+        """Plex HTTP search only. Returns (item, plex_track | None | SKIP)."""
+        self._log.info("Processing {}/{} tracks - {} ", index, items_len, item)
+        if not force and "plex_userrating" in item:
+            self._log.debug("Plex rating already present for: {}", item)
+            return item, self._PLEX_SEARCH_SKIP
+        try:
+            return item, self.search_plex_track(item)
+        except Exception as exc:  # noqa: BLE001 - keep the rest of the sync going
+            self._log.error("Error searching Plex for {}: {}", item, exc)
+            return item, self._PLEX_SEARCH_SKIP
+
     def _fetch_plex_info(self, items, write, force):
-        """Obtain track information from Plex."""
+        """Obtain track information from Plex.
+
+        Plex searches run in a thread pool (I/O bound). Field updates,
+        tag writes, and SQLite commits happen on the main thread: tags
+        first (``try_write``), then a single ``lib.transaction()`` for
+        every ``store()``.
+        """
+        items = list(items)
         items_len = len(items)
+        if not items_len:
+            return
+
         progress = self.create_progress_counter(
             items_len,
             "Syncing Plex library",
             unit="track",
             threadsafe=True,
         )
+        results = []
         try:
             with ThreadPoolExecutor() as executor:
-                for index, item in enumerate(items, start=1):
+                futures = [
                     executor.submit(
-                        self._process_item, index, item, write, force, items_len, progress
+                        self._search_plex_item, index, item, force, items_len
                     )
+                    for index, item in enumerate(items, start=1)
+                ]
+                for future in as_completed(futures):
+                    try:
+                        results.append(future.result())
+                    except Exception as exc:  # noqa: BLE001
+                        self._log.error("Plex search worker failed: {}", exc)
+                    finally:
+                        if progress is not None:
+                            try:
+                                progress.update()
+                            except Exception as exc:  # noqa: BLE001
+                                self._log.debug(
+                                    "Progress counter update failed: {}", exc
+                                )
         finally:
             if progress is not None:
                 try:
@@ -994,59 +1078,37 @@ class PlexSync(BeetsPlugin):
                 except Exception as exc:  # noqa: BLE001 - closing progress is best-effort
                     self._log.debug("Failed to close progress counter: {}", exc)
 
-    def _process_item(self, index, item, write, force, items_len, progress=None):
-        try:
-            with context.music_dir(item._db.directory):
-                self._log.info("Processing {}/{} tracks - {} ", index, items_len, item)
-                if not force and "plex_userrating" in item:
-                    self._log.debug("Plex rating already present for: {}", item)
-                    return
-                plex_track = self.search_plex_track(item)
-                if plex_track is None:
-                    self._log.info("No track found for: {}", item)
-                    # Clear any stale Plex fields from a previous (possibly
-                    # wrong) match. Without this, an item whose old match
-                    # collided with another item - or whose Plex track was
-                    # since removed/retagged - keeps its bogus
-                    # plex_ratingkey forever: search_plex_track now
-                    # correctly returns None here, but returning early
-                    # without clearing meant `-f` could never actually fix
-                    # it, since the stale key was never overwritten.
-                    cleared = False
-                    for field in (
-                        "plex_guid",
-                        "plex_ratingkey",
-                        "plex_userrating",
-                        "plex_skipcount",
-                        "plex_viewcount",
-                        "plex_lastviewedat",
-                        "plex_lastratedat",
-                        "plex_updated",
-                    ):
-                        if field in item:
-                            del item[field]
-                            cleared = True
-                    if cleared:
-                        item.store()
-                        self._log.debug("Cleared stale Plex fields for: {}", item)
-                    return
-                item.plex_guid = plex_track.guid
-                item.plex_ratingkey = plex_track.ratingKey
-                item.plex_userrating = plex_track.userRating
-                item.plex_skipcount = plex_track.skipCount
-                item.plex_viewcount = plex_track.viewCount
-                item.plex_lastviewedat = plex_track.lastViewedAt
-                item.plex_lastratedat = plex_track.lastRatedAt
-                item.plex_updated = time.time()
+        to_store = []
+        for item, plex_track in results:
+            if plex_track is self._PLEX_SEARCH_SKIP:
+                continue
+            if plex_track is None:
+                self._log.info("No track found for: {}", item)
+            if self._apply_plex_result(item, plex_track):
+                to_store.append(item)
+
+        if not to_store:
+            return
+
+        music_dir = getattr(getattr(to_store[0], "_db", None), "directory", None)
+        dir_cm = context.music_dir(music_dir) if music_dir else nullcontext()
+        with dir_cm:
+            if write:
+                for item in to_store:
+                    try:
+                        item.try_write()
+                    except Exception as exc:  # noqa: BLE001
+                        self._log.debug("try_write failed for {}: {}", item, exc)
+
+        db = getattr(to_store[0], "_db", None)
+        txn = getattr(db, "transaction", None) if db is not None else None
+        if callable(txn):
+            with db.transaction():
+                for item in to_store:
+                    item.store()
+        else:
+            for item in to_store:
                 item.store()
-                if write:
-                    item.try_write()
-        finally:
-            if progress is not None:
-                try:
-                    progress.update()
-                except Exception as exc:  # noqa: BLE001 - keep sync resilient
-                    self._log.debug("Progress counter update failed: {}", exc)
 
     def search_plex_track(self, item):
         """Fetch the Plex track key.
