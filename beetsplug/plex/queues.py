@@ -129,16 +129,32 @@ class ManualPromptQueue:
         self._limit = max(1, limit)
         self._queues: Dict[str, List[ManualPromptItem]] = {}
         self._seen: Dict[str, set[str]] = {}
+        self._limit_logged: set[str] = set()
         self._log = log or logging.getLogger("beets.plexsync")
 
     def enqueue(self, item: ManualPromptItem) -> None:
-        """Queue a manual prompt item silently. Drain happens at end of processing."""
+        """Queue a manual prompt item silently. Drain happens at end of processing.
+
+        Once ``limit`` items are queued for a playlist, further unmatched
+        tracks are dropped (the config key ``search.manual_prompt_queue_limit``).
+        """
         if not item.playlist_id or not item.cache_key:
             return
         seen_keys = self._seen.setdefault(item.playlist_id, set())
         if item.cache_key in seen_keys:
             return
         queue_items = self._queues.setdefault(item.playlist_id, [])
+        if len(queue_items) >= self._limit:
+            seen_keys.add(item.cache_key)
+            if item.playlist_id not in self._limit_logged:
+                self._limit_logged.add(item.playlist_id)
+                self._log.info(
+                    "Manual prompt queue for '{}' is full ({}); "
+                    "further unmatched tracks will be skipped",
+                    item.playlist_id,
+                    self._limit,
+                )
+            return
         queue_items.append(item)
         seen_keys.add(item.cache_key)
 
@@ -146,6 +162,7 @@ class ManualPromptQueue:
         if not playlist_id:
             return []
         self._seen.pop(playlist_id, None)
+        self._limit_logged.discard(playlist_id)
         items = self._queues.pop(playlist_id, [])
         return items
 
