@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 
 from beets import ui
+from beets.util.color import colorize
 
 from beetsplug.core.config import get_plexsync_config
 from beetsplug.utils.prompt_logging import prompt_guard
@@ -858,7 +859,7 @@ def search_plex_song(
                 song["title"],
                 ", ".join(search_strategies_tried) if search_strategies_tried else "none",
             )
-            prompt = ui.colorize('text_highlight', "\nSearch manually?") + " (Y/n)"
+            prompt = colorize('text_highlight', "\nSearch manually?") + " (Y/n)"
             with prompt_guard():
                 if ui.input_yn(prompt):
                     result = plugin.manual_track_search(song)

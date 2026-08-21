@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-from beets import ui
+from beets.util.color import colorize
 
 
 def parse_title(title_orig):
@@ -44,7 +44,7 @@ def highlight_matches(source: str | None, target: str | None) -> str:
     target_words = target.lower().split() if target else []
 
     if source and target and source.lower() == target.lower():
-        return ui.colorize('text_success', target)
+        return colorize('text_success', target)
 
     from difflib import SequenceMatcher
 
@@ -64,7 +64,7 @@ def highlight_matches(source: str | None, target: str | None) -> str:
                 or fuzzy_score(clean_source_word, clean_target_word) > 0.8
             ):
                 highlighted_words.append(
-                    ui.colorize('text_success', original_target_words[i])
+                    colorize('text_success', original_target_words[i])
                 )
                 word_matched = True
                 break

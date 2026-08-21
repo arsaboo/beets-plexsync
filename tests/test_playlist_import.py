@@ -56,7 +56,8 @@ class CacheStub:
 
 
 _STUB_MODULE_NAMES = (
-    'beets', 'beets.ui', 'beets.library', 'beets.autotag', 'beets.autotag.distance',
+    'beets', 'beets.ui', 'beets.util', 'beets.util.color', 'beets.library',
+    'beets.autotag', 'beets.autotag.distance',
     'plexapi', 'plexapi.audio', 'confuse',
 )
 
@@ -107,6 +108,13 @@ def ensure_stubs(data, add_cleanup=None):
     # logging module so that import resolves against the stub.
     import logging as _stdlib_logging
     beets.logging = _stdlib_logging
+
+    # Plugin modules do `from beets.util.color import colorize`.
+    util_module = types.ModuleType('beets.util')
+    color_module = types.ModuleType('beets.util.color')
+    color_module.colorize = lambda name, text: text
+    util_module.color = color_module
+    beets.util = util_module
 
     # Minimal beets.library stub used by matching helpers during tests.
     library_module = types.ModuleType('beets.library')

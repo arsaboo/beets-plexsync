@@ -32,6 +32,7 @@ from types import SimpleNamespace
 from typing import Dict, List, Optional, Tuple
 
 from beets import config, context, ui
+from beets.util.color import colorize
 from beets.dbcore import types
 from beets.dbcore.types import DateType
 from beets.library import Item  # Added Item to import
@@ -1227,7 +1228,7 @@ class PlexSync(BeetsPlugin):
                     song.get("title", "Unknown"),
                     ", ".join(item.search_strategies_tried or []) or "none",
                 )
-                prompt = ui.colorize("text_highlight", "\nSearch manually?") + " (Y/n)"
+                prompt = colorize("text_highlight", "\nSearch manually?") + " (Y/n)"
                 with prompt_guard():
                     user_wants_search = ui.input_yn(prompt)
                 if user_wants_search:

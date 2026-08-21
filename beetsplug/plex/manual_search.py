@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Iterable, Dict, List, Optional
 
 from beets import ui
+from beets.util.color import colorize
 from beets.ui import input_, print_
 
 from beetsplug.utils.helpers import highlight_matches
@@ -14,9 +15,9 @@ from beetsplug.core.matching import get_fuzzy_score
 
 def _render_actions() -> str:
     return (
-        ui.colorize('action', 'a') + ui.colorize('text_highlight_minor', ': Abort') + '   '
-        + ui.colorize('action', 's') + ui.colorize('text_highlight_minor', ': Skip') + '   '
-        + ui.colorize('action', 'e') + ui.colorize('text_highlight_minor', ': Enter manual search') + '\n'
+        colorize('action', 'a') + colorize('text_highlight_minor', ': Abort') + '   '
+        + colorize('action', 's') + colorize('text_highlight_minor', ': Skip') + '   '
+        + colorize('action', 'e') + colorize('text_highlight_minor', ': Enter manual search') + '\n'
     )
 
 
@@ -83,8 +84,8 @@ def review_candidate_confirmations(
     ref_artist = reference_song.get("artist", "")
 
     header = (
-        ui.colorize('text_highlight', '\nReview candidate matches for: ')
-        + ui.colorize('text_highlight_minor', f"{ref_album} - {ref_title} - {ref_artist}")
+        colorize('text_highlight', '\nReview candidate matches for: ')
+        + colorize('text_highlight_minor', f"{ref_album} - {ref_title} - {ref_artist}")
     )
     print_(header)
 
@@ -118,23 +119,23 @@ def review_candidate_confirmations(
 
         sources = ", ".join(sorted(entry.get("sources", []))) or "candidate"
         print_(
-            f"{ui.colorize('action', str(index))}. {highlighted_album} - {highlighted_title} - "
-            f"{highlighted_artist} (Match: {ui.colorize(score_color, f'{similarity:.2f}')}, "
-            f"Sources: {ui.colorize('text_highlight_minor', sources)})"
+            f"{colorize('action', str(index))}. {highlighted_album} - {highlighted_title} - "
+            f"{highlighted_artist} (Match: {colorize(score_color, f'{similarity:.2f}')}, "
+            f"Sources: {colorize('text_highlight_minor', sources)})"
         )
 
         if query_song and (
             query_title != ref_title or query_album != ref_album or query_artist != ref_artist
         ):
             print_(
-                ui.colorize(
+                colorize(
                     'text_highlight_minor',
                     f"   Based on query: {query_album or 'Unknown'} - {query_title} - {query_artist}",
                 )
             )
 
-    print_(ui.colorize('text_highlight', '\nActions:'))
-    print_(ui.colorize('text_highlight_minor', '  #: Select match by number'))
+    print_(colorize('text_highlight', '\nActions:'))
+    print_(colorize('text_highlight_minor', '  #: Select match by number'))
     print_(_render_actions())
 
     with prompt_guard():
@@ -197,8 +198,8 @@ def handle_manual_search(plugin, sorted_tracks, song, original_query=None):
     source_artist = song.get("artist", "")
 
     header = (
-        ui.colorize('text_highlight', '\nChoose candidates for: ')
-        + ui.colorize('text_highlight_minor', f"{source_album} - {source_title} - {source_artist}")
+        colorize('text_highlight', '\nChoose candidates for: ')
+        + colorize('text_highlight_minor', f"{source_album} - {source_title} - {source_artist}")
     )
     print_(header)
 
@@ -217,11 +218,11 @@ def handle_manual_search(plugin, sorted_tracks, song, original_query=None):
 
         print_(
             f"{index}. {highlighted_album} - {highlighted_title} - {highlighted_artist} "
-            f"(Match: {ui.colorize(score_color, f'{score:.2f}')})"
+            f"(Match: {colorize(score_color, f'{score:.2f}')})"
         )
 
-    print_(ui.colorize('text_highlight', '\nActions:'))
-    print_(ui.colorize('text_highlight_minor', '  #: Select match by number'))
+    print_(colorize('text_highlight', '\nActions:'))
+    print_(colorize('text_highlight_minor', '  #: Select match by number'))
     print_(_render_actions())
 
     with prompt_guard():
@@ -243,13 +244,13 @@ def handle_manual_search(plugin, sorted_tracks, song, original_query=None):
 
 def manual_track_search(plugin, original_query=None):
     """Interactively search for a Plex track."""
-    print_(ui.colorize('text_highlight', '\nManual Search'))
+    print_(colorize('text_highlight', '\nManual Search'))
     print_('Enter search criteria (empty to skip):')
 
     with prompt_guard():
-        title = input_(ui.colorize('text_highlight_minor', 'Title: ')).strip()
-        album = input_(ui.colorize('text_highlight_minor', 'Album: ')).strip()
-        artist = input_(ui.colorize('text_highlight_minor', 'Artist: ')).strip()
+        title = input_(colorize('text_highlight_minor', 'Title: ')).strip()
+        album = input_(colorize('text_highlight_minor', 'Album: ')).strip()
+        artist = input_(colorize('text_highlight_minor', 'Artist: ')).strip()
 
     plugin._log.debug("Searching with title='{}', album='{}', artist='{}'", title, album, artist)
 
@@ -271,8 +272,8 @@ def manual_track_search(plugin, original_query=None):
 
     sorted_tracks = plugin.find_closest_match(song_dict, filtered_tracks)
     header = (
-        ui.colorize('text_highlight', '\nChoose candidates for: ')
-        + ui.colorize('text_highlight_minor', f"{album} - {title} - {artist}")
+        colorize('text_highlight', '\nChoose candidates for: ')
+        + colorize('text_highlight_minor', f"{album} - {title} - {artist}")
     )
     print_(header)
 
@@ -290,12 +291,12 @@ def manual_track_search(plugin, original_query=None):
             score_color = 'text_error'
 
         print_(
-            f"{ui.colorize('action', str(index))}. {highlighted_album} - {highlighted_title} - "
-            f"{highlighted_artist} (Match: {ui.colorize(score_color, f'{score:.2f}')})"
+            f"{colorize('action', str(index))}. {highlighted_album} - {highlighted_title} - "
+            f"{highlighted_artist} (Match: {colorize(score_color, f'{score:.2f}')})"
         )
 
-    print_(ui.colorize('text_highlight', '\nActions:'))
-    print_(ui.colorize('text_highlight_minor', '  #: Select match by number'))
+    print_(colorize('text_highlight', '\nActions:'))
+    print_(colorize('text_highlight_minor', '  #: Select match by number'))
     print_(_render_actions())
 
     with prompt_guard():
