@@ -1,15 +1,19 @@
 import importlib
 import sys
 import types
-import unittest
+
+import pytest
 
 from tests.test_playlist_import import ensure_stubs, DummyLogger
 
 
-class ManualSearchTest(unittest.TestCase):
-    def setUp(self):
+class ManualSearchTest:
+    @pytest.fixture(autouse=True)
+    def setup(self, request):
         # set up beets/confuse stubs and load manual_search
-        self.config, _ = ensure_stubs({'plexsync': {'manual_search': False}}, self)
+        self.config, _ = ensure_stubs(
+            {'plexsync': {'manual_search': False}}, request.addfinalizer
+        )
         _saved_matching = sys.modules.get('beetsplug.core.matching')
 
         def _restore_matching():
@@ -18,7 +22,7 @@ class ManualSearchTest(unittest.TestCase):
             else:
                 sys.modules['beetsplug.core.matching'] = _saved_matching
 
-        self.addCleanup(_restore_matching)
+        request.addfinalizer(_restore_matching)
         sys.modules['beetsplug.core.matching'] = types.SimpleNamespace(
             get_fuzzy_score=lambda a, b: 1.0 if a and b and a.lower() == b.lower() else 0.5
         )
@@ -48,10 +52,9 @@ class ManualSearchTest(unittest.TestCase):
         plugin = Plugin()
         plugin.cache._make_cache_key = lambda song: f"cache-{song['title']}"
 
-        track = types.SimpleNamespace(title='Song', parentTitle='Album', artist=lambda: types.SimpleNamespace(title='Artist'))
         # ensure helper stores negative cache
         self.manual._store_negative_cache(plugin, {'title': 'Song'}, None)
-        self.assertIn(('cache-Song', None), plugin.cache_calls)
+        assert ('cache-Song', None) in plugin.cache_calls
 
     def test_cache_selection_skips_manual_query_cache(self):
         class Plugin:
@@ -72,8 +75,8 @@ class ManualSearchTest(unittest.TestCase):
 
         self.manual._cache_selection(plugin, manual_query, track, original_query)
 
-        self.assertIn(('cache-Original Title', track), plugin.cache_calls)
-        self.assertNotIn(('cache-', track), plugin.cache_calls)
+        assert ('cache-Original Title', track) in plugin.cache_calls
+        assert ('cache-', track) not in plugin.cache_calls
 
     def test_cache_selection_without_original_query_does_not_cache(self):
         class Plugin:
@@ -93,8 +96,4 @@ class ManualSearchTest(unittest.TestCase):
 
         self.manual._cache_selection(plugin, manual_query, track)
 
-        self.assertEqual(plugin.cache_calls, [])
-
-
-if __name__ == '__main__':
-    unittest.main()
+        assert plugin.cache_calls == []

@@ -1,5 +1,4 @@
 import types
-import unittest
 
 from beetsplug.plexsync import PlexSync
 
@@ -15,7 +14,7 @@ class DummyLogger:
         pass
 
 
-class SearchPlexTrackTests(unittest.TestCase):
+class SearchPlexTrackTests:
     """Unit tests for PlexSync.search_plex_track's delegation to search_plex_song.
 
     search_plex_track used to run its own brittle album+title query with no
@@ -45,25 +44,24 @@ class SearchPlexTrackTests(unittest.TestCase):
 
         result = PlexSync.search_plex_track(plugin, item)
 
-        self.assertEqual(result, "the-track")
-        self.assertEqual(len(calls), 1)
+        assert result == "the-track"
+        assert len(calls) == 1
         song, kwargs = calls[0]
-        self.assertEqual(
-            song,
-            {"title": "Rang De Basanti", "album": "Rang De Basanti", "artist": "A.R. Rahman"},
-        )
+        assert song == {
+            "title": "Rang De Basanti", "album": "Rang De Basanti", "artist": "A.R. Rahman",
+        }
         # Non-interactive: no manual prompts from a ThreadPoolExecutor worker.
-        self.assertEqual(kwargs["manual_search"], False)
+        assert kwargs["manual_search"] is False
         # Skip the LLM web-search cleanup fallback: a full-library resync
         # should stay deterministic (see live-testing note in the docstring).
-        self.assertEqual(kwargs["llm_attempted"], True)
+        assert kwargs["llm_attempted"] is True
         # Don't let unrelated beets items borrow each other's cached match.
-        self.assertEqual(kwargs["use_local_candidates"], False)
+        assert kwargs["use_local_candidates"] is False
         # Force resync should re-check live Plex state, not a stale cache
         # entry written by an unrelated feature (playlist import, etc.).
-        self.assertEqual(kwargs["use_cache"], False)
+        assert kwargs["use_cache"] is False
         # No manual-prompt/LLM-enhancement queueing for a library sync.
-        self.assertIsNone(kwargs["playlist_id"])
+        assert kwargs["playlist_id"] is None
 
     def test_returns_none_without_raising_when_no_genuine_match(self):
         """No real Plex counterpart exists - must not collide onto a guess."""
@@ -75,7 +73,7 @@ class SearchPlexTrackTests(unittest.TestCase):
 
         result = PlexSync.search_plex_track(plugin, item)
 
-        self.assertIsNone(result)
+        assert result is None
 
     def test_distinct_items_with_no_match_do_not_collide(self):
         """Two distinct beets items with no genuine Plex counterpart (e.g. the
@@ -92,8 +90,8 @@ class SearchPlexTrackTests(unittest.TestCase):
         result_a = PlexSync.search_plex_track(plugin, item_a)
         result_b = PlexSync.search_plex_track(plugin, item_b)
 
-        self.assertIsNone(result_a)
-        self.assertIsNone(result_b)
+        assert result_a is None
+        assert result_b is None
 
 
 class FakeBeetsItem:
@@ -137,7 +135,7 @@ class FakeBeetsItem:
         return self._fields.get("title", "<item>")
 
 
-class ProcessItemStaleFieldClearingTests(unittest.TestCase):
+class ProcessItemStaleFieldClearingTests:
     """Regression tests for _process_item leaving a stale plex_ratingkey in
     place when search_plex_track now correctly returns None.
 
@@ -178,8 +176,8 @@ class ProcessItemStaleFieldClearingTests(unittest.TestCase):
         PlexSync._process_item(plugin, 1, item, write=False, force=True, items_len=1)
 
         for field in ("plex_ratingkey", "plex_guid", "plex_userrating"):
-            self.assertNotIn(field, item)
-        self.assertEqual(item.store_calls, 1)
+            assert field not in item
+        assert item.store_calls == 1
 
     def test_does_not_store_when_nothing_to_clear(self):
         """An item that never had Plex fields shouldn't trigger a needless
@@ -189,7 +187,7 @@ class ProcessItemStaleFieldClearingTests(unittest.TestCase):
 
         PlexSync._process_item(plugin, 1, item, write=False, force=True, items_len=1)
 
-        self.assertEqual(item.store_calls, 0)
+        assert item.store_calls == 0
 
     def test_successful_match_still_sets_all_fields_normally(self):
         track = types.SimpleNamespace(
@@ -206,10 +204,7 @@ class ProcessItemStaleFieldClearingTests(unittest.TestCase):
 
         PlexSync._process_item(plugin, 1, item, write=False, force=True, items_len=1)
 
-        self.assertEqual(item.plex_ratingkey, 12345)
-        self.assertEqual(item.plex_guid, "new-guid")
-        self.assertEqual(item.store_calls, 1)
+        assert item.plex_ratingkey == 12345
+        assert item.plex_guid == "new-guid"
+        assert item.store_calls == 1
 
-
-if __name__ == "__main__":
-    unittest.main()

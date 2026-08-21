@@ -1,13 +1,15 @@
 import importlib
 import types
-import unittest
+
+import pytest
 
 from tests.test_playlist_import import ensure_stubs, DummyLogger
 
 
-class SpotifyTransferTest(unittest.TestCase):
-    def setUp(self):
-        ensure_stubs({'plexsync': {}}, self)
+class SpotifyTransferTest:
+    @pytest.fixture(autouse=True)
+    def setup(self, request):
+        ensure_stubs({'plexsync': {}}, request.addfinalizer)
         if 'beetsplug.plex.spotify_transfer' in importlib.sys.modules:
             importlib.reload(importlib.sys.modules['beetsplug.plex.spotify_transfer'])
         else:
@@ -76,8 +78,8 @@ class SpotifyTransferTest(unittest.TestCase):
         )
         self.transfer.plex_to_spotify(plugin, lib, 'Mix')
 
-        self.assertTrue(plugin.called_auth)
-        self.assertEqual(plugin.sent, ('Mix', ['spotify:track:123']))
+        assert plugin.called_auth
+        assert plugin.sent == ('Mix', ['spotify:track:123'])
 
     def test_falls_back_to_search_when_unplayable(self):
         logger = DummyLogger()
@@ -125,9 +127,6 @@ class SpotifyTransferTest(unittest.TestCase):
         )
         self.transfer.plex_to_spotify(plugin, lib, 'Mix')
 
-        self.assertEqual(plugin.sent, ['fallback'])
+        assert plugin.sent == ['fallback']
 
-
-if __name__ == '__main__':
-    unittest.main()
 

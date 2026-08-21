@@ -2,7 +2,8 @@ import importlib
 import json
 import sys
 import types
-import unittest
+
+import pytest
 
 from tests.test_playlist_import import DummyLogger, ensure_stubs
 
@@ -25,10 +26,9 @@ class CacheStub:
         self.storage[key] = (rating_key, cleaned_metadata)
 
 
-class PlexSearchTests(unittest.TestCase):
-    def setUp(self):
-        if sys.version_info < (3, 9):
-            self.skipTest('Plex search tests require Python 3.9+')
+class PlexSearchTests:
+    @pytest.fixture(autouse=True)
+    def setup(self, request):
         class SimpleBaseModel:
             def __init__(self, **data):
                 for key, value in data.items():
@@ -52,13 +52,13 @@ class PlexSearchTests(unittest.TestCase):
             else:
                 sys.modules['pydantic'] = _saved_pydantic
 
-        self.addCleanup(_restore_pydantic)
+        request.addfinalizer(_restore_pydantic)
         sys.modules['pydantic'] = types.SimpleNamespace(
             BaseModel=SimpleBaseModel,
             Field=Field,
             field_validator=field_validator,
         )
-        ensure_stubs({'plexsync': {}, 'llm': {'search': {}}}, self)
+        ensure_stubs({'plexsync': {}, 'llm': {'search': {}}}, request.addfinalizer)
         if 'beetsplug.plex.search' in sys.modules:
             importlib.reload(sys.modules['beetsplug.plex.search'])
         else:
@@ -88,7 +88,7 @@ class PlexSearchTests(unittest.TestCase):
         plugin._cache_result = lambda *args, **kwargs: None
 
         result = self.search.search_plex_song(plugin, {'title': 'Song', 'artist': 'Artist'}, manual_search=False)
-        self.assertIs(result, track)
+        assert result is track
 
     def test_single_track_search_caches_result(self):
         track = types.SimpleNamespace(ratingKey=7, title='Match', parentTitle='Album')
@@ -111,8 +111,8 @@ class PlexSearchTests(unittest.TestCase):
 
         song = {'title': 'Song', 'album': 'Album', 'artist': 'Artist'}
         result = self.search.search_plex_song(plugin, song, manual_search=False)
-        self.assertIs(result, track)
-        self.assertTrue(recorded)
+        assert result is track
+        assert recorded
 
     def test_local_candidate_direct_match_short_circuits_search(self):
         track = types.SimpleNamespace(ratingKey=303, title='Vector Match', parentTitle='Album')
@@ -173,9 +173,9 @@ class PlexSearchTests(unittest.TestCase):
         song = {'title': 'Original', 'album': 'Album', 'artist': 'Artist'}
         result = self.search.search_plex_song(plugin, song, manual_search=False)
 
-        self.assertIs(result, track)
-        self.assertEqual(music.fetch_calls, [303])
-        self.assertEqual(music.search_calls, [])
+        assert result is track
+        assert music.fetch_calls == [303]
+        assert music.search_calls == []
 
     def test_local_candidate_variant_fallback(self):
         variant_track = types.SimpleNamespace(
@@ -247,19 +247,17 @@ class PlexSearchTests(unittest.TestCase):
         song = {'title': 'Original Song', 'album': 'Original Album', 'artist': 'Original Artist'}
         result = self.search.search_plex_song(plugin, song, manual_search=False)
 
-        self.assertIs(result, variant_track)
+        assert result is variant_track
         # Ensure the variant metadata search was attempted.
-        self.assertGreaterEqual(len(music.search_calls), 1)
-        self.assertTrue(
-            any(
-                {k: v for k, v in call.items() if k != 'limit'}
-                == {'album.title': 'Variant Album', 'track.title': 'Variant Song'}
-                for call in music.search_calls
-            )
+        assert len(music.search_calls) >= 1
+        assert any(
+            {k: v for k, v in call.items() if k != 'limit'}
+            == {'album.title': 'Variant Album', 'track.title': 'Variant Song'}
+            for call in music.search_calls
         )
         # Ensure search results are cached for the original query.
         cache_keys = list(cache.storage.keys())
-        self.assertTrue(any('Original Song' in key for key in cache_keys))
+        assert any('Original Song' in key for key in cache_keys)
 
     def test_single_track_low_similarity_rejected(self):
         track = types.SimpleNamespace(
@@ -306,10 +304,10 @@ class PlexSearchTests(unittest.TestCase):
         song = {'title': 'Original Song', 'album': 'Original Album', 'artist': 'Original Artist'}
         result = self.search.search_plex_song(plugin, song, manual_search=False)
 
-        self.assertIsNone(result)
-        self.assertFalse(positive_results)
+        assert result is None
+        assert not positive_results
 
-    def test_user_confirmation_accepts_candidate(self):
+    def test_user_confirmation_accepts_candidate(self, request):
         track = types.SimpleNamespace(
             ratingKey=111,
             title='Candidate Song',
@@ -369,18 +367,18 @@ class PlexSearchTests(unittest.TestCase):
                 "original_song": candidate.get("song"),
             }
         review_module.review_candidate_confirmations = fake_review
-        self.addCleanup(lambda: setattr(review_module, "review_candidate_confirmations", original_review))
+        request.addfinalizer(lambda: setattr(review_module, "review_candidate_confirmations", original_review))
 
         song = {'title': 'Original Song', 'album': 'Original Album', 'artist': 'Original Artist'}
 
         result = self.search.search_plex_song(plugin, song, manual_search=True)
 
-        self.assertIs(result, track)
-        self.assertTrue(cached_results)
-        self.assertFalse(plugin.manual_track_search_called)
-        self.assertFalse(plugin._candidate_confirmations)
+        assert result is track
+        assert cached_results
+        assert not plugin.manual_track_search_called
+        assert not plugin._candidate_confirmations
 
-    def test_confirmation_survives_nested_call(self):
+    def test_confirmation_survives_nested_call(self, request):
         variant_track = types.SimpleNamespace(
             ratingKey=222,
             title='Variant Track',
@@ -473,17 +471,17 @@ class PlexSearchTests(unittest.TestCase):
                 "original_song": candidate.get("song"),
             }
         review_module.review_candidate_confirmations = fake_review
-        self.addCleanup(lambda: setattr(review_module, "review_candidate_confirmations", original_review))
+        request.addfinalizer(lambda: setattr(review_module, "review_candidate_confirmations", original_review))
 
         song = {'title': 'Original Song', 'album': 'Original Album', 'artist': 'Original Artist'}
 
         result = self.search.search_plex_song(plugin, song, manual_search=True)
 
-        self.assertIs(result, variant_track)
-        self.assertTrue(cached_results)
-        self.assertFalse(plugin.manual_track_search_called)
-        self.assertFalse(plugin._candidate_confirmations)
-        self.assertGreaterEqual(len(music.search_calls), 1)
+        assert result is variant_track
+        assert cached_results
+        assert not plugin.manual_track_search_called
+        assert not plugin._candidate_confirmations
+        assert len(music.search_calls) >= 1
 
     def test_use_cache_false_bypasses_cache_read_and_write(self):
         stale_track = types.SimpleNamespace(ratingKey=1, title='Stale')
@@ -516,12 +514,12 @@ class PlexSearchTests(unittest.TestCase):
 
         result = self.search.search_plex_song(plugin, song, manual_search=False, use_cache=False)
 
-        self.assertIs(result, fresh_track)
+        assert result is fresh_track
         # use_cache=False must skip the write too - a bulk resync shouldn't
         # pay for a SQLite write (new connection + commit) per item; those
         # writes serialize under thread concurrency and can dominate
         # wall-clock time (observed live: ~5 tracks/s -> ~0.05 tracks/s).
-        self.assertFalse(recorded)
+        assert not recorded
 
     def test_exact_title_match_preferred_over_fuzzy_tie(self):
         # Regression test: "Ram Aur Shyam Theme, Pt. 1..6 - Instrumental" all
@@ -579,10 +577,10 @@ class PlexSearchTests(unittest.TestCase):
         }
         result = self.search.search_plex_song(plugin, song, manual_search=False)
 
-        self.assertIs(result, parts[4])  # Pt. 5, not Pt. 1
+        assert result is parts[4]  # Pt. 5, not Pt. 1
         # find_closest_match must only have seen the exact-title candidate,
         # not all 6 tied parts.
-        self.assertEqual(seen_candidate_titles, [['Ram Aur Shyam Theme, Pt. 5 - Instrumental']])
+        assert seen_candidate_titles == [['Ram Aur Shyam Theme, Pt. 5 - Instrumental']]
 
     def test_variant_rejected_when_similarity_low(self):
         variant_track = types.SimpleNamespace(
@@ -658,10 +656,7 @@ class PlexSearchTests(unittest.TestCase):
         song = {'title': 'Original Song', 'album': 'Original Album', 'artist': 'Original Artist'}
         result = self.search.search_plex_song(plugin, song, manual_search=False)
 
-        self.assertIsNone(result)
+        assert result is None
         # Ensure no positive cache entry was written.
-        self.assertFalse(cached_results)
+        assert not cached_results
 
-
-if __name__ == '__main__':
-    unittest.main()

@@ -2,15 +2,15 @@ import importlib
 import json
 import sys
 import types
-import unittest
+
+import pytest
 
 from tests.test_playlist_import import ensure_stubs
 
 
-class LLMSearchTest(unittest.TestCase):
-    def setUp(self):
-        if sys.version_info < (3, 9):
-            self.skipTest('LLM module requires Python 3.9+')
+class LLMSearchTest:
+    @pytest.fixture(autouse=True)
+    def setup(self, request):
         class SimpleBaseModel:
             def __init__(self, **data):
                 for key, value in data.items():
@@ -34,7 +34,7 @@ class LLMSearchTest(unittest.TestCase):
             else:
                 sys.modules['pydantic'] = _saved_pydantic
 
-        self.addCleanup(_restore_pydantic)
+        request.addfinalizer(_restore_pydantic)
         sys.modules['pydantic'] = types.SimpleNamespace(
             BaseModel=SimpleBaseModel,
             Field=Field,
@@ -55,22 +55,21 @@ class LLMSearchTest(unittest.TestCase):
                     },
                 }
             },
-            self,
+            request.addfinalizer,
         )
         if 'beetsplug.ai.llm' in sys.modules:
             importlib.reload(sys.modules['beetsplug.ai.llm'])
         else:
             importlib.import_module('beetsplug.ai.llm')
         self.llm = importlib.import_module('beetsplug.ai.llm')
-
-    def tearDown(self):
+        yield
         if 'beetsplug.ai.llm' in sys.modules:
             sys.modules['beetsplug.ai.llm']._search_toolkit = None
 
     def test_search_track_info_toolkit_missing(self):
         self.llm._search_toolkit = None
         result = self.llm.search_track_info('Test Song')
-        self.assertEqual(result, {'title': 'Test Song', 'artist': '', 'album': None})
+        assert result == {'title': 'Test Song', 'artist': '', 'album': None}
 
     def test_search_track_info_with_toolkit(self):
         class Toolkit:
@@ -78,7 +77,7 @@ class LLMSearchTest(unittest.TestCase):
                 return {'title': 'Found', 'artist': 'Artist', 'album': 'Album'}
         self.llm._search_toolkit = Toolkit()
         result = self.llm.search_track_info('Input Song')
-        self.assertEqual(result, {'title': 'Found', 'artist': 'Artist', 'album': 'Album'})
+        assert result == {'title': 'Found', 'artist': 'Artist', 'album': 'Album'}
 
     def test_instructor_available_flag(self):
         """Test that INSTRUCTOR_AVAILABLE flag matches actual instructor availability."""
@@ -87,29 +86,25 @@ class LLMSearchTest(unittest.TestCase):
             expected = True
         except ImportError:
             expected = False
-        self.assertEqual(self.llm.INSTRUCTOR_AVAILABLE, expected)
+        assert self.llm.INSTRUCTOR_AVAILABLE == expected
 
     def test_create_fallback_song(self):
         """Test fallback song creation."""
         toolkit = self.llm.MusicSearchTools(provider='ollama')
         fallback = toolkit._create_fallback_song('Test Title')
-        self.assertEqual(fallback.title, 'Test Title')
-        self.assertEqual(fallback.artist, '')
-        self.assertIsNone(fallback.album)
+        assert fallback.title == 'Test Title'
+        assert fallback.artist == ''
+        assert fallback.album is None
 
     def test_instructor_client_initialization(self):
         """Test that instructor_client is initialized when instructor is available."""
         toolkit = self.llm.MusicSearchTools(provider='ollama')
         # In test environment, instructor is not available
-        self.assertIsNone(toolkit.instructor_client)
+        assert toolkit.instructor_client is None
 
     def test_agno_fallback_exists(self):
         """Test that Agno agent fallback is maintained."""
         toolkit = self.llm.MusicSearchTools(provider='ollama')
         # Agno is also not available in test environment, so ollama_agent will be None
         # This test just verifies the attribute exists
-        self.assertTrue(hasattr(toolkit, 'ollama_agent'))
-
-
-if __name__ == '__main__':
-    unittest.main()
+        assert hasattr(toolkit, 'ollama_agent')

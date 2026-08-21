@@ -1,7 +1,8 @@
 import importlib
 import sys
 import types
-import unittest
+
+import pytest
 
 
 class DummyConfigNode:
@@ -60,14 +61,15 @@ _STUB_MODULE_NAMES = (
 )
 
 
-def ensure_stubs(data, test_case=None):
+def ensure_stubs(data, add_cleanup=None):
     """Install lightweight stub modules for beets/plexapi/confuse.
 
-    If `test_case` is given, the previous sys.modules entries (real modules
-    or earlier stubs) are snapshotted and restored via addCleanup, so this
-    call doesn't leak into later tests run in the same process.
+    If `add_cleanup` is given (a callable taking a zero-arg function, e.g.
+    ``request.addfinalizer`` under pytest), the previous sys.modules entries
+    (real modules or earlier stubs) are snapshotted and restored later, so
+    this call doesn't leak into later tests run in the same process.
     """
-    if test_case is not None:
+    if add_cleanup is not None:
         saved = {name: sys.modules.get(name) for name in _STUB_MODULE_NAMES}
 
         def _restore():
@@ -77,7 +79,7 @@ def ensure_stubs(data, test_case=None):
                 else:
                     sys.modules[name] = mod
 
-        test_case.addCleanup(_restore)
+        add_cleanup(_restore)
 
     config = DummyConfig()
     config.set_data(data)
@@ -238,9 +240,12 @@ class PluginStub:
         return []
 
 
-class PlaylistImportTest(unittest.TestCase):
-    def setUp(self):
-        self.config, self.UserError = ensure_stubs({'plexsync': {'manual_search': False}}, self)
+class PlaylistImportTest:
+    @pytest.fixture(autouse=True)
+    def setup(self, request):
+        self.config, self.UserError = ensure_stubs(
+            {'plexsync': {'manual_search': False}}, request.addfinalizer
+        )
         if 'beetsplug.plex.playlist_import' in sys.modules:
             importlib.reload(sys.modules['beetsplug.plex.playlist_import'])
         else:
@@ -264,8 +269,8 @@ class PlaylistImportTest(unittest.TestCase):
 
         self.module.add_songs_to_plex(plugin, 'Mix', songs)
 
-        self.assertEqual(plugin.added, (['match-One', 'match-Two'], 'Mix'))
-        self.assertFalse(plugin.last_manual)
+        assert plugin.added == (['match-One', 'match-Two'], 'Mix')
+        assert not plugin.last_manual
 
     def test_add_songs_to_plex_warns_when_empty(self):
         logger = DummyLogger()
@@ -278,8 +283,8 @@ class PlaylistImportTest(unittest.TestCase):
         plugin = EmptyPlugin(logger)
         self.module.add_songs_to_plex(plugin, 'Empty', [{'title': 'Zero'}])
 
-        self.assertIsNone(plugin.added)
-        self.assertTrue(any(level == 'warning' for level, _ in logger.messages))
+        assert plugin.added is None
+        assert any(level == 'warning' for level, _ in logger.messages)
 
     def test_import_playlist_spotify_flow(self):
         logger = DummyLogger()
@@ -296,16 +301,15 @@ class PlaylistImportTest(unittest.TestCase):
         plugin = SpotifyPlugin(logger)
         self.module.import_playlist(plugin, 'MyMix', 'https://open.spotify.com/playlist/demo')
 
-        self.assertEqual(plugin.imported_id, 'list-id')
-        self.assertEqual(plugin.added, (['match-Track'], 'MyMix'))
-        self.assertFalse(plugin.last_manual)
+        assert plugin.imported_id == 'list-id'
+        assert plugin.added == (['match-Track'], 'MyMix')
+        assert not plugin.last_manual
 
     def test_import_playlist_requires_url(self):
         logger = DummyLogger()
         plugin = PluginStub(logger)
-        from beets import ui
 
-        with self.assertRaises(self.UserError):
+        with pytest.raises(self.UserError):
             self.module.import_playlist(plugin, 'Test', None)
 
     def test_import_playlist_listenbrainz_flow(self):
@@ -338,13 +342,10 @@ class PlaylistImportTest(unittest.TestCase):
             self.module.add_songs_to_plex = original_add
             sys.modules.pop('beetsplug.listenbrainz', None)
 
-        self.assertEqual(
-            added_calls,
-            [
-                ('Weekly Jams', [{'title': 'Jam Track'}], None),
-                ('Weekly Exploration', [{'title': 'Explore Track'}], None),
-            ],
-        )
+        assert added_calls == [
+            ('Weekly Jams', [{'title': 'Jam Track'}], None),
+            ('Weekly Exploration', [{'title': 'Explore Track'}], None),
+        ]
 
     def test_import_search(self):
         logger = DummyLogger()
@@ -352,9 +353,5 @@ class PlaylistImportTest(unittest.TestCase):
 
         self.module.import_search(plugin, 'SearchMix', 'query', limit=5)
 
-        self.assertEqual(plugin.added, (['match-Q'], 'SearchMix'))
-        self.assertEqual(self.search_calls[-1], ('query', 5))
-
-
-if __name__ == '__main__':
-    unittest.main()
+        assert plugin.added == (['match-Q'], 'SearchMix')
+        assert self.search_calls[-1] == ('query', 5)

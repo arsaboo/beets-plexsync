@@ -12,6 +12,9 @@ setup(
     platforms='ALL',
     packages=find_packages(include=['beetsplug', 'beetsplug.*']),
     python_requires='>=3.10',
+    extras_require={
+        'test': ['pytest'],
+    },
     install_requires=[
         'beets>=2.6.0',
         'plexapi>=4.13.4',

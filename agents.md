@@ -77,10 +77,11 @@ When PlexSync.search_plex_song(...) is called, the pipeline should proceed:
     - --import-failed/--log-file: retry manual imports using generated logs
 
 ## Testing
-- Run unit tests:
+- Run unit tests (pytest is the test runner; `pytest` or `python3 -m pytest`):
   ```bash
-  python3 -m unittest discover -s ./tests -p "test_*.py" -v
+  python3 -m pytest -v
   ```
+  Install the test extra if needed: `pip install -e .[test]`
 - Compile modules quickly:
   ```bash
   python3 - << 'PY'

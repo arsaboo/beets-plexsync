@@ -1,7 +1,8 @@
 import importlib
 import sys
 import types
-import unittest
+
+import pytest
 
 
 class DummyConfigNode:
@@ -43,8 +44,8 @@ class ConfigValueError(Exception):
 _STUB_MODULE_NAMES = ('beets', 'beets.ui', 'confuse')
 
 
-def ensure_stubs(data, test_case=None):
-    if test_case is not None:
+def ensure_stubs(data, add_cleanup=None):
+    if add_cleanup is not None:
         saved = {name: sys.modules.get(name) for name in _STUB_MODULE_NAMES}
 
         def _restore():
@@ -54,7 +55,7 @@ def ensure_stubs(data, test_case=None):
                 else:
                     sys.modules[name] = mod
 
-        test_case.addCleanup(_restore)
+        add_cleanup(_restore)
 
     config = DummyConfig()
     config.set_data(data)
@@ -80,9 +81,10 @@ def ensure_stubs(data, test_case=None):
     return config
 
 
-class GetPlexsyncConfigTest(unittest.TestCase):
-    def setUp(self):
-        self.config = ensure_stubs({'plexsync': {}}, self)
+class GetPlexsyncConfigTest:
+    @pytest.fixture(autouse=True)
+    def setup(self, request):
+        self.config = ensure_stubs({'plexsync': {}}, request.addfinalizer)
         if 'beetsplug.core.config' in sys.modules:
             importlib.reload(sys.modules['beetsplug.core.config'])
         else:
@@ -90,23 +92,16 @@ class GetPlexsyncConfigTest(unittest.TestCase):
 
     def test_default_value_returned(self):
         helpers = importlib.import_module('beetsplug.core.config')
-        self.assertTrue(helpers.get_plexsync_config('manual_search', bool, True))
+        assert helpers.get_plexsync_config('manual_search', bool, True)
 
     def test_nested_lookup(self):
         self.config.set_data({'plexsync': {'playlists': {'items': [1, 2]}}})
         helpers = importlib.import_module('beetsplug.core.config')
-        self.assertEqual(
-            helpers.get_plexsync_config(['playlists', 'items'], list, []),
-            [1, 2],
-        )
+        assert helpers.get_plexsync_config(['playlists', 'items'], list, []) == [1, 2]
 
     def test_missing_nested_returns_default(self):
         helpers = importlib.import_module('beetsplug.core.config')
-        self.assertEqual(
-            helpers.get_plexsync_config(['playlists', 'defaults'], dict, {'x': 1}),
-            {'x': 1},
+        assert (
+            helpers.get_plexsync_config(['playlists', 'defaults'], dict, {'x': 1})
+            == {'x': 1}
         )
-
-
-if __name__ == '__main__':
-    unittest.main()
