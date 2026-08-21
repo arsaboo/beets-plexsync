@@ -666,7 +666,7 @@ class PlexSync(BeetsPlugin):
         )
 
         def func_playlist_add(lib, opts, args):
-            items = lib.items(ui.decargs(args))
+            items = lib.items(args)
             self._plex_add_playlist_item(items, opts.playlist)
 
         playlistadd_cmd.func = func_playlist_add
@@ -680,7 +680,7 @@ class PlexSync(BeetsPlugin):
         )
 
         def func_playlist_rem(lib, opts, args):
-            items = lib.items(ui.decargs(args))
+            items = lib.items(args)
             self._plex_remove_playlist_item(items, opts.playlist)
 
         playlistrem_cmd.func = func_playlist_rem
