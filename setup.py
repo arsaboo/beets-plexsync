@@ -16,7 +16,7 @@ setup(
         'test': ['pytest'],
     },
     install_requires=[
-        'beets>=2.6.0',
+        'beets>=2.13.0',
         'plexapi>=4.13.4',
         'jiosaavn-python>=0.2',
         'spotipy',

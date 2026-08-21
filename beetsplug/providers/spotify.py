@@ -18,6 +18,7 @@ from spotipy.oauth2 import SpotifyOAuth
 from spotipy.exceptions import SpotifyOauthError
 
 from beets import config
+from beets.util.id_extractors import extract_release_id
 from beetsplug.utils.helpers import parse_title, clean_album_name
 
 
@@ -137,10 +138,26 @@ def process_spotify_track(track: Dict[str, Any], logger) -> Optional[Dict[str, A
         return None
 
 
+_SPOTIFY_ENTITY_TYPE_RE = re.compile(r"(?:open\.spotify\.com/|spotify:)([a-z]+)")
+
+
 def get_playlist_id(url: str) -> str:
-    parts = url.split("/")
-    index = parts.index("playlist")
-    return parts[index + 1]
+    """Extract a playlist ID from a URL, native URI, or bare ID.
+
+    Accepts open.spotify.com/playlist/<id> URLs (with or without query
+    strings, e.g. ?si=...), spotify:playlist:<id> URIs, and bare IDs,
+    using beets' id_extractors (URI support requires beets >= 2.13).
+    """
+    text = str(url)
+    playlist_id = extract_release_id("spotify", text)
+    if not playlist_id:
+        raise ValueError(f"Could not extract a Spotify playlist ID from: {url!r}")
+    # extract_release_id matches any Spotify entity type; reject album/track/
+    # artist URLs/URIs rather than passing their ID to the playlist API.
+    entity = _SPOTIFY_ENTITY_TYPE_RE.search(text)
+    if entity and entity.group(1) != "playlist":
+        raise ValueError(f"Expected a Spotify playlist URL or URI, got: {url!r}")
+    return playlist_id
 
 
 def get_playlist_tracks(plugin, playlist_id: str) -> List[Dict[str, Any]]:
