@@ -11,8 +11,8 @@ from typing import Any, Dict, List, Optional
 from collections import Counter
 
 import dateutil.parser
-import requests
 from bs4 import BeautifulSoup
+from beetsplug._utils.requests import TimeoutAndRetrySession
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 from spotipy.exceptions import SpotifyOauthError
@@ -215,10 +215,7 @@ def import_spotify_playlist(plugin, playlist_id: str) -> List[Dict[str, Any]]:
 
     try:
         playlist_url = f"https://open.spotify.com/playlist/{playlist_id}"
-        response = requests.get(playlist_url, headers=plugin.headers)
-        if response.status_code != 200:
-            plugin._log.error("Failed to fetch playlist page: {}", response.status_code)
-            return song_list
+        response = TimeoutAndRetrySession().get(playlist_url, headers=plugin.headers)
 
         soup = BeautifulSoup(response.text, "html.parser")
 
@@ -260,20 +257,21 @@ def import_spotify_playlist(plugin, playlist_id: str) -> List[Dict[str, Any]]:
                             track_id = href.split('/track/')[-1].split('?')[0]
                             track_url = f"https://open.spotify.com/track/{track_id}"
                             try:
-                                track_page = requests.get(track_url, headers=plugin.headers)
-                                if track_page.status_code == 200:
-                                    track_soup = BeautifulSoup(track_page.text, 'html.parser')
-                                    title = track_soup.find('meta', {'property': 'og:title'})
-                                    description = track_soup.find('meta', {'property': 'og:description'})
-                                    if title and description:
-                                        desc_parts = description['content'].split(' · ')
-                                        song_dict = {
-                                            'title': title['content'].strip(),
-                                            'artist': desc_parts[0].strip() if len(desc_parts) > 0 else '',
-                                            'album': desc_parts[1].strip() if len(desc_parts) > 1 else '',
-                                            'year': None
-                                        }
-                                        song_list.append(song_dict)
+                                track_page = TimeoutAndRetrySession().get(
+                                    track_url, headers=plugin.headers
+                                )
+                                track_soup = BeautifulSoup(track_page.text, 'html.parser')
+                                title = track_soup.find('meta', {'property': 'og:title'})
+                                description = track_soup.find('meta', {'property': 'og:description'})
+                                if title and description:
+                                    desc_parts = description['content'].split(' · ')
+                                    song_dict = {
+                                        'title': title['content'].strip(),
+                                        'artist': desc_parts[0].strip() if len(desc_parts) > 0 else '',
+                                        'album': desc_parts[1].strip() if len(desc_parts) > 1 else '',
+                                        'year': None
+                                    }
+                                    song_list.append(song_dict)
                             except Exception as e:
                                 plugin._log.debug("Error processing track {}: {}", track_url, e)
 

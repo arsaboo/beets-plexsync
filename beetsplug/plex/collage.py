@@ -3,8 +3,8 @@
 import os
 from io import BytesIO
 
-import requests
 from PIL import Image
+from beetsplug._utils.requests import TimeoutAndRetrySession
 
 
 def create_collage(list_image_urls, dimension, logger):
@@ -20,7 +20,7 @@ def create_collage(list_image_urls, dimension, logger):
         if index >= dimension * dimension:
             break
         try:
-            response = requests.get(url, timeout=10)
+            response = TimeoutAndRetrySession().get(url)
             img = Image.open(BytesIO(response.content))
             if img.mode != "RGB":
                 img = img.convert("RGB")

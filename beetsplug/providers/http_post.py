@@ -1,5 +1,6 @@
 from beets import logging
 import requests
+from beetsplug._utils.requests import TimeoutAndRetrySession
 
 _log = logging.getLogger('beets.plexsync.post')
 
@@ -37,8 +38,9 @@ def import_post_playlist(source_config, cache=None):
     payload = source_config.get("payload", {})
 
     try:
-        response = requests.post(server_url, headers=headers, json=payload)
-        response.raise_for_status()  # Raise exception for non-200 status codes
+        response = TimeoutAndRetrySession().post(
+            server_url, headers=headers, json=payload
+        )
 
         data = response.json()
         if not isinstance(data, dict) or "song_list" not in data:

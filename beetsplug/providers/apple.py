@@ -1,7 +1,7 @@
 import json
 from beets import logging
-import requests
 from bs4 import BeautifulSoup
+from beetsplug._utils.requests import TimeoutAndRetrySession
 
 _log = logging.getLogger('beets.plexsync.apple')
 
@@ -42,8 +42,10 @@ def import_apple_playlist(url, cache=None, headers=None):
     song_list = []
 
     try:
-        # Send a GET request to the URL and get the HTML content
-        response = requests.get(url, headers=headers)
+        # TimeoutAndRetrySession: 10s timeout, retries on 429/5xx, raise_for_status.
+        # Per-request headers override the session User-Agent (Apple needs a
+        # browser UA). Non-200 (e.g. 403) becomes HTTPError and is caught below.
+        response = TimeoutAndRetrySession().get(url, headers=headers)
         content = response.text
 
         # Create a BeautifulSoup object with the HTML content
