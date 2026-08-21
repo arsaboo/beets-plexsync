@@ -238,6 +238,21 @@ class PlexSync(BeetsPlugin):
                 library not found"
             )
         self.register_listener("database_change", self.listen_for_db_change)
+        self.register_listener("item_removed", self.on_item_removed)
+
+    def on_item_removed(self, item):
+        """Drop a removed item from the in-memory vector index.
+
+        beets fires ``item_removed`` with the removed Item. Without this
+        the index could keep serving a deleted track as a local candidate
+        for the rest of the CLI run.
+        """
+        index = getattr(self, "_vector_index", None)
+        item_id = getattr(item, "id", None)
+        if index is None or item_id is None:
+            return
+        if index.remove_item(item_id):
+            self._log.debug("Removed item {} from vector index", item_id)
 
     def _extract_vector_metadata(self, item) -> Dict[str, Optional[str]]:
         return {
