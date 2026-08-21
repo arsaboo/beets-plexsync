@@ -1,87 +1,175 @@
 # beets-plexsync - Project Context
 
-This file is kept in sync with `gemini.md`. Codex/Cursor-style agents read `agents.md`; Gemini CLI reads `gemini.md`; Claude Code reads `CLAUDE.md` (more detailed command/config map).
+Canonical agent brief. `CLAUDE.md` and `gemini.md` point here so they stay in sync.
 
 ## Environment
 
-- **Conda env**: `py311` — run commands with `conda run -n py311 ...`
+- **Conda env**: Always use `py311` — `conda run -n py311 ...`
 - **Python**: 3.11 locally; plugin requires `>=3.10`
 - **Beets**: `>=2.13.0` (tested against 2.13.1)
 - **Platform**: Windows 11 (Unix shell syntax in bash: forward slashes, `/dev/null`)
-- **Remote live machine** (optional): `arsaboo@192.168.2.188`, plugin under `~/.local`, `beet` at `~/.local/bin/beet`
+- **Tests**: `conda run -n py311 python -m pytest -v`
+- **Single test**: `conda run -n py311 python -m pytest tests/test_cache.py -v`
+- **Compile check**: `conda run -n py311 python -c "import os, py_compile; [py_compile.compile(os.path.join(r,f)) for r,_,fs in os.walk('beetsplug') for f in fs if f.endswith('.py')]; print('OK')"`
+- **Test extra**: `pip install -e .[test]` (pytest)
+- **Remote** (optional live checks): `arsaboo@192.168.2.188`, plugin under `~/.local`, `beet` at `~/.local/bin/beet`
 
 ## Project Overview
 
-This project is a plugin for [beets](https://github.com/beetbox/beets). The plugin, named `plexsync`, syncs and manages a music library between beets and a Plex Media Server.
+beets-plexsync is a [beets](https://github.com/beetbox/beets) plugin (`PlexSync` extending `BeetsPlugin`) that syncs a music library between beets and Plex.
 
-Key features:
-- **Library Sync**: Import ratings, play counts, last played dates from Plex into beets (`beet plexsync`, `plexsyncrecent`)
+- **Library Sync**: ratings, play counts, last played (`beet plexsync`, `plexsyncrecent`)
 - **Smart Playlists**: Daily Discovery, Forgotten Gems, Recent Hits, Fresh Favorites, 70s80s Flashback, Highly Rated, Most Played
-- **AI Playlists**: Natural-language playlists via LLM (`beet plexsonic`)
+- **AI Playlists**: natural-language playlists (`beet plexsonic`)
 - **External Import**: Spotify, Apple Music, YouTube, Tidal, JioSaavn, Gaana, M3U8, HTTP POST
-- **Playlist Management**: Add/remove/clear, playlist→collection, album collages
-- **Spotify Transfer**: Copy Plex playlists to Spotify (`plex2spotify`)
+- **Spotify Transfer**: Plex → Spotify (`plex2spotify`)
+- **Playlist Management**: add/remove/clear, playlist→collection, album collages
 
 ## Implementation Guidelines
 
 - Ask clarifying questions for ambiguous changes
 - Draft and confirm approach for non-trivial features
 - List trade-offs when multiple approaches exist
-- Follow existing patterns and module boundaries below
+- Follow existing module boundaries (providers, plex, core, ai)
 
 ### Critical Constraints
+
 - **NEVER modify cache keys** (`Cache._make_cache_key` pipe format `title|artist|album` in `core/cache.py`). Changing keys invalidates the existing SQLite cache.
 - Keep public APIs and method signatures stable when possible
-- Maintain compatibility with beets plugin architecture and CLI
+- Maintain beets plugin architecture and CLI compatibility
 - Preserve vector index behavior (`core/vector_index.py`)
-- Minimize Spotify API calls (batch `sp.tracks()`, cache)
+- Minimize Spotify API calls — batch `sp.tracks()` (50 at once) and cache
+- spotipy is configured with retries/backoff for rate limits
+- Provider HTTP: `beetsplug._utils.requests.TimeoutAndRetrySession` (timeout, 429/5xx retry)
+- Do not mutate `beets.autotag.distance.Distance._weights` (`plex_track_distance` uses a local weighted sum)
+- `beet plexsync`: search in threads; `try_write` then one `lib.transaction()` for all `store()`
+- Cache expensive operations (Plex, providers, LLM)
 - Keep LLM tooling behind config flags; degrade gracefully
 
 ### Development Patterns
-- Logging: `from beets import logging` so loggers are `BeetsLogger` (`{}`-style formatting)
-- Prefer Pydantic v2 models for structured data
-- Cache expensive operations (Plex, providers, LLM)
-- Provider HTTP: `beetsplug._utils.requests.TimeoutAndRetrySession` (timeout, 429/5xx retry)
-- `plex_track_distance` uses a local weighted sum — do not mutate `beets.autotag.distance.Distance._weights`
-- `beet plexsync`: search in threads; `try_write` then one `lib.transaction()` for all `store()`
+
+- Logging: `from beets import logging` so loggers are `BeetsLogger` (`{}`-style)
+- Prefer Pydantic v2 models
+- Cache expensive operations
 
 ## Code Organization
-- Entry point: `beetsplug/plexsync.py`
-- AI: `beetsplug/ai/llm.py` (Agno; OpenAI-like or Ollama)
-- Core: `beetsplug/core/{cache.py, config.py, matching.py, vector_index.py}`
-- Plex: `beetsplug/plex/{search.py, manual_search.py, playlist_import.py, smartplaylists.py, operations.py, spotify_transfer.py, queues.py, collage.py}`
-- Providers: `beetsplug/providers/{apple.py, spotify.py, youtube.py, tidal.py, jiosaavn.py, gaana.py, m3u8.py, http_post.py}`
-- Utils: `beetsplug/utils/{helpers.py, prompt_logging.py}`
 
-## Search Pipeline (`beetsplug/plex/search.py`)
-When `PlexSync.search_plex_song(...)` is called:
-1. Cache check — return cached ratingKey via `plugin.music.fetchItem`
-2. Local beets candidates (`core/vector_index.py`)
-   - Direct match via cached `plex_ratingkey` if similarity >= 0.8
-   - Else queue for confirmation; try variant queries on `music.searchTracks`
-3. Score hits with `core/matching.plex_track_distance`; accept on threshold
-4. Manual search UI (`manual_search.py`): a abort, s skip (negative cache), e enter, numeric select (cache original query only)
+```
+beetsplug/
+├── plexsync.py              # Main plugin entry point (PlexSync)
+├── ai/llm.py                # Agno LLM (OpenAI-like or Ollama)
+├── core/
+│   ├── cache.py             # SQLite cache (track lookups, playlists, Spotify)
+│   ├── config.py            # get_config_value, get_plexsync_config
+│   ├── matching.py          # fuzzy matching, plex_track_distance (local weights)
+│   └── vector_index.py      # In-memory cosine-similarity index
+├── plex/
+│   ├── search.py            # Multi-strategy Plex track search
+│   ├── manual_search.py     # Interactive manual search UI
+│   ├── playlist_import.py   # Import playlists into Plex
+│   ├── smartplaylists.py    # Smart playlist generation
+│   ├── operations.py        # Plex CRUD, playlist→collection
+│   ├── spotify_transfer.py  # Plex→Spotify transfer
+│   ├── queues.py            # LLMEnhancementQueue, ManualPromptQueue
+│   └── collage.py           # Album art collage
+├── providers/
+│   ├── spotify.py           # spotipy + web scrape fallback
+│   ├── apple.py             # Apple Music HTML scrape
+│   ├── youtube.py / tidal.py / gaana.py  # wrappers around other beets plugins
+│   ├── jiosaavn.py          # JioSaavn async API
+│   ├── m3u8.py              # M3U8 parser
+│   └── http_post.py         # HTTP POST importer (TimeoutAndRetrySession)
+└── utils/
+    ├── helpers.py           # parse_title, clean_album_name, highlight_matches
+    └── prompt_logging.py    # Log buffering during interactive prompts
+```
+
+## Beets Subcommands (13)
+
+| Command | Description | Key Options |
+|---------|-------------|-------------|
+| `plexupdate` | Update Plex library | |
+| `plexsync` | Fetch track attributes from Plex | `-f`/`--force` |
+| `plexplaylistadd` | Add tracks to Plex playlist | `-m`/`--playlist` (default: Beets) |
+| `plexplaylistremove` | Remove tracks from Plex playlist | `-m`/`--playlist` |
+| `plexsyncrecent` | Sync recently played tracks | `--days` (default: 7) |
+| `plexplaylistimport` | Import playlist into Plex | `-m`, `-u`/`--url`, `-l`/`--listenbrainz` |
+| `plexplaylistclear` | Clear a Plex playlist | `-m`/`--playlist` |
+| `plexcollage` | Album collage from history | `-i`/`--interval`, `-g`/`--grid` |
+| `plexsonic` | LLM playlists | `-n`, `-p`/`--prompt`, `-m`, `-c`/`--clear` |
+| `plexsearchimport` | Import from YouTube search | `-m`, `-s`/`--search`, `-l`/`--limit` |
+| `plexplaylist2collection` | Playlist → collection | `-m`/`--playlist` |
+| `plex2spotify` | Plex playlist → Spotify | `-m`/`--playlist` (default: beets) |
+| `plex_smartplaylists` | Generate smart playlists | `-i`/`--import-failed`, `-l`/`--log-file`, `-o`/`--only` |
+
+## Key Instance Variables (PlexSync)
+
+| Variable | Type | Description |
+|----------|------|-------------|
+| `self.plex` | `PlexServer` | Plex server connection |
+| `self.music` | Library section | Plex music library |
+| `self.sp` | `spotipy.Spotify` | Authenticated Spotify client |
+| `self.cache` | `Cache` | SQLite cache |
+| `self.llm_client` | OpenAI-like client | LLM for plexsonic |
+| `self.search_llm` | LLM client | Search enhancement |
+| `self._vector_index` | `BeetsVectorIndex` | In-memory cosine index |
+| `self._llm_enhancement_queue` | `LLMEnhancementQueue` | Background LLM queue |
+| `self._manual_prompt_queue` | `ManualPromptQueue` | Deferred manual prompts |
+| `self._progress_manager` | Enlighten manager | Progress bars |
+
+## Beets Flexible Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `plex_guid` | STRING | Plex GUID |
+| `plex_ratingkey` | INTEGER | Plex rating key |
+| `plex_userrating` | FLOAT | User rating |
+| `plex_skipcount` | INTEGER | Skip count |
+| `plex_viewcount` | INTEGER | Play count |
+| `plex_lastviewedat` | DateType | Last played |
+| `plex_lastratedat` | DateType | Last rated |
+| `plex_updated` | DateType | Last sync |
+
+## Config Options
+
+- **Plex** (`config["plex"]`): `host`, `port`, `token`, `library_name`, `secure`, `ignore_cert_errors`
+- **PlexSync** (`config["plexsync"]`): `tokenfile`, `manual_search`, `max_tracks`, `exclusion_days`, `history_days`, `discovery_ratio`, `use_llm_search`, `llm.background_enhancement`, `search.manual_prompt_queue_enabled`, `search.manual_prompt_queue_limit`
+- **LLM** (`config["llm"]`): `api_key`, `model`, `base_url`, `search.provider`, `search.api_key`, `search.base_url`, `search.model`, `search.embedding_model`
+- **Spotify** (`config["spotify"]`): `client_id`, `client_secret`
+
+## Search Pipeline (`plex/search.py`)
+
+1. Cache check → cached ratingKey via `plugin.music.fetchItem`
+2. Local beets candidates (`core/vector_index.py`) → accept if similarity >= 0.8, else queue confirmation; variant `music.searchTracks`
+3. Score with `core/matching.plex_track_distance`; accept on threshold
+4. Manual UI (`manual_search.py`): a abort, s skip (negative cache), e enter, numeric select (cache original query only)
 5. Optional LLM fallback if `plexsync.use_llm_search` (SearxNG > Exa > Brave > Tavily; Brave ~1 req/s)
 
+## Spotify API
+
+- OAuth via spotipy with token cache (`providers/spotify.py`)
+- Client: `retries=3`, `backoff_factor=0.5`
+- Playlist import: API first (`playlist_items` + pagination), web scrape fallback, cache (api/web/tracks)
+- Track search: in-memory `_spotify_search_result_cache`
+- Availability: batch `sp.tracks()` (50/request)
+- Playlist sync: diff-based add/remove, 100-track chunks
+- Playlist IDs: `extract_release_id` (URLs with `?si=`, `spotify:playlist:` URIs, bare IDs); reject album/track/artist URLs
+
 ## Smart Playlists
-`beet plex_smartplaylists`:
-- System: `daily_discovery`, `forgotten_gems`, `recent_hits`, `fresh_favorites`, `70s80s_flashback` (1970–1989), `highly_rated`, `most_played`
-- Daily Discovery dedupes sonic + library pools by `ratingKey` / `plex_ratingkey`
-- Flags: `--only` (comma-separated IDs), `--import-failed`/`--log-file`
 
-## Testing
-```bash
-conda run -n py311 python -m pytest -v
-conda run -n py311 python -m pytest tests/test_cache.py -v
-```
-Install the test extra if needed: `pip install -e .[test]`
+System types: `daily_discovery`, `forgotten_gems`, `recent_hits`, `fresh_favorites`, `70s80s_flashback` (1970–1989), `highly_rated`, `most_played`
 
-```bash
-conda run -n py311 python -c "import os, py_compile; [py_compile.compile(os.path.join(r,f)) for r,_,fs in os.walk('beetsplug') for f in fs if f.endswith('.py')]; print('OK')"
-```
+Daily Discovery dedupes sonic + library pools by `ratingKey` / `plex_ratingkey`.
+
+Imported playlists via `plexsync.playlists`. Flags: `--only`, `--import-failed`/`--log-file`.
 
 ## LLM Configuration
+
 - `beet plexsonic` uses top-level `llm.*` (`api_key`, `model`, `base_url`)
 - `llm.search.*` only when `plexsync.use_llm_search` is enabled
 - If `llm.api_key` is set: OpenAI-compatible via agno; else Ollama
 - Search toolkit: `searxng_host`, `exa_api_key`, `brave_api_key`, `tavily_api_key`
+
+## Dependencies (key)
+
+`beets>=2.13.0`, Python `>=3.10`, `plexapi>=4.13.4`, `spotipy`, `openai`, `agno>=1.2.16`, `instructor>=1.0`, `pydantic>=2.0.0`, `numpy`, `scipy`, `beautifulsoup4`, `requests`, `python-dateutil`, `pillow`
