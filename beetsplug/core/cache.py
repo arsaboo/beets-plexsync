@@ -196,46 +196,6 @@ class Cache:
             logger.error("Failed to initialize Spotify cache tables: {}", e)
             raise
 
-    def clear_expired_spotify_cache(self):
-        """Clear expired Spotify cache entries with randomized expiration."""
-        try:
-            import random
-
-            with self._connect() as conn:
-                cursor = conn.cursor()
-
-                # Get all entries
-                for table_type in ["api", "web", "tracks"]:
-                    table_name = f"spotify_{table_type}_cache"
-                    cursor.execute(f"SELECT playlist_id, created_at FROM {table_name}")
-                    rows = cursor.fetchall()
-
-                    for playlist_id, created_at in rows:
-                        if created_at:
-                            expiry_hours = random.uniform(60, 200)
-                            created_dt = datetime.fromisoformat(created_at)
-                            expiry = created_dt + timedelta(hours=expiry_hours)
-
-                            # Check if expired. created_at comes from SQLite's
-                            # CURRENT_TIMESTAMP, which is UTC; compare against
-                            # UTC too (datetime.now() is local time and would
-                            # make expiry off by the local UTC offset).
-                            if datetime.utcnow() > expiry:
-                                cursor.execute(
-                                    f"DELETE FROM {table_name} WHERE playlist_id = ?",
-                                    (playlist_id,),
-                                )
-                                if cursor.rowcount:
-                                    logger.debug(
-                                        "Cleaned expired entry from {} (age: {:.1f}h)",
-                                        table_name,
-                                        expiry_hours,
-                                    )
-
-                conn.commit()
-        except Exception as e:
-            logger.error("Failed to clear expired Spotify cache: {}", e)
-
     def clear_expired_playlist_cache(self, max_age_hours=72):
         """Clear expired playlist cache entries."""
         try:
@@ -319,15 +279,6 @@ class Cache:
             key_str = f"{normalized_title}|{normalized_artist}|{normalized_album}"
             return key_str
         return str(query_data)
-
-    def _verify_track_exists(self, plex_ratingkey, query):
-        """Verify track exists in Plex."""
-        try:
-            # First try direct lookup
-            self.plugin.music.fetchItem(plex_ratingkey)
-            return True
-        except Exception:
-            return False
 
     def get(self, query):
         """Retrieve cached result for a given query."""
@@ -476,50 +427,4 @@ class Cache:
                 logger.info("Cleared {} entries from cache", count_before)
         except Exception as e:
             logger.error("Failed to clear cache: {}", e)
-
-    def clear_negative_cache_entries(self, pattern=None):
-        """Clear negative cache entries, optionally matching a pattern."""
-        try:
-            with self._connect() as conn:
-                cursor = conn.cursor()
-
-                if pattern:
-                    # Clear specific pattern
-                    cursor.execute(
-                        "DELETE FROM cache WHERE plex_ratingkey = -1 AND query LIKE ?",
-                        (f"%{pattern}%",)
-                    )
-                    logger.debug("Cleared {} negative cache entries matching pattern: {}",
-                               cursor.rowcount, pattern)
-                else:
-                    # Clear all negative entries
-                    cursor.execute("DELETE FROM cache WHERE plex_ratingkey = -1")
-                    logger.debug("Cleared {} negative cache entries", cursor.rowcount)
-
-                conn.commit()
-                return cursor.rowcount
-        except Exception as e:
-            logger.error("Failed to clear negative cache entries: {}", e)
-            return 0
-
-    def clear_old_format_entries(self):
-        """Clear all old format cache entries (JSON and list formats)."""
-        try:
-            with self._connect() as conn:
-                cursor = conn.cursor()
-
-                # Delete entries that don't use the new pipe format
-                cursor.execute(
-                    "DELETE FROM cache WHERE query NOT LIKE '%|%' OR query LIKE '{%' OR query LIKE '[%'"
-                )
-                cleared_count = cursor.rowcount
-
-                if cleared_count > 0:
-                    logger.info("Cleared {} old format cache entries", cleared_count)
-
-                conn.commit()
-                return cleared_count
-        except Exception as e:
-            logger.error("Failed to clear old format cache entries: {}", e)
-            return 0
 
