@@ -1,7 +1,7 @@
 """LLM integration for beets plugins."""
 
 import json
-import logging
+from beets import logging
 import textwrap
 import time
 from typing import Optional, Dict
@@ -619,5 +619,5 @@ def search_track_info(query: str) -> Dict:
         logger.info("Found track info: {}", result)
         return result
     except Exception as e:
-        logger.error("Error in agent-based search: %s", e)
+        logger.error("Error in agent-based search: {}", e)
         return {"title": query, "artist": "", "album": None}

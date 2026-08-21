@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import logging
+from beets import logging
 import queue
 import threading
 from dataclasses import dataclass, field

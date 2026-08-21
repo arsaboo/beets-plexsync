@@ -1,4 +1,4 @@
-import logging
+from beets import logging
 from pathlib import Path
 
 _log = logging.getLogger('beets.plexsync.m3u8')

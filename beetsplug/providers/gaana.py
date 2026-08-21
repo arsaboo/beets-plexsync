@@ -1,4 +1,4 @@
-import logging
+from beets import logging
 
 _log = logging.getLogger('beets.plexsync.gaana')
 

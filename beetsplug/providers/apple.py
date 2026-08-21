@@ -1,5 +1,5 @@
 import json
-import logging
+from beets import logging
 import requests
 from bs4 import BeautifulSoup
 

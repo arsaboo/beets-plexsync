@@ -1,5 +1,5 @@
 import json
-import logging
+from beets import logging
 import re
 import sqlite3
 from contextlib import contextmanager

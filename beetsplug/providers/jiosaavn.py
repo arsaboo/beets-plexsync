@@ -1,4 +1,4 @@
-import logging
+from beets import logging
 import asyncio
 # Monkey-patch for pydantic.typing.Annotated compatibility
 try:

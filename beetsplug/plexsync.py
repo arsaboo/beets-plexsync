@@ -17,7 +17,6 @@ Put something like the following in your config.yaml to configure:
         token: token
 """
 
-import logging
 import os
 import asyncio
 import re
@@ -114,8 +113,8 @@ class PlexSync(BeetsPlugin):
         """Initialize plexsync plugin."""
         super().__init__()
 
-        # Set up the logger
-        self._log = logging.getLogger('beets.plexsync')
+        # BeetsPlugin.__init__ already provides self._log as a beets
+        # BeetsLogger ('beets.plexsync'); don't replace it with a stdlib logger.
 
         self.headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 0.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",

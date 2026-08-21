@@ -101,6 +101,11 @@ def ensure_stubs(data, test_case=None):
     beets.ui = ui_module
     beets.config = config
 
+    # Plugin modules do `from beets import logging`; expose the stdlib
+    # logging module so that import resolves against the stub.
+    import logging as _stdlib_logging
+    beets.logging = _stdlib_logging
+
     # Minimal beets.library stub used by matching helpers during tests.
     library_module = types.ModuleType('beets.library')
 

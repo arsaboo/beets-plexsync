@@ -1,4 +1,4 @@
-import logging
+from beets import logging
 import requests
 
 _log = logging.getLogger('beets.plexsync.post')
