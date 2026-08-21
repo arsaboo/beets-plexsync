@@ -588,7 +588,9 @@ class PlexSync(BeetsPlugin):
 
     def listen_for_db_change(self, lib, model):
         """Listens for beets db change and register the update for the end."""
-        self.register_listener("cli_exit", self._plexupdate)
+        if not getattr(self, "_plexupdate_registered", False):
+            self.register_listener("cli_exit", self._plexupdate)
+            self._plexupdate_registered = True
 
         index = getattr(self, "_vector_index", None)
         if index is None:
