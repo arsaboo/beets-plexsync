@@ -22,12 +22,15 @@ beets-plexsync is a [beets](https://github.com/beetbox/beets) plugin (`PlexSync`
 
 ## Critical Constraints
 
-- **NEVER** modify cache keys (stored in SQLite via `core/cache.py`)
-- Keep public APIs and method signatures stable
+- **NEVER** modify cache keys (`Cache._make_cache_key` pipe format `title|artist|album` in `core/cache.py`). Changing keys invalidates the existing SQLite cache.
+- Keep public APIs and method signatures stable when possible
 - Maintain beets plugin architecture compatibility
 - Preserve vector index behavior (`core/vector_index.py`)
 - Spotify API calls should be minimized — use batch endpoints (`sp.tracks()` for 50 at once) and caching
 - spotipy client is configured with retries/backoff for rate limits
+- Provider HTTP uses `beetsplug._utils.requests.TimeoutAndRetrySession` (timeout + 429/5xx retry)
+- Do not mutate `beets.autotag.distance.Distance._weights` (`plex_track_distance` uses a local weighted sum)
+- `beet plexsync`: search in threads; `try_write` then one `lib.transaction()` for all `store()`
 - Cache expensive operations (Plex calls, provider fetches, LLM queries)
 - Keep LLM tooling behind config flags; degrade gracefully
 
@@ -41,7 +44,7 @@ beetsplug/
 ├── core/
 │   ├── cache.py              # SQLite cache (track lookups, playlist data, Spotify data)
 │   ├── config.py             # Config helpers (get_config_value, get_plexsync_config)
-│   ├── matching.py           # String similarity, fuzzy matching, plex_track_distance
+│   ├── matching.py           # String similarity, fuzzy matching, plex_track_distance (local weights)
 │   └── vector_index.py       # In-memory cosine-similarity index over beets metadata
 ├── plex/
 │   ├── search.py             # Multi-strategy Plex track search pipeline
@@ -60,7 +63,7 @@ beetsplug/
 │   ├── jiosaavn.py           # JioSaavn async API
 │   ├── gaana.py              # Wrapper around external GaanaPlugin
 │   ├── m3u8.py               # M3U8 file parser
-│   └── http_post.py          # Generic HTTP POST playlist importer
+│   └── http_post.py          # Generic HTTP POST playlist importer (TimeoutAndRetrySession)
 └── utils/
     ├── helpers.py            # parse_title, clean_album_name, highlight_matches
     └── prompt_logging.py     # Thread-safe log buffering during interactive prompts
@@ -157,11 +160,11 @@ Flags: `--only` (comma-separated IDs), `--import-failed`/`--log-file` (retry fro
 
 ## Dependencies (key)
 
-`beets>=2.4.0`, `plexapi>=4.13.4`, `spotipy`, `openai`, `agno>=1.2.16`, `instructor>=1.0`, `pydantic>=2.0.0`, `numpy`, `scipy`, `beautifulsoup4`, `requests`, `python-dateutil`, `pillow`
+`beets>=2.13.0`, Python `>=3.10`, `plexapi>=4.13.4`, `spotipy`, `openai`, `agno>=1.2.16`, `instructor>=1.0`, `pydantic>=2.0.0`, `numpy`, `scipy`, `beautifulsoup4`, `requests`, `python-dateutil`, `pillow`. Test extra: `pip install -e .[test]` (pytest).
 
 ## Development Patterns
 
-- Logging namespace: `beets.plexsync`
+- Logging: `from beets import logging` so loggers are `BeetsLogger` (`{}`-style)
 - Prefer Pydantic v2 models for structured data
 - Follow existing module boundaries (providers, plex, core, ai)
 - Ask clarifying questions for ambiguous changes
