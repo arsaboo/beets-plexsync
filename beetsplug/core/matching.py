@@ -4,7 +4,7 @@ import re
 import difflib
 from typing import Optional, Tuple, Iterable
 
-from beets.autotag.distance import Distance, string_dist
+from beets.autotag.distance import string_dist
 from beets.library import Item
 from plexapi.audio import Track
 
@@ -308,14 +308,51 @@ def enhanced_artist_distance(str1: str, str2: str) -> float:
     return avg_distance
 
 
+class _LocalDistance:
+    """Weighted sum of 0-1 field penalties.
+
+    Intentionally does **not** use beets.autotag.distance.Distance: that
+    class's ``_weights`` is a process-wide cached_classproperty, and
+    mutating it (the previous implementation) corrupted autotag scoring
+    for the rest of the beets process.
+    """
+
+    def __init__(self, weights: Optional[dict] = None):
+        self._weights = dict(weights or {})
+        self._penalties: dict = {}
+
+    def add(self, key: str, dist: float) -> None:
+        dist = max(0.0, min(1.0, float(dist)))
+        self._penalties.setdefault(key, []).append(dist)
+        if key not in self._weights:
+            existing = list(self._weights.values())
+            self._weights[key] = (sum(existing) / len(existing)) if existing else 1.0
+
+    def add_ratio(self, key: str, number1, number2) -> None:
+        number2 = float(number2)
+        number = float(max(min(number1, number2), 0))
+        self.add(key, number / number2 if number2 else 0.0)
+
+    def add_string(self, key: str, str1, str2) -> None:
+        self.add(key, string_dist(str1, str2))
+
+    @property
+    def distance(self) -> float:
+        raw = maxd = 0.0
+        for key, vals in self._penalties.items():
+            w = self._weights.get(key, 1.0)
+            raw += sum(vals) * w
+            maxd += len(vals) * w
+        return raw / maxd if maxd else 0.0
+
+
 def plex_track_distance(
     item: Item,
     plex_track: Track,
     config: Optional[dict] = None
-) -> Tuple[float, Distance]:
+) -> Tuple[float, _LocalDistance]:
     """Calculate distance between a beets Item and Plex Track with enhanced matching."""
-    # Create distance object
-    dist = Distance()
+    dist = _LocalDistance()
 
     # Check which fields are available
     has_title = bool(item.title and item.title.strip())
