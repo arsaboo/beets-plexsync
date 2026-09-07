@@ -96,6 +96,12 @@ The command will only generate the specified playlists, skipping others in your 
 
 You can use config filters to finetune any playlist. You can specify the `genre`, `year`, and `UserRating` to be included and excluded from any of the playlists. See the extended example below.
 
+Two numeric floors live under `filters`:
+- `filters.min_rating` - keep only rated tracks at or above this (0-10); unrated tracks are always retained. This is the single source of truth for the rating floor across all playlist types (`Fresh Favorites` defaults it to `6` when not set).
+- `filters.min_popularity` - keep only tracks whose `spotify_track_popularity` (from the beets `spotify` plugin) is at or above this (0-100). Tracks with no popularity data are dropped, since their floor can't be verified.
+
+Playlists also collapse compilation/greatest-hits copies of the same song (same title+artist, distinct rating keys), keeping the best-rated, most-played representative so the same song can't occupy multiple slots.
+
 ### Library Sync
 - **Plex Library Sync**: `beet plexsync [-f]` imports all the data from your Plex library inside beets. Use the `-f` flag to force update the entire library with fresh information from Plex.
 - **Recent Sync**: `beet plexsyncrecent [--days N]` updates the information for tracks listened in the last N days (default: 7). For example, `beet plexsyncrecent [--days 14]` will update tracks played in the last 14 days.

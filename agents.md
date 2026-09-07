@@ -4,7 +4,7 @@ Canonical agent brief. `CLAUDE.md` and `gemini.md` point here so they stay in sy
 
 ## Environment
 
-- **Conda env**: Always use `py311` — `conda run -n py311 ...`
+- **Conda env**: Always use `py311` — `conda run -n py311 ...`. This env is **local-only** (Windows); it does **not** exist on the remote machine.
 - **Python**: 3.11 locally; plugin requires `>=3.10`
 - **Beets**: `>=2.13.0` (tested against 2.13.1)
 - **Platform**: Windows 11 (Unix shell syntax in bash: forward slashes, `/dev/null`)
@@ -12,7 +12,7 @@ Canonical agent brief. `CLAUDE.md` and `gemini.md` point here so they stay in sy
 - **Single test**: `conda run -n py311 python -m pytest tests/test_cache.py -v`
 - **Compile check**: `conda run -n py311 python -c "import os, py_compile; [py_compile.compile(os.path.join(r,f)) for r,_,fs in os.walk('beetsplug') for f in fs if f.endswith('.py')]; print('OK')"`
 - **Test extra**: `pip install -e .[test]` (pytest)
-- **Remote** (optional live checks): `arsaboo@192.168.2.188`, plugin under `~/.local`, `beet` at `~/.local/bin/beet`
+- **Remote** (optional live checks): `arsaboo@192.168.2.188`. **No conda on the remote** — run Python directly: `ssh arsaboo@192.168.2.188` then use the system `python3` (Python 3.10.12; beets installed under `~/.local/lib/python3.10/site-packages`) or the `beet` CLI at `/home/arsaboo/.local/bin/beet`. The library DB is `~/.config/beets/musiclibrary.blb`. Plugin code lives under `~/.local/lib/python3.10/site-packages/beetsplug` (the `plexsync` plugin is loaded from there). Beets version on remote is 2.13.1. `~/.local/lib` paths can be queried directly, e.g.: `python3 -c "from beets.library import Library; lib=Library('/home/arsaboo/.config/beets/musiclibrary.blb'); ..."`.
 
 ## Project Overview
 

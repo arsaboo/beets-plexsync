@@ -414,10 +414,10 @@ def calculate_track_score(ps, track, base_time=None, tracks_context=None, playli
     if base_time is None:
         base_time = datetime.now()
 
-    rating = float(getattr(track, 'plex_userrating', 0))
+    rating = float(getattr(track, 'plex_userrating', 0) or 0)
     last_played = getattr(track, 'plex_lastviewedat', None)
-    play_count = getattr(track, 'plex_viewcount', 0)
-    popularity = float(getattr(track, 'spotify_track_popularity', 0))
+    play_count = int(getattr(track, 'plex_viewcount', 0) or 0)
+    popularity = float(getattr(track, 'spotify_track_popularity', 0) or 0)
     release_year = getattr(track, 'year', None)
 
     if release_year:
@@ -780,6 +780,108 @@ def _dedupe_by_rating_key(tracks, plex_lookup):
     return unique_tracks
 
 
+def _song_identity(item):
+    """Normalized (title, artist) key for an item, or None when title is missing.
+
+    Compilation/greatest-hits copies of the same song are distinct Plex items
+    (different rating keys) but play as near-duplicates, so they must be
+    collapsed together.
+    """
+    title = str(getattr(item, 'title', '') or '').casefold().strip()
+    if not title:
+        return None
+    artist = str(getattr(item, 'artist', '') or '').casefold().strip()
+    return (title, artist)
+
+
+def _representative_score(item):
+    """Sortable quality score used to pick the best copy of a duplicated song.
+
+    Ranking: rating desc -> play count desc -> most recently played. The tuple
+    is designed for lexicographic comparison (higher is better).
+    """
+    rating = float(getattr(item, 'plex_userrating', 0) or 0)
+    plays = int(getattr(item, 'plex_viewcount', 0) or 0)
+    last = getattr(item, 'plex_lastviewedat', None) or 0
+    try:
+        last = float(last)
+    except (TypeError, ValueError):
+        last = 0.0
+    return (rating, plays, last)
+
+
+def _dedupe_by_song_identity(items):
+    """Collapse compilation/clone copies of the same song (same title+artist).
+
+    Keeps the single best eligible representative per identity (best rating,
+    then most played, then most recently played) so a version that would be
+    filtered out can't win and a song can't occupy multiple playlist slots.
+    Items without a usable identity are passed through untouched. Order of
+    first occurrence per identity is preserved.
+
+    Mirrors Harmony's `d8a4963` selection-time dedupe (plexsync has no
+    sequencing pass, so the same-identity distance penalty half doesn't apply).
+    """
+    best = {}   # ident -> (item, score)
+    order = []  # idents in first-seen order; unkeyable items stored directly
+    for item in items:
+        ident = _song_identity(item)
+        if ident is None:
+            order.append(item)  # opaque pass-through
+            continue
+        score = _representative_score(item)
+        if ident not in best:
+            best[ident] = (item, score)
+            order.append(ident)
+        elif score > best[ident][1]:
+            best[ident] = (item, score)
+    result = []
+    for entry in order:
+        if isinstance(entry, tuple):  # identity key
+            result.append(best[entry][0])
+        else:  # opaque item
+            result.append(entry)
+    return result
+
+
+def _apply_min_popularity(ps, items, min_popularity, playlist_label):
+    """Drop items below a minimum Spotify popularity floor.
+
+    Popularity comes from beets' `spotify_track_popularity` flex field
+    (populated by the beets `spotify` plugin and stored as a string). Items
+    with no popularity data (0/None) are dropped because their floor can't be
+    verified. Mirrors Harmony's `filter_by_popularity` (long_drives).
+    """
+    if not min_popularity or not items:
+        return items
+    try:
+        floor = float(min_popularity)
+    except (TypeError, ValueError):
+        ps._log.debug(
+            "Ignoring invalid min_popularity '{}' for {} playlist",
+            min_popularity, playlist_label,
+        )
+        return items
+    kept = []
+    dropped = 0
+    for item in items:
+        pop = getattr(item, 'spotify_track_popularity', 0) or 0
+        try:
+            pop = float(pop)
+        except (TypeError, ValueError):
+            pop = 0.0
+        if pop >= floor:
+            kept.append(item)
+        else:
+            dropped += 1
+    if dropped:
+        ps._log.debug(
+            "min_popularity {} removed {} tracks for {} playlist",
+            floor, dropped, playlist_label,
+        )
+    return kept
+
+
 def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_genres, similar_tracks, playlist_type):
     """
     Unified function to generate different types of smart playlists.
@@ -800,7 +902,19 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
     max_tracks = get_config_value(playlist_config, defaults_cfg, "max_tracks", 20)
     discovery_ratio = get_config_value(playlist_config, defaults_cfg, "discovery_ratio", 30)
     exclusion_days = get_config_value(playlist_config, defaults_cfg, "exclusion_days", 30)
-    filters = playlist_config.get("filters", {})
+    filters = playlist_config.get("filters", {}) or {}
+
+    # Single source of truth for the rating floor is `filters.min_rating`
+    # (handled generically by build_advanced_filters/apply_playlist_filters).
+    # Fresh Favorites keeps its documented default of 6 by materializing it
+    # into the filters when the user specified no rating floor at all.
+    if playlist_type == "fresh_favorites" and "min_rating" not in filters:
+        default_min_rating = get_config_value(playlist_config, defaults_cfg, "min_rating", 6)
+        if default_min_rating:
+            filters = dict(filters)
+            filters["min_rating"] = default_min_rating
+
+    min_popularity = filters.get("min_popularity")
 
     # Special handling for certain playlist types
     special_handling = playlist_type in ["70s80s_flashback", "highly_rated", "most_played"]
@@ -906,6 +1020,10 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
             filtered_items = sorted_items
             ps._log.debug("Sorted {} tracks by play count for Most Played playlist", len(filtered_items))
 
+        # Optional popularity floor + collapse compilation copies of the same song
+        filtered_items = _apply_min_popularity(ps, filtered_items, min_popularity, playlist_name)
+        filtered_items = _dedupe_by_song_identity(filtered_items)
+
         # Separate rated and unrated tracks
         rated_items = []
         unrated_items = []
@@ -1007,25 +1125,17 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
             elif playlist_type == "fresh_favorites":
                 min_year, _ = _apply_recency_guard(ps, playlist_config, filters, playlist_name, default_max_age_years=7)
                 unique_tracks = _filter_tracks_by_min_year(ps, unique_tracks, min_year, playlist_name)
-                # Apply min rating filter for fresh favorites - keep tracks with rating >= min_rating AND unrated tracks
-                def _safe_float_rating(track):
-                    rating = getattr(track, 'plex_userrating', 0) or 0
-                    try:
-                        return float(rating) if rating is not None else 0
-                    except (ValueError, TypeError):
-                        return 0
 
-                min_rating = get_config_value(playlist_config, defaults_cfg, "min_rating", 6)
-                unique_tracks = [t for t in unique_tracks if
-                                _safe_float_rating(t) == 0 or  # Keep unrated tracks
-                                _safe_float_rating(t) >= min_rating]  # Keep rated tracks that meet min rating
+        # Optional popularity floor + collapse compilation copies of the same song
+        unique_tracks = _apply_min_popularity(ps, unique_tracks, min_popularity, playlist_name)
+        unique_tracks = _dedupe_by_song_identity(unique_tracks)
 
         # Separate rated and unrated tracks
         rated_tracks = []
         unrated_tracks = []
         for track in unique_tracks:
             if track:  # Make sure track exists
-                rating = float(getattr(track, 'plex_userrating', 0))
+                rating = float(getattr(track, 'plex_userrating', 0) or 0)
                 if rating > 0:
                     rated_tracks.append(track)
                 else:
@@ -1148,6 +1258,11 @@ def validate_filter_config(ps, filter_config):
             return False, "min_rating must be a number"
         if not 0 <= filter_config['min_rating'] <= 10:
             return False, "min_rating must be between 0 and 10"
+    if 'min_popularity' in filter_config:
+        if not isinstance(filter_config['min_popularity'], (int, float)):
+            return False, "min_popularity must be a number"
+        if not 0 <= filter_config['min_popularity'] <= 100:
+            return False, "min_popularity must be between 0 and 100"
     return True, ""
 
 
