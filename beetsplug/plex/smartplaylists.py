@@ -516,16 +516,21 @@ def calculate_track_score(ps, track, base_time=None, tracks_context=None, playli
     final_score = stats.norm.cdf(weighted_score * 1.5) * 100
     noise = _np.random.normal(0, 0.5)
     final_score = final_score + noise
-    if not is_rated and final_score < 50:
+    if not is_rated:
+        # Keep unrated scores in the intended 50-100 range without reversing
+        # their order around 50 (the old conditional mapping made, for example,
+        # a raw score of 44 become 72 while a better score of 56 stayed 56).
         final_score = 50 + (final_score / 2)
 
     return max(0, min(100, final_score))
 
 
 def select_by_popularity(ps, tracks, num_tracks, jitter=2.0, playlist_label=""):
-    """Popularity-first selection for the unrated portion of a playlist.
+    """Explicit popularity-only selection for callers that request it.
 
-    Ranks eligible unrated tracks by their Spotify popularity (the beets
+    Smart-playlist generation uses :func:`select_unrated` so playlist-specific
+    theme weights are preserved. This helper ranks eligible unrated tracks by
+    their Spotify popularity (the beets
     ``spotify_track_popularity`` flex field) and picks the top ``num_tracks``.
     A small bounded random adjustment (``uniform(-jitter, +jitter)`` popularity
     points) lets nearly-equally-popular tracks rotate between regenerations;
@@ -697,6 +702,54 @@ def select_tracks_weighted(ps, tracks, num_tracks, playlist_type=None):
         pass
 
     return selected_tracks
+
+
+def select_unrated(ps, tracks, num_tracks, playlist_type=None, playlist_label=""):
+    """Select unrated tracks using the playlist's theme weights.
+
+    Tracks with valid popularity data are preferred. Missing or invalid
+    popularity data is kept in a fallback group so it cannot crowd out verified
+    tracks. Both groups are ranked with :func:`select_tracks_weighted`, ensuring
+    that each playlist's ``unrated_weights`` still applies. Genuine popularity
+    ``0`` is valid data and remains in the preferred group.
+    """
+    if not tracks or num_tracks <= 0:
+        return []
+
+    verified = []
+    unverified = []
+    for track in tracks:
+        target = verified if _popularity_of(track) is not None else unverified
+        target.append(track)
+
+    if not verified:
+        selected = select_tracks_weighted(
+            ps, unverified, num_tracks, playlist_type=playlist_type,
+        )
+        if selected:
+            ps._log.warning(
+                "{}: no popularity data on any unrated track; selected {} "
+                "track(s) unverified",
+                playlist_label, len(selected),
+            )
+        return selected
+
+    selected = select_tracks_weighted(
+        ps, verified, num_tracks, playlist_type=playlist_type,
+    )
+    needed = num_tracks - len(selected)
+    if needed > 0 and unverified:
+        fallback = select_tracks_weighted(
+            ps, unverified, needed, playlist_type=playlist_type,
+        )
+        selected.extend(fallback)
+        ps._log.warning(
+            "{}: only {} unrated track(s) have popularity data; filled {} "
+            "slot(s) with unverified tracks",
+            playlist_label, len(verified), len(fallback),
+        )
+
+    return selected
 
 
 def build_advanced_filters(filter_config, exclusion_days, preferred_genres=None):
@@ -1306,8 +1359,9 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
             )
 
             selected_rated = select_tracks_weighted(ps, rated_items, rated_tracks_count, playlist_type=playlist_type)
-            # Unrated portion is popularity-first (see select_by_popularity).
-            selected_unrated = select_by_popularity(ps, unrated_items, unrated_tracks_count, playlist_label=playlist_name)
+            # Unrated portion uses theme-aware weighted selection (see select_unrated).
+            selected_unrated = select_unrated(ps, unrated_items, unrated_tracks_count,
+                                              playlist_type=playlist_type, playlist_label=playlist_name)
 
             # Fill remaining slots if needed
             if len(selected_unrated) < unrated_tracks_count:
@@ -1381,9 +1435,10 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
         unrated_tracks_count, rated_tracks_count = calculate_playlist_proportions(ps, max_tracks, discovery_ratio)
 
         # Rated half uses weighted scoring (rating/recency/etc.); the unrated
-        # half is popularity-first (see select_by_popularity).
+        # half uses theme-aware weighted selection (see select_unrated).
         selected_rated = select_tracks_weighted(ps, rated_tracks, rated_tracks_count, playlist_type=playlist_type)
-        selected_unrated = select_by_popularity(ps, unrated_tracks, unrated_tracks_count, playlist_label=playlist_name)
+        selected_unrated = select_unrated(ps, unrated_tracks, unrated_tracks_count,
+                                          playlist_type=playlist_type, playlist_label=playlist_name)
 
         # Fill remaining slots if needed
         if len(selected_unrated) < unrated_tracks_count:

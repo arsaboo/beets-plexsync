@@ -6,7 +6,8 @@ don't have, so the entire library discovery pool was silently dropped.
 """
 
 import types
-from datetime import datetime
+from datetime import datetime, timedelta
+from unittest.mock import patch
 
 from beetsplug.plex import smartplaylists
 
@@ -326,6 +327,142 @@ class SelectByPopularityTest:
         ps = self._ps()
         assert smartplaylists.select_by_popularity(ps, [], 5) == []
         assert smartplaylists.select_by_popularity(ps, [self._item(1, "A", "10")], 0) == []
+
+
+class SelectUnratedThemeTest:
+    """The unrated selection must delegate to the playlist-specific weighted
+    scorer so each playlist's ``unrated_weights`` apply -- not pure
+    popularity. This fixes the Forgotten Gems regression where
+    select_by_popularity surfaced recent hits instead of old gems.
+    """
+
+    NOW = datetime(2025, 6, 1)
+
+    @staticmethod
+    def _ps():
+        return types.SimpleNamespace(_log=types.SimpleNamespace(
+            warning=lambda *a, **k: None,
+            info=lambda *a, **k: None,
+            debug=lambda *a, **k: None,
+        ))
+
+    def _item(self, key, year, viewcount, lastviewed_ts, pop):
+        return types.SimpleNamespace(
+            plex_ratingkey=key, title=str(key), artist="A", album="A",
+            year=year, plex_userrating=0, plex_viewcount=viewcount,
+            plex_lastviewedat=lastviewed_ts, spotify_track_popularity=pop,
+        )
+
+    def _score(self, track, context, playlist_type):
+        # calculate_track_score normally adds slight variety; suppress it here
+        # so these tests check only the configured theme weights.
+        with patch("numpy.random.normal", return_value=0.0):
+            return smartplaylists.calculate_track_score(
+                self._ps(), track, base_time=self.NOW,
+                tracks_context=context, playlist_type=playlist_type,
+            )
+
+    def test_forgotten_gems_favors_old_rare_long_unplayed(self):
+        # Both tracks are outside a typical 90-day exclusion window. Forgotten
+        # Gems weights should let the old, rarely-played, longer-unplayed gem
+        # outrank the more popular recent release.
+        old = self._item(1, 1995, 1, (self.NOW - timedelta(days=1000)).timestamp(), "60")
+        new = self._item(2, 2024, 5, (self.NOW - timedelta(days=100)).timestamp(), "75")
+        ctx = [old, new]
+        assert self._score(old, ctx, "forgotten_gems") > self._score(new, ctx, "forgotten_gems")
+
+    def test_forgotten_gems_age_weight_prefers_older_track(self):
+        # With every other attribute equal, z_age -0.1 is enough to preserve
+        # the intended older-track preference without an arbitrary age floor.
+        played = (self.NOW - timedelta(days=100)).timestamp()
+        old = self._item(1, 1995, 1, played, "60")
+        new = self._item(2, 2024, 1, played, "60")
+        ctx = [old, new]
+        assert self._score(old, ctx, "forgotten_gems") > self._score(new, ctx, "forgotten_gems")
+
+    def test_recent_hits_favors_recent_release(self):
+        # Recent Hits: age +0.4 -> newer release clearly wins.
+        old = self._item(1, 1995, 5, (self.NOW - timedelta(days=2)).timestamp(), "70")
+        new = self._item(2, 2024, 5, (self.NOW - timedelta(days=2)).timestamp(), "70")
+        ctx = [old, new]
+        assert self._score(new, ctx, "recent_hits") > self._score(old, ctx, "recent_hits")
+
+    def test_fresh_favorites_favors_recent_release(self):
+        # Fresh Favorites: age +0.45 -> newer release clearly wins.
+        old = self._item(1, 1995, 1, (self.NOW - timedelta(days=30)).timestamp(), "60")
+        new = self._item(2, 2024, 1, (self.NOW - timedelta(days=30)).timestamp(), "60")
+        ctx = [old, new]
+        assert self._score(new, ctx, "fresh_favorites") > self._score(old, ctx, "fresh_favorites")
+
+    def test_unverified_only_fills_shortfall(self):
+        # Missing popularity is unverified and must only be used when there are
+        # too few verified candidates; genuine popularity 0 stays verified.
+        def _item(key, pop, year=2000):
+            return self._item(key, year, 0, None, pop)
+        verified1 = _item(1, "10")
+        verified2 = _item(2, "0")    # real zero -> verified
+        unverified = _item(3, None)  # missing -> unverified
+        sel = smartplaylists.select_unrated(
+            self._ps(), [verified1, verified2, unverified], 2,
+            playlist_type="daily_discovery",
+        )
+        assert all(t.plex_ratingkey != 3 for t in sel)
+        # When all three are requested, the unverified slot is filled last.
+        full = smartplaylists.select_unrated(
+            self._ps(), [verified1, verified2, unverified], 3,
+            playlist_type="daily_discovery",
+        )
+        assert {t.plex_ratingkey for t in full} == {1, 2, 3}
+
+    def test_both_groups_use_playlist_weights(self, monkeypatch):
+        calls = []
+
+        def fake_weighted(ps, tracks, count, playlist_type=None):
+            calls.append(([t.plex_ratingkey for t in tracks], count, playlist_type))
+            return tracks[:count]
+
+        monkeypatch.setattr(smartplaylists, "select_tracks_weighted", fake_weighted)
+        verified1 = self._item(1, 2000, 0, None, "10")
+        verified2 = self._item(2, 2000, 0, None, "0")
+        unverified1 = self._item(3, 2000, 0, None, None)
+        unverified2 = self._item(4, 2000, 0, None, "invalid")
+
+        selected = smartplaylists.select_unrated(
+            self._ps(), [verified1, unverified1, verified2, unverified2], 3,
+            playlist_type="forgotten_gems",
+        )
+
+        assert [t.plex_ratingkey for t in selected] == [1, 2, 3]
+        assert calls == [
+            ([1, 2], 3, "forgotten_gems"),
+            ([3, 4], 1, "forgotten_gems"),
+        ]
+
+    def test_all_unverified_still_uses_playlist_weights(self, monkeypatch):
+        calls = []
+
+        def fake_weighted(ps, tracks, count, playlist_type=None):
+            calls.append(([t.plex_ratingkey for t in tracks], count, playlist_type))
+            return list(reversed(tracks))[:count]
+
+        monkeypatch.setattr(smartplaylists, "select_tracks_weighted", fake_weighted)
+        items = [
+            self._item(1, 1990, 0, None, None),
+            self._item(2, 2000, 0, None, None),
+        ]
+        selected = smartplaylists.select_unrated(
+            self._ps(), items, 1, playlist_type="forgotten_gems",
+        )
+
+        assert [t.plex_ratingkey for t in selected] == [2]
+        assert calls == [([1, 2], 1, "forgotten_gems")]
+
+    def test_empty_and_zero_count(self):
+        ps = self._ps()
+        assert smartplaylists.select_unrated(ps, [], 5, playlist_type="forgotten_gems") == []
+        assert smartplaylists.select_unrated(
+            ps, [self._item(1, 2000, 0, None, "10")], 0, playlist_type="forgotten_gems",
+        ) == []
 
 
 class FilterBeetsItemsTest:
