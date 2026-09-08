@@ -525,67 +525,6 @@ def calculate_track_score(ps, track, base_time=None, tracks_context=None, playli
     return max(0, min(100, final_score))
 
 
-def select_by_popularity(ps, tracks, num_tracks, jitter=2.0, playlist_label=""):
-    """Explicit popularity-only selection for callers that request it.
-
-    Smart-playlist generation uses :func:`select_unrated` so playlist-specific
-    theme weights are preserved. This helper ranks eligible unrated tracks by
-    their Spotify popularity (the beets
-    ``spotify_track_popularity`` flex field) and picks the top ``num_tracks``.
-    A small bounded random adjustment (``uniform(-jitter, +jitter)`` popularity
-    points) lets nearly-equally-popular tracks rotate between regenerations;
-    a track more than ``2*jitter`` popularity points behind another can never
-    be ranked above it, so selection stays popularity-dominant.
-
-    Note: this intentionally optimizes popularity only. Any *eligibility*
-    preference for the unrated pool (release age, low play count, recency) must
-    be enforced by the upstream filters (``exclusion_days``, ``min_year``/year
-    filters, ``min_rating``, ``min_popularity``, dedup) rather than the scoring
-    weights.
-
-    Tracks with no valid popularity data are kept separate and only used to fill
-    remaining slots when there are too few scored candidates (with a log note).
-    """
-    if not tracks or num_tracks <= 0:
-        return []
-
-    scored = []
-    unscored = []
-    for track in tracks:
-        pop = _popularity_of(track)
-        if pop is None:
-            unscored.append(track)
-            continue
-        scored.append((pop, track))
-
-    if not scored:
-        if unscored:
-            ps._log.warning(
-                "{}: no popularity data on any unrated track; selected {} track(s) unverified",
-                playlist_label, min(num_tracks, len(unscored)),
-            )
-        return unscored[:num_tracks]
-
-    # Bounded random jitter keeps the pick popularity-dominant while allowing
-    # near-ties to vary run to run.
-    adjusted = [(pop + _module_rng.uniform(-jitter, jitter), pop, track)
-                for pop, track in scored]
-    # Descending by adjusted score; break exact ties toward higher popularity.
-    adjusted.sort(key=lambda x: (x[0], x[1]), reverse=True)
-    selected = [track for _, _, track in adjusted[:num_tracks]]
-
-    if len(selected) < num_tracks:
-        needed = num_tracks - len(selected)
-        selected.extend(unscored[:needed])
-        ps._log.warning(
-            "{}: only {} unrated track(s) have popularity data; filled {} slot(s) "
-            "with unverified tracks",
-            playlist_label, len(scored), needed,
-        )
-
-    return selected
-
-
 def select_tracks_weighted(ps, tracks, num_tracks, playlist_type=None):
     if not tracks or num_tracks <= 0:
         return []
@@ -761,53 +700,6 @@ def select_unrated(ps, tracks, num_tracks, playlist_type=None, playlist_label=""
             )
 
     return selected
-
-
-def build_advanced_filters(filter_config, exclusion_days, preferred_genres=None):
-    """Build the legacy Plex advanced-search filter dictionary.
-
-    Retained for API compatibility only. Smart-playlist candidate selection no
-    longer uses this helper because Plex cannot represent null user ratings or
-    null last-played dates correctly. External callers should prefer filtering
-    synced beets items with :func:`_filter_beets_items`.
-    """
-    adv = {'and': []}
-    if filter_config:
-        include = filter_config.get('include', {}) or {}
-        exclude = filter_config.get('exclude', {}) or {}
-        all_genres = set(g.lower() for g in (preferred_genres or []))
-        inc_genres = include.get('genres')
-        if inc_genres:
-            all_genres.update(g.lower() for g in inc_genres)
-        if all_genres:
-            adv['and'].append({'or': [{'genre': g} for g in all_genres]})
-        exc_genres = exclude.get('genres')
-        if exc_genres:
-            adv['and'].append({'genre!': list(exc_genres)})
-        inc_years = include.get('years') or {}
-        if ('between' in inc_years and isinstance(inc_years['between'], list)
-                and len(inc_years['between']) == 2):
-            start_year, end_year = inc_years['between']
-            adv['and'].append({'and': [
-                {'year>>': start_year}, {'year<<': end_year},
-            ]})
-        if 'after' in inc_years:
-            adv['and'].append({'year>>': inc_years['after']})
-        if 'before' in inc_years:
-            adv['and'].append({'year<<': inc_years['before']})
-        exc_years = exclude.get('years') or {}
-        if 'before' in exc_years:
-            adv['and'].append({'year>>': exc_years['before']})
-        if 'after' in exc_years:
-            adv['and'].append({'year<<': exc_years['after']})
-        if 'min_rating' in filter_config:
-            mr = filter_config['min_rating']
-            adv['and'].append({'or': [
-                {'userRating': 0}, {'userRating>>': mr},
-            ]})
-    if exclusion_days and exclusion_days > 0:
-        adv['and'].append({'lastViewedAt<<': f'-{exclusion_days}d'})
-    return adv if adv['and'] else None
 
 
 def _normalized_strings(values):
@@ -1268,65 +1160,21 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
 
         ps._log.debug("Found {} tracks with Plex sync data", len(all_beets_items))
 
-        # Apply filters to beets items
-        filtered_items = []
-        for item in all_beets_items:
-            include_item = True
+        # Reuse the same beets-based candidate filter as the regular path
+        # (None-safe rating/recency, multi-value genres, consistent year bounds)
+        # rather than a divergent inline copy. Special playlists deliberately
+        # apply no recency (exclusion_days) or max_plays, matching prior behavior.
+        filtered_items = _filter_beets_items(
+            all_beets_items, filters,
+            exclusion_days=None, preferred_genres=None, max_plays=None,
+        )
 
-            # Apply year filters if they exist in config
-            if filters.get('include', {}).get('years'):
-                years_config = filters['include']['years']
-                item_year = getattr(item, 'year', None)
-                if 'after' in years_config and item_year and item_year <= years_config['after']:
-                    include_item = False
-                if 'before' in years_config and item_year and item_year >= years_config['before']:
-                    include_item = False
-                if 'between' in years_config and item_year:
-                    start_year, end_year = years_config['between']
-                    if not (start_year <= item_year <= end_year):
-                        include_item = False
-
-            # Apply genre filters if they exist
-            if include_item and filters.get('include', {}).get('genres'):
-                item_genres = set(g.lower().strip() for g in (item.genres or []))
-                include_genres = set(g.lower().strip() for g in filters['include']['genres'])
-                if not (item_genres & include_genres):
-                    include_item = False
-
-            # Apply exclude filters
-            if include_item and filters.get('exclude', {}).get('genres'):
-                item_genres = set(g.lower().strip() for g in (item.genres or []))
-                exclude_genres = set(g.lower().strip() for g in filters['exclude']['genres'])
-                if item_genres & exclude_genres:
-                    include_item = False
-
-            # Apply exclude years
-            if include_item and filters.get('exclude', {}).get('years'):
-                years_config = filters['exclude']['years']
-                item_year = getattr(item, 'year', None)
-                if 'before' in years_config and item_year and item_year < years_config['before']:
-                    include_item = False
-                if 'after' in years_config and item_year and item_year > years_config['after']:
-                    include_item = False
-
-            # Apply min rating filter
-            if include_item and 'min_rating' in filters:
-                rating = _rating_of(item)
-                if rating > 0 and rating < filters['min_rating']:
-                    include_item = False
-
-            # Special handling for 70s80s_flashback - only include tracks from 1970-1989
-            if playlist_type == "70s80s_flashback":
-                item_year = getattr(item, 'year', None)
-                try:
-                    item_year = int(item_year) if item_year is not None else None
-                except (ValueError, TypeError):
-                    item_year = None
-                if not (item_year and 1970 <= item_year <= 1989):
-                    include_item = False
-
-            if include_item:
-                filtered_items.append(item)
+        # Special handling for 70s80s_flashback - only include tracks from 1970-1989
+        if playlist_type == "70s80s_flashback":
+            filtered_items = [
+                item for item in filtered_items
+                if (y := _year_of(item)) is not None and 1970 <= y <= 1989
+            ]
 
         # For highly_rated playlist, further filter for ratings >= 7
         if playlist_type == "highly_rated":
@@ -1362,8 +1210,19 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
 
         # Select tracks using weighted scoring
         if playlist_type == "most_played":
-            # For most played, use the sorted list directly but apply weighted selection for variety
-            selected_items = select_tracks_weighted(ps, filtered_items, max_tracks, playlist_type=playlist_type)
+            # ``filtered_items`` is sorted by play count descending above. Sampling
+            # the whole pool with select_tracks_weighted is probabilistic (softmax)
+            # and gives every track a nonzero chance, so low/zero-play tracks leak
+            # in (a prior run was 50% zero-play). Restrict to a top band by play
+            # count and apply weighted variety within that band so the result
+            # stays dominated by the most-played tracks.
+            band = max(max_tracks * 3, 50)
+            top_band = filtered_items[:band]
+            ps._log.debug(
+                "Most Played: {} tracks, weighted-selecting {} from top-{} band by play count",
+                len(filtered_items), max_tracks, band,
+            )
+            selected_items = select_tracks_weighted(ps, top_band, max_tracks, playlist_type=playlist_type)
         else:
             unrated_tracks_count, rated_tracks_count = calculate_playlist_proportions(
                 ps, max_tracks, discovery_ratio,

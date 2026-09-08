@@ -1183,6 +1183,10 @@ class PlexSync(BeetsPlugin):
         # Build lookup once for all tracks
         plex_lookup = self._build_plex_lookup_and_vector_index(lib)
 
+        # Stage DB updates inside one transaction and defer tag-file writes until
+        # after it commits (mirrors _fetch_plex_info) so file I/O doesn't hold the
+        # SQLite transaction open across the whole batch.
+        to_write = []
         with lib.transaction():
             for track in tracks:
                 beets_item = plex_lookup.get(track.ratingKey)
@@ -1205,11 +1209,21 @@ class PlexSync(BeetsPlugin):
                     )
                     beets_item.plex_updated = time.time()
                     beets_item.store()
-                    with context.music_dir(beets_item._db.directory):
-                        beets_item.try_write()
+                    to_write.append(beets_item)
                 except exceptions.NotFound:
                     self._log.debug("Track not found in Plex: {}", beets_item)
                     continue
+
+        if to_write:
+            music_dir = getattr(getattr(to_write[0], "_db", None), "directory", None)
+            dir_cm = context.music_dir(music_dir) if music_dir else nullcontext()
+            with dir_cm:
+                for beets_item in to_write:
+                    try:
+                        beets_item.try_write()
+                    except Exception as exc:  # noqa: BLE001 - best-effort tag write
+                        self._log.debug("try_write failed for {}: {}", beets_item, exc)
+
     def _cache_result(self, cache_key, result, cleaned_metadata=None):
         """Helper method to safely cache search results."""
         if not cache_key:
