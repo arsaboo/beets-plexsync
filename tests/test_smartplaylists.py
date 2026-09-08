@@ -162,6 +162,41 @@ class SongIdentityTest:
         assert len(result) == 3  # nothing keyable is dropped
 
 
+class PlexRatingKeyDedupeTest:
+    """Duplicate beets entries pointing at the same Plex track must collapse to
+    the best representative (the regular path dedupes via the lookup dict, but
+    special playlists iterate raw beets items)."""
+
+    @staticmethod
+    def _item(key, title, album="Album", rating=5, plays=0, last=None):
+        return types.SimpleNamespace(
+            plex_ratingkey=key, title=title, artist="Artist", album=album,
+            plex_userrating=rating, plex_viewcount=plays, plex_lastviewedat=last,
+        )
+
+    def test_collapses_same_rating_key_keeps_best(self):
+        items = [
+            self._item(7, "Jogi", album="Vol. 2", rating=5, plays=3),
+            self._item(7, "Jogi", album="Vol. 3", rating=8, plays=9),  # best
+            self._item(7, "Jogi", album="Vol:2", rating=3),
+        ]
+        result = smartplaylists._dedupe_by_plex_ratingkey(items)
+        assert len(result) == 1
+        assert result[0].album == "Vol. 3"  # best representative wins
+
+    def test_keeps_distinct_rating_keys(self):
+        items = [self._item(1, "A"), self._item(2, "B")]
+        assert [t.plex_ratingkey for t in smartplaylists._dedupe_by_plex_ratingkey(items)] == [1, 2]
+
+    def test_passes_through_keyless_items(self):
+        items = [
+            self._item(1, "A"),
+            types.SimpleNamespace(title="NoKey", artist="B", plex_ratingkey=None),
+        ]
+        result = smartplaylists._dedupe_by_plex_ratingkey(items)
+        assert len(result) == 2
+
+
 class MinPopularityTest:
     """`filters.min_popularity` floor drops tracks without verified popularity."""
 

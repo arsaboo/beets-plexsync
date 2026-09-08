@@ -1003,6 +1003,41 @@ def _dedupe_by_rating_key(tracks, plex_lookup):
     return unique_tracks
 
 
+def _dedupe_by_plex_ratingkey(items):
+    """Collapse beets items that point to the same Plex track.
+
+    The beets library can hold duplicate entries (e.g. the same album imported
+    under two volume-name spellings, or reordered artist credits) that resolve
+    to the same ``plex_ratingkey``. Selection iterating raw ``lib.items()``
+    (the special playlists) could otherwise pick both copies and have the Plex
+    add step silently collapse them to a single track, leaving the playlist one
+    short. This keeps the best eligible representative per Plex rating key.
+
+    Items without a usable rating key are passed through untouched.
+    """
+    best = {}   # key -> (item, score)
+    order = []  # keys in first-seen order; unkeyable items stored directly
+    for item in items:
+        key = getattr(item, "plex_ratingkey", None) or getattr(item, "ratingKey", None)
+        if not key:
+            order.append(item)  # opaque pass-through
+            continue
+        key = str(key)
+        score = _representative_score(item)
+        if key not in best:
+            best[key] = (item, score)
+            order.append(key)
+        elif score > best[key][1]:
+            best[key] = (item, score)
+    result = []
+    for entry in order:
+        if isinstance(entry, str):  # key
+            result.append(best[entry][0])
+        else:  # opaque item
+            result.append(entry)
+    return result
+
+
 def _song_identity(item):
     """Normalized (title, artist) key for an item, or None when title is missing.
 
@@ -1244,8 +1279,10 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
             filtered_items = sorted_items
             ps._log.debug("Sorted {} tracks by play count for Most Played playlist", len(filtered_items))
 
-        # Optional popularity floor + collapse compilation copies of the same song
+        # Optional popularity floor + collapse copies of the same Plex track and
+        # compilation copies of the same song (in that order).
         filtered_items = _apply_min_popularity(ps, filtered_items, min_popularity, playlist_name)
+        filtered_items = _dedupe_by_plex_ratingkey(filtered_items)
         filtered_items = _dedupe_by_song_identity(filtered_items)
 
         # Separate rated and unrated tracks
@@ -1322,8 +1359,10 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
                 min_year, _ = _apply_recency_guard(ps, playlist_config, filters, playlist_name, default_max_age_years=7)
                 unique_tracks = _filter_tracks_by_min_year(ps, unique_tracks, min_year, playlist_name)
 
-        # Optional popularity floor + collapse compilation copies of the same song
+        # Optional popularity floor + collapse copies of the same Plex track and
+        # compilation copies of the same song (in that order).
         unique_tracks = _apply_min_popularity(ps, unique_tracks, min_popularity, playlist_name)
+        unique_tracks = _dedupe_by_plex_ratingkey(unique_tracks)
         unique_tracks = _dedupe_by_song_identity(unique_tracks)
 
         # Separate rated and unrated tracks
