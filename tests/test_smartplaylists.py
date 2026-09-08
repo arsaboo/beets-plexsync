@@ -182,3 +182,87 @@ class MinPopularityTest:
         items = [self._item(1, "A", None)]
         ps = types.SimpleNamespace(_log=types.SimpleNamespace(debug=lambda *a, **k: None))
         assert smartplaylists._apply_min_popularity(ps, items, None, "test") == items
+
+
+class SelectByPopularityTest:
+    """The unrated selection should be popularity-first: pick the most popular
+    eligible tracks, with only a little bounded randomness at near-ties."""
+
+    @staticmethod
+    def _ps():
+        return types.SimpleNamespace(_log=types.SimpleNamespace(
+            warning=lambda *a, **k: None,
+            info=lambda *a, **k: None,
+            debug=lambda *a, **k: None,
+        ))
+
+    @staticmethod
+    def _item(key, title, pop):
+        return types.SimpleNamespace(
+            plex_ratingkey=key, title=title, artist="A",
+            spotify_track_popularity=pop,
+        )
+
+    def test_picks_most_popular(self):
+        # Gaps of 20 (>> 2*jitter) => deterministic top-3 by popularity.
+        items = [
+            self._item(1, "A", "10"),
+            self._item(2, "B", "90"),
+            self._item(3, "C", "50"),
+            self._item(4, "D", "30"),
+            self._item(5, "E", "70"),
+        ]
+        ps = self._ps()
+        sel = smartplaylists.select_by_popularity(ps, items, 3)
+        pops = sorted(float(t.spotify_track_popularity) for t in sel)
+        assert pops == [50.0, 70.0, 90.0]
+
+    def test_gap_beyond_jitter_is_deterministic(self):
+        # A(90) vs B(85): gap 5 > 2*jitter(4), so A can never be displaced.
+        items = [
+            self._item(1, "A", "90"),
+            self._item(2, "B", "85"),
+            self._item(3, "C", "10"),
+        ]
+        ps = self._ps()
+        for _ in range(200):
+            assert smartplaylists.select_by_popularity(ps, items, 1)[0].plex_ratingkey == 1
+
+    def test_near_ties_can_rotate(self):
+        # A(90) vs B(89): gap 1 < jitter span, so both can win; C(10) never.
+        items = [
+            self._item(1, "A", "90"),
+            self._item(2, "B", "89"),
+            self._item(3, "C", "10"),
+        ]
+        ps = self._ps()
+        winners = set()
+        for _ in range(200):
+            winners.add(smartplaylists.select_by_popularity(ps, items, 1)[0].plex_ratingkey)
+        assert winners <= {1, 2}
+        assert winners == {1, 2}  # both appear over enough runs
+
+    def test_zero_popularity_treated_as_scored(self):
+        # A real pop=0 is scored (unlike missing); so the unverified C is only
+        # ever chosen as a fill when there are too few scored candidates.
+        items = [
+            self._item(1, "A", "10"),
+            self._item(2, "B", "0"),     # real zero -> scored
+            self._item(3, "C", None),    # missing -> unscored
+        ]
+        ps = self._ps()
+        for _ in range(50):
+            sel = smartplaylists.select_by_popularity(ps, items, 2)
+            assert all(t.plex_ratingkey != 3 for t in sel)
+        assert {t.plex_ratingkey for t in smartplaylists.select_by_popularity(ps, items, 3)} == {1, 2, 3}
+
+    def test_all_missing_returns_unverified(self):
+        items = [self._item(1, "A", None), self._item(2, "B", None)]
+        ps = self._ps()
+        sel = smartplaylists.select_by_popularity(ps, items, 1)
+        assert len(sel) == 1 and sel[0].plex_ratingkey in (1, 2)
+
+    def test_empty_and_zero_count(self):
+        ps = self._ps()
+        assert smartplaylists.select_by_popularity(ps, [], 5) == []
+        assert smartplaylists.select_by_popularity(ps, [self._item(1, "A", "10")], 0) == []
