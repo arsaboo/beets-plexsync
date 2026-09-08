@@ -7,10 +7,9 @@ and Plex/beets objects. Behavior preserved.
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from typing import Tuple
+import math
 import time
 import copy
-
-import json
 
 from beets import config
 from beetsplug.core.config import get_config_value, get_plexsync_config
@@ -375,10 +374,7 @@ def _compute_context_stats(tracks, base_time):
             play_counts.append(0)
 
         # Popularity
-        try:
-            popularities.append(float(getattr(t, 'spotify_track_popularity', 0) or 0))
-        except (TypeError, ValueError):
-            popularities.append(0.0)
+        popularities.append(_popularity_of(t) or 0.0)
 
         # Age
         y = getattr(t, 'year', None)
@@ -417,7 +413,7 @@ def calculate_track_score(ps, track, base_time=None, tracks_context=None, playli
     rating = float(getattr(track, 'plex_userrating', 0) or 0)
     last_played = getattr(track, 'plex_lastviewedat', None)
     play_count = int(getattr(track, 'plex_viewcount', 0) or 0)
-    popularity = float(getattr(track, 'spotify_track_popularity', 0) or 0)
+    popularity = _popularity_of(track) or 0.0
     release_year = getattr(track, 'year', None)
 
     if release_year:
@@ -470,7 +466,7 @@ def calculate_track_score(ps, track, base_time=None, tracks_context=None, playli
                 except (ValueError, TypeError, OSError, OverflowError):
                     all_days.append(365)
         all_play_counts = [int(getattr(t, 'plex_viewcount', 0) or 0) for t in tracks_context]
-        all_popularity = [float(getattr(t, 'spotify_track_popularity', 0) or 0) for t in tracks_context]
+        all_popularity = [_popularity_of(t) or 0.0 for t in tracks_context]
         all_ages = []
         for t in tracks_context:
             y = getattr(t, 'year', None)
@@ -551,12 +547,8 @@ def select_by_popularity(ps, tracks, num_tracks, jitter=2.0, playlist_label=""):
     scored = []
     unscored = []
     for track in tracks:
-        raw = getattr(track, "spotify_track_popularity", None)
-        try:
-            pop = float(raw)
-            if pop != pop:  # NaN
-                raise ValueError
-        except (TypeError, ValueError):
+        pop = _popularity_of(track)
+        if pop is None:
             unscored.append(track)
             continue
         scored.append((pop, track))
@@ -590,7 +582,7 @@ def select_by_popularity(ps, tracks, num_tracks, jitter=2.0, playlist_label=""):
 
 
 def select_tracks_weighted(ps, tracks, num_tracks, playlist_type=None):
-    if not tracks:
+    if not tracks or num_tracks <= 0:
         return []
 
     # Standard weighted selection for all playlist types
@@ -708,117 +700,285 @@ def select_tracks_weighted(ps, tracks, num_tracks, playlist_type=None):
 
 
 def build_advanced_filters(filter_config, exclusion_days, preferred_genres=None):
+    """Build the legacy Plex advanced-search filter dictionary.
+
+    Retained for API compatibility only. Smart-playlist candidate selection no
+    longer uses this helper because Plex cannot represent null user ratings or
+    null last-played dates correctly. External callers should prefer filtering
+    synced beets items with :func:`_filter_beets_items`.
+    """
     adv = {'and': []}
     if filter_config:
         include = filter_config.get('include', {}) or {}
         exclude = filter_config.get('exclude', {}) or {}
-        # Combine preferred and included genres for a single OR query
         all_genres = set(g.lower() for g in (preferred_genres or []))
         inc_genres = include.get('genres')
         if inc_genres:
             all_genres.update(g.lower() for g in inc_genres)
         if all_genres:
             adv['and'].append({'or': [{'genre': g} for g in all_genres]})
-        # Exclude genres
         exc_genres = exclude.get('genres')
         if exc_genres:
             adv['and'].append({'genre!': list(exc_genres)})
-        # Include years
         inc_years = include.get('years') or {}
-        if 'between' in inc_years and isinstance(inc_years['between'], list) and len(inc_years['between']) == 2:
+        if ('between' in inc_years and isinstance(inc_years['between'], list)
+                and len(inc_years['between']) == 2):
             start_year, end_year = inc_years['between']
-            adv['and'].append({'and': [{'year>>': start_year}, {'year<<': end_year}]})
+            adv['and'].append({'and': [
+                {'year>>': start_year}, {'year<<': end_year},
+            ]})
         if 'after' in inc_years:
             adv['and'].append({'year>>': inc_years['after']})
         if 'before' in inc_years:
             adv['and'].append({'year<<': inc_years['before']})
-        # Exclude years (translate to constraints)
         exc_years = exclude.get('years') or {}
         if 'before' in exc_years:
-            # Exclude anything strictly before X => require year >= X
             adv['and'].append({'year>>': exc_years['before']})
         if 'after' in exc_years:
-            # Exclude anything strictly after Y => require year <= Y
             adv['and'].append({'year<<': exc_years['after']})
-        # Rating filter at top-level of filter_config
         if 'min_rating' in filter_config:
             mr = filter_config['min_rating']
-            adv['and'].append({'or': [{'userRating': 0}, {'userRating>>': mr}]})
-    # Exclude recent plays
+            adv['and'].append({'or': [
+                {'userRating': 0}, {'userRating>>': mr},
+            ]})
     if exclusion_days and exclusion_days > 0:
         adv['and'].append({'lastViewedAt<<': f'-{exclusion_days}d'})
-    # Clean up if empty
-    if not adv['and']:
-        return None
-    return adv
+    return adv if adv['and'] else None
 
 
-def _get_with_cache(ps, cache_key, func):
-    """Helper to cache results of a function call."""
-    if cache_key in ps._server_query_cache:
-        ps._log.debug("Using cached results for key: {}", cache_key)
-        return ps._server_query_cache[cache_key]
-
-    results = func()
-    ps._server_query_cache[cache_key] = results
-    return results
-
-
-def _get_library_tracks(ps, preferred_genres, filters, exclusion_days):
-    """Fetch candidate library tracks, applying server-side filters when possible.
-
-    Returns (tracks, filtered_server_side). `filtered_server_side` is True only
-    when `adv_filters` were actually sent to and honored by Plex's searchTracks
-    -- callers must not skip client-side apply_playlist_filters() just because
-    filters existed, since the server-side call can fail and fall back to an
-    unfiltered full-library fetch.
-    """
-    filtered_server_side = False
-
-    adv_filters = build_advanced_filters(filters, exclusion_days, preferred_genres)
-    if adv_filters:
-        cache_key = json.dumps(adv_filters, sort_keys=True)
-        try:
-            ps._log.debug("Using server-side filters: {}", adv_filters)
-            _t0 = time.time()
-
-            tracks = _get_with_cache(ps, cache_key, lambda: ps.music.searchTracks(filters=adv_filters))
-            filtered_server_side = True
-
-            ps._log.debug(
-                "Server-side filter fetched {} tracks in {:.2f}s",
-                len(tracks), time.time() - _t0,
-            )
-        except Exception as e:
-            ps._log.debug("Server-side filter failed (falling back to client filter): {}", e)
-            _t0 = time.time()
-            tracks = ps.music.search(libtype="track")
-            ps._log.debug(
-                "Client-side fetch (no server filters) returned {} tracks in {:.2f}s",
-                len(tracks), time.time() - _t0,
-            )
+def _normalized_strings(values):
+    """Return non-empty, case-insensitive strings from scalar/iterable input."""
+    if values is None:
+        return set()
+    if isinstance(values, str):
+        values = [values]
     else:
-        # No filters specified; fetch all tracks (may be large)
-        _t0 = time.time()
-        tracks = ps.music.search(libtype="track")
-        ps._log.debug(
-            "Fetched all tracks (no filters) -> {} in {:.2f}s",
-            len(tracks), time.time() - _t0,
-        )
+        try:
+            iter(values)
+        except TypeError:
+            values = [values]
+    return {
+        text for value in values
+        if (text := str(value).strip().casefold())
+    }
 
-    # Optional candidate pool cap to avoid huge post-filtering work
+
+def _genres_of(item):
+    """Normalized set of an item's beets ``genres`` values."""
+    return _normalized_strings(getattr(item, "genres", None))
+
+
+def _year_of(item):
+    """Item year as int, or None when missing/invalid."""
+    y = getattr(item, "year", None)
     try:
-        defaults_cfg = get_plexsync_config(["playlists", "defaults"], dict, {})
-        max_pool = get_config_value(defaults_cfg, defaults_cfg, "max_candidate_pool", None)
-        if max_pool:
-            import random
-            if len(tracks) > int(max_pool):
-                tracks = random.sample(tracks, int(max_pool))
-                ps._log.debug("Capped candidate pool to {} tracks", max_pool)
-    except Exception:
-        pass
+        return int(y) if y not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
 
-    return tracks, filtered_server_side
+
+def _rating_of(item):
+    """Plex user rating as float; missing/invalid values are unrated."""
+    try:
+        rating = float(getattr(item, "plex_userrating", 0) or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    return rating if math.isfinite(rating) and rating > 0 else 0.0
+
+
+def _play_count_of(item):
+    """Plex play count as a non-negative integer; invalid values become zero."""
+    try:
+        plays = int(getattr(item, "plex_viewcount", 0) or 0)
+    except (TypeError, ValueError, OverflowError):
+        return 0
+    return max(plays, 0)
+
+
+def _popularity_of(item):
+    """Spotify popularity in its valid 0-100 range, or None when unverified."""
+    raw = getattr(item, "spotify_track_popularity", None)
+    if raw is None or raw == "":
+        return None
+    try:
+        popularity = float(raw)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(popularity) or not 0 <= popularity <= 100:
+        return None
+    return popularity
+
+
+def _last_viewed_ts(item):
+    """Last-played epoch (float) for an item, or None when never played.
+
+    Plex represents "never played" as a null lastViewedAt (beets stores None);
+    the exclusion filter keys off exactly that.
+    """
+    raw = getattr(item, "plex_lastviewedat", None)
+    if raw is None:
+        return None
+    try:
+        timestamp = raw.timestamp() if isinstance(raw, datetime) else float(raw)
+    except (TypeError, ValueError, OSError, OverflowError):
+        return None
+    return timestamp if math.isfinite(timestamp) else None
+
+
+def _filter_beets_items(items, filters, exclusion_days=None, preferred_genres=None,
+                        max_plays=None, now_ts=None):
+    """Filter beets items on the fields beets already stores (Plex-synced).
+
+    Candidate selection runs against the beets library (assumed synced with
+    Plex) instead of Plex's advanced search, because Plex stores *unrated* as
+    ``userRating=None`` and *never played* as ``lastViewedAt=None`` and exposes
+    no null operator for either - so ``min_rating`` and ``exclusion_days`` can
+    not be expressed server-side.
+
+    Null semantics:
+      - ``plex_userrating`` missing/None/0 -> unrated, always kept by ``min_rating``.
+      - ``plex_lastviewedat`` missing/None -> never played, always kept by ``exclusion_days``.
+      - include-genres configured + item has no genres -> rejected (cannot satisfy).
+      - exclude-genres configured + item has no genres -> kept (nothing to exclude).
+      - explicit include-year + unknown year -> rejected (cannot satisfy).
+      - invalid timestamps are kept (never wrongly dropped).
+
+    Explicit ``include.genres`` are authoritative; ``preferred_genres`` (dynamic)
+    are only used when no include-genres are configured.
+
+    Pure (no I/O, no logging); ``now_ts`` (epoch seconds) is injectable for tests.
+    """
+    filters = filters or {}
+    include = filters.get("include") or {}
+    exclude = filters.get("exclude") or {}
+
+    # Presence, not truthiness, matters: an explicitly empty include list means
+    # "no genre restriction" and must not unexpectedly enable dynamic genres.
+    if "genres" in include:
+        include_genres = _normalized_strings(include.get("genres"))
+    else:
+        include_genres = _normalized_strings(preferred_genres)
+    exclude_genres = _normalized_strings(exclude.get("genres"))
+
+    inc_years = include.get("years") or {}
+    exc_years = exclude.get("years") or {}
+    has_inc_year = any(k in inc_years for k in ("after", "before", "between"))
+    has_exc_year = any(k in exc_years for k in ("before", "after"))
+
+    try:
+        min_rating = float(filters["min_rating"]) if "min_rating" in filters else None
+    except (TypeError, ValueError, OverflowError):
+        min_rating = None
+
+    try:
+        days = float(exclusion_days) if exclusion_days is not None else 0.0
+        exclusion_seconds = days * 86400.0 if math.isfinite(days) and days > 0 else None
+    except (TypeError, ValueError, OverflowError):
+        exclusion_seconds = None
+
+    try:
+        max_plays_limit = int(max_plays) if max_plays is not None else None
+        if max_plays_limit is not None and max_plays_limit < 0:
+            max_plays_limit = None
+    except (TypeError, ValueError, OverflowError):
+        max_plays_limit = None
+
+    if now_ts is None:
+        now_ts = time.time()
+
+    result = []
+    for item in items:
+        if item is None:
+            continue
+
+        item_genres = _genres_of(item) if include_genres or exclude_genres else set()
+        # Genre inclusion (requires at least one match when a set is configured).
+        if include_genres and not (item_genres & include_genres):
+            continue
+        # Genre exclusion (drop if any match).
+        if exclude_genres and (item_genres & exclude_genres):
+            continue
+
+        # Include year bounds (mirrors the special-path beets semantics).
+        if has_inc_year:
+            y = _year_of(item)
+            ok = True
+            if "after" in inc_years and not (y is not None and y > int(inc_years["after"])):
+                ok = False
+            if ok and "before" in inc_years and not (y is not None and y < int(inc_years["before"])):
+                ok = False
+            if ok and "between" in inc_years:
+                b = inc_years["between"]
+                ok = y is not None and (int(b[0]) <= y <= int(b[1]))
+            if not ok:
+                continue
+        # Exclude year bounds.
+        if has_exc_year:
+            y_exc = _year_of(item)
+            if y_exc is not None:
+                if "before" in exc_years and y_exc < int(exc_years["before"]):
+                    continue
+                if "after" in exc_years and y_exc > int(exc_years["after"]):
+                    continue
+
+        # Rating floor: rated below the floor dropped; unrated always kept.
+        if min_rating is not None:
+            r = _rating_of(item)
+            if r > 0 and r < min_rating:
+                continue
+
+        # Recency exclusion: recently played dropped; never played always kept.
+        if exclusion_seconds:
+            ts = _last_viewed_ts(item)
+            if ts is not None and (now_ts - ts) <= exclusion_seconds:
+                continue
+
+        # Optional max play count (only when explicitly configured).
+        if max_plays_limit is not None and _play_count_of(item) > max_plays_limit:
+            continue
+
+        result.append(item)
+    return result
+
+
+def _beets_candidates_from_lookup(plex_lookup):
+    """Return only lookup items carrying a usable Plex rating key.
+
+    The lookup builder historically inserts one item under a null key when
+    unsynced library items expose the declared-but-empty flexible field. Such
+    an item cannot be resolved back to Plex and must not enter selection.
+    """
+    return [
+        item for key, item in plex_lookup.items()
+        if key and item is not None and getattr(item, "plex_ratingkey", None)
+    ]
+
+
+def _get_beets_candidates(ps, plex_lookup, filters, exclusion_days,
+                          preferred_genres=None, max_plays=None, playlist_label=""):
+    """Return eligible beets candidates (tracks present in Plex) for a playlist.
+
+    The candidate set is the beets library's Plex-synced items (values of
+    ``plex_lookup``); eligibility is decided on the synced beets fields via
+    :func:`_filter_beets_items`. No Plex search is performed - under the synced
+    assumption beets provides everything the old server-side ``searchTracks``
+    filter did, without its null-field limitations or the slow/timeout-prone
+    query.
+    """
+    _t0 = time.time()
+    candidates = _beets_candidates_from_lookup(plex_lookup)
+    filtered = _filter_beets_items(
+        candidates, filters, exclusion_days,
+        preferred_genres=preferred_genres, max_plays=max_plays,
+    )
+    rated = sum(1 for it in filtered if _rating_of(it) > 0)
+    never_played = sum(1 for it in filtered if _last_viewed_ts(it) is None)
+    ps._log.debug(
+        "{}: beets candidate pool {} -> {} eligible ({} rated, {} unrated, {} never played) in {:.2f}s",
+        playlist_label or "smartplaylist", len(candidates), len(filtered), rated,
+        len(filtered) - rated, never_played, time.time() - _t0,
+    )
+    return filtered
 
 
 def _dedupe_by_rating_key(tracks, plex_lookup):
@@ -863,13 +1023,9 @@ def _representative_score(item):
     Ranking: rating desc -> play count desc -> most recently played. The tuple
     is designed for lexicographic comparison (higher is better).
     """
-    rating = float(getattr(item, 'plex_userrating', 0) or 0)
-    plays = int(getattr(item, 'plex_viewcount', 0) or 0)
-    last = getattr(item, 'plex_lastviewedat', None) or 0
-    try:
-        last = float(last)
-    except (TypeError, ValueError):
-        last = 0.0
+    rating = _rating_of(item)
+    plays = _play_count_of(item)
+    last = _last_viewed_ts(item) or 0.0
     return (rating, plays, last)
 
 
@@ -912,14 +1068,17 @@ def _apply_min_popularity(ps, items, min_popularity, playlist_label):
 
     Popularity comes from beets' `spotify_track_popularity` flex field
     (populated by the beets `spotify` plugin and stored as a string). Items
-    with no popularity data (0/None) are dropped because their floor can't be
-    verified. Mirrors Harmony's `filter_by_popularity` (long_drives).
+    with missing or invalid popularity are dropped because their floor cannot
+    be verified; a genuine numeric popularity of zero remains valid data.
+    Mirrors Harmony's `filter_by_popularity` (long_drives).
     """
-    if not min_popularity or not items:
+    if min_popularity is None or not items:
         return items
     try:
         floor = float(min_popularity)
-    except (TypeError, ValueError):
+        if not math.isfinite(floor):
+            raise ValueError
+    except (TypeError, ValueError, OverflowError):
         ps._log.debug(
             "Ignoring invalid min_popularity '{}' for {} playlist",
             min_popularity, playlist_label,
@@ -928,12 +1087,8 @@ def _apply_min_popularity(ps, items, min_popularity, playlist_label):
     kept = []
     dropped = 0
     for item in items:
-        pop = getattr(item, 'spotify_track_popularity', 0) or 0
-        try:
-            pop = float(pop)
-        except (TypeError, ValueError):
-            pop = 0.0
-        if pop >= floor:
+        pop = _popularity_of(item)
+        if pop is not None and pop >= floor:
             kept.append(item)
         else:
             dropped += 1
@@ -965,10 +1120,17 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
     max_tracks = get_config_value(playlist_config, defaults_cfg, "max_tracks", 20)
     discovery_ratio = get_config_value(playlist_config, defaults_cfg, "discovery_ratio", 30)
     exclusion_days = get_config_value(playlist_config, defaults_cfg, "exclusion_days", 30)
+    max_plays = get_config_value(playlist_config, defaults_cfg, "max_plays", None)
     filters = playlist_config.get("filters", {}) or {}
+    if not isinstance(filters, dict):
+        ps._log.error(
+            "Invalid filter configuration for {}: expected a dictionary; ignoring filters",
+            playlist_name,
+        )
+        filters = {}
 
     # Single source of truth for the rating floor is `filters.min_rating`
-    # (handled generically by build_advanced_filters/apply_playlist_filters).
+    # (handled generically by _filter_beets_items/apply_playlist_filters).
     # Fresh Favorites keeps its documented default of 6 by materializing it
     # into the filters when the user specified no rating floor at all.
     if playlist_type == "fresh_favorites" and "min_rating" not in filters:
@@ -976,6 +1138,22 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
         if default_min_rating:
             filters = dict(filters)
             filters["min_rating"] = default_min_rating
+
+    is_valid, error = validate_filter_config(ps, filters)
+    if not is_valid:
+        ps._log.error("Invalid filter configuration for {}: {}; ignoring filters",
+                      playlist_name, error)
+        filters = {}
+
+    if max_plays is not None:
+        try:
+            max_plays = int(max_plays)
+            if max_plays < 0:
+                raise ValueError("must be non-negative")
+        except (TypeError, ValueError, OverflowError):
+            ps._log.error("Invalid max_plays '{}' for {}; ignoring it",
+                          max_plays, playlist_name)
+            max_plays = None
 
     min_popularity = filters.get("min_popularity")
 
@@ -1034,17 +1212,9 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
 
             # Apply min rating filter
             if include_item and 'min_rating' in filters:
-                rating = getattr(item, 'rating', 0) or getattr(item, 'plex_userrating', 0) or 0
-                # Ensure both values are numeric for comparison
-                try:
-                    rating = float(rating) if rating is not None else 0
-                except (ValueError, TypeError):
-                    rating = 0
-
-                if rating > 0: # Only apply min_rating to rated tracks
-                    min_rating = filters['min_rating']
-                    if rating < min_rating:
-                        include_item = False
+                rating = _rating_of(item)
+                if rating > 0 and rating < filters['min_rating']:
+                    include_item = False
 
             # Special handling for 70s80s_flashback - only include tracks from 1970-1989
             if playlist_type == "70s80s_flashback":
@@ -1063,23 +1233,14 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
         if playlist_type == "highly_rated":
             highly_rated_items = []
             for item in filtered_items:
-                rating = getattr(item, 'plex_userrating', 0) or 0
-                # Ensure rating is numeric for comparison
-                try:
-                    rating = float(rating) if rating is not None else 0
-                except (ValueError, TypeError):
-                    rating = 0
-                if rating >= 7.0:  # High rating threshold
+                if _rating_of(item) >= 7.0:  # High rating threshold
                     highly_rated_items.append(item)
             filtered_items = highly_rated_items
             ps._log.debug("Filtered to {} highly rated tracks (rating >= 7.0)", len(filtered_items))
 
         # For most_played playlist, sort by play count
         if playlist_type == "most_played":
-            def get_play_count(item):
-                return getattr(item, 'plex_viewcount', 0) or 0
-
-            sorted_items = sorted(filtered_items, key=get_play_count, reverse=True)
+            sorted_items = sorted(filtered_items, key=_play_count_of, reverse=True)
             filtered_items = sorted_items
             ps._log.debug("Sorted {} tracks by play count for Most Played playlist", len(filtered_items))
 
@@ -1091,8 +1252,7 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
         rated_items = []
         unrated_items = []
         for item in filtered_items:
-            rating = getattr(item, 'plex_userrating', 0) or 0
-            if rating > 0:
+            if _rating_of(item) > 0:
                 rated_items.append(item)
             else:
                 unrated_items.append(item)
@@ -1104,8 +1264,9 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
             # For most played, use the sorted list directly but apply weighted selection for variety
             selected_items = select_tracks_weighted(ps, filtered_items, max_tracks, playlist_type=playlist_type)
         else:
-            rated_tracks_count = int(max_tracks * (1 - discovery_ratio / 100))
-            unrated_tracks_count = int(max_tracks * (discovery_ratio / 100))
+            unrated_tracks_count, rated_tracks_count = calculate_playlist_proportions(
+                ps, max_tracks, discovery_ratio,
+            )
 
             selected_rated = select_tracks_weighted(ps, rated_items, rated_tracks_count, playlist_type=playlist_type)
             # Unrated portion is popularity-first (see select_by_popularity).
@@ -1121,68 +1282,39 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
 
             selected_items = selected_rated + selected_unrated
     else:
-        # Regular handling for playlists that use Plex tracks directly
+        # Regular handling: candidates come from the beets library (Plex-synced
+        # items) and are filtered on the synced fields. No Plex search is used.
         if playlist_type == "daily_discovery":
-            # Daily Discovery uses both sonic analysis and library tracks
-            matched_sonic_tracks = []
+            # Normalize sonic matches (Plex objects) to beets items, then filter
+            # the combined pool so sonic tracks respect the same eligibility rules.
+            sonic_items = []
             for plex_track in similar_tracks:
                 try:
                     beets_item = plex_lookup.get(plex_track.ratingKey)
                     if beets_item:
-                        matched_sonic_tracks.append(plex_track)
+                        sonic_items.append(beets_item)
                 except Exception as e:
                     ps._log.debug("Error processing sonic track {}: {}", plex_track.title, e)
                     continue
 
-            ps._log.debug("Collecting additional tracks from library for discovery...")
-            all_library_tracks, filtered_server_side = _get_library_tracks(
-                ps, preferred_genres, filters, exclusion_days
+            library_candidates = _beets_candidates_from_lookup(plex_lookup)
+            ps._log.debug("Discovery pool: {} library + {} sonic candidates",
+                          len(library_candidates), len(sonic_items))
+            all_potential_tracks = _filter_beets_items(
+                library_candidates + sonic_items, filters, exclusion_days,
+                preferred_genres=preferred_genres, max_plays=max_plays,
             )
-
-            # Filter library tracks client-side unless the server already applied them
-            if filters and not filtered_server_side:
-                all_library_tracks = apply_playlist_filters(ps, all_library_tracks, filters)
-
-            # Convert library tracks to beets items
-            library_final_tracks = []
-            for track in all_library_tracks:
-                try:
-                    beets_item = plex_lookup.get(track.ratingKey)
-                    if beets_item:
-                        library_final_tracks.append(beets_item)
-                except Exception as e:
-                    ps._log.debug("Error converting library track {}: {}", track.title, e)
-
-            # Combine both sources of potential discovery tracks
-            all_potential_tracks = matched_sonic_tracks + library_final_tracks
-            ps._log.debug("Found {} sonic analysis tracks and {} library tracks for discovery",
-                          len(matched_sonic_tracks), len(library_final_tracks))
-
-            # Final track selection after removing duplicates (by rating key,
-            # across both object types - beets Items only expose the key as
-            # plex_ratingkey, so keying on ratingKey alone would silently
-            # drop the entire library pool).
+            # Collapse duplicates (a rating key can appear as both sonic + library).
             unique_tracks = _dedupe_by_rating_key(all_potential_tracks, plex_lookup)
         else:
-            # For other playlist types, use standard library tracks
-            all_library_tracks, filtered_server_side = _get_library_tracks(
-                ps, preferred_genres, filters, exclusion_days
+            unique_tracks = _get_beets_candidates(
+                ps, plex_lookup, filters, exclusion_days,
+                preferred_genres=preferred_genres, max_plays=max_plays,
+                playlist_label=playlist_name,
             )
 
-            # Skip redundant client-side filtering only when the server actually applied them
-            if filters and not filtered_server_side:
-                all_library_tracks = apply_playlist_filters(ps, all_library_tracks, filters)
-
-            unique_tracks = []
-            for track in all_library_tracks:
-                try:
-                    beets_item = plex_lookup.get(track.ratingKey)
-                    if beets_item:
-                        unique_tracks.append(beets_item)
-                except Exception as e:
-                    ps._log.debug("Error converting track {}: {}", track.title, e)
-
-            # Apply year-based filtering for certain playlist types
+            # Release-year guard for recency-focused playlists (applied on top of
+            # the configured filters; preserves the retain-on-empty fallback).
             if playlist_type == "recent_hits":
                 min_year, _ = _apply_recency_guard(ps, playlist_config, filters, playlist_name, default_max_age_years=3)
                 unique_tracks = _filter_tracks_by_min_year(ps, unique_tracks, min_year, playlist_name)
@@ -1199,8 +1331,7 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
         unrated_tracks = []
         for track in unique_tracks:
             if track:  # Make sure track exists
-                rating = float(getattr(track, 'plex_userrating', 0) or 0)
-                if rating > 0:
+                if _rating_of(track) > 0:
                     rated_tracks.append(track)
                 else:
                     unrated_tracks.append(track)

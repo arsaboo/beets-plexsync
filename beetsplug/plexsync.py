@@ -1831,8 +1831,9 @@ class PlexSync(BeetsPlugin):
         vector_index = BeetsVectorIndex()
 
         for item in lib.items():
-            if hasattr(item, "plex_ratingkey"):
-                plex_lookup[item.plex_ratingkey] = item
+            rating_key = getattr(item, "plex_ratingkey", None)
+            if rating_key:
+                plex_lookup[rating_key] = item
 
             metadata = self._extract_vector_metadata(item)
             item_id = metadata.get("id")
