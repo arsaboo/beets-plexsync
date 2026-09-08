@@ -705,13 +705,17 @@ def select_tracks_weighted(ps, tracks, num_tracks, playlist_type=None):
 
 
 def select_unrated(ps, tracks, num_tracks, playlist_type=None, playlist_label=""):
-    """Select unrated tracks using the playlist's theme weights.
+    """Select unrated tracks using each playlist's theme weights, top-N ranking.
 
-    Tracks with valid popularity data are preferred. Missing or invalid
-    popularity data is kept in a fallback group so it cannot crowd out verified
-    tracks. Both groups are ranked with :func:`select_tracks_weighted`, ensuring
-    that each playlist's ``unrated_weights`` still applies. Genuine popularity
-    ``0`` is valid data and remains in the preferred group.
+    Tracks with valid popularity data are preferred; missing or invalid
+    popularity is a fallback so it cannot crowd out verified tracks. Both groups
+    are ranked by the playlist's ``unrated_weights`` and the top candidates are
+    chosen. Top-N ranking (rather than probabilistic sampling) is deliberate:
+    softmax sampling gives every track some selection probability, which lets
+    low-scoring (e.g. popularity-0) tracks leak into the mix on a large pool.
+    Genuine popularity ``0`` is still valid data and stays in the preferred
+    group, but with the theme weights it ranks at the bottom and is only chosen
+    when better tracks are exhausted.
     """
     if not tracks or num_tracks <= 0:
         return []
@@ -719,13 +723,23 @@ def select_unrated(ps, tracks, num_tracks, playlist_type=None, playlist_label=""
     verified = []
     unverified = []
     for track in tracks:
-        target = verified if _popularity_of(track) is not None else unverified
-        target.append(track)
+        (verified if _popularity_of(track) is not None else unverified).append(track)
+
+    def _rank_top(group, count):
+        if not group or count <= 0:
+            return []
+        base_time = datetime.now()
+        context_stats = _compute_context_stats(group, base_time)
+        scored = [
+            (calculate_track_score(ps, track, base_time, tracks_context_stats=context_stats,
+                                   playlist_type=playlist_type), track)
+            for track in group
+        ]
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [track for _, track in scored[:count]]
 
     if not verified:
-        selected = select_tracks_weighted(
-            ps, unverified, num_tracks, playlist_type=playlist_type,
-        )
+        selected = _rank_top(unverified, num_tracks)
         if selected:
             ps._log.warning(
                 "{}: no popularity data on any unrated track; selected {} "
@@ -734,20 +748,17 @@ def select_unrated(ps, tracks, num_tracks, playlist_type=None, playlist_label=""
             )
         return selected
 
-    selected = select_tracks_weighted(
-        ps, verified, num_tracks, playlist_type=playlist_type,
-    )
+    selected = _rank_top(verified, num_tracks)
     needed = num_tracks - len(selected)
     if needed > 0 and unverified:
-        fallback = select_tracks_weighted(
-            ps, unverified, needed, playlist_type=playlist_type,
-        )
-        selected.extend(fallback)
-        ps._log.warning(
-            "{}: only {} unrated track(s) have popularity data; filled {} "
-            "slot(s) with unverified tracks",
-            playlist_label, len(verified), len(fallback),
-        )
+        fallback = _rank_top(unverified, needed)
+        if fallback:
+            selected.extend(fallback)
+            ps._log.warning(
+                "{}: only {} unrated track(s) have popularity data; filled {} "
+                "slot(s) with unverified tracks",
+                playlist_label, len(verified), len(fallback),
+            )
 
     return selected
 

@@ -414,48 +414,30 @@ class SelectUnratedThemeTest:
         )
         assert {t.plex_ratingkey for t in full} == {1, 2, 3}
 
-    def test_both_groups_use_playlist_weights(self, monkeypatch):
-        calls = []
+    def test_daily_discovery_excludes_pop_zero_when_better_available(self):
+        # Top-N theme ranking (not probabilistic sampling): with daily_discovery's
+        # popularity weight, a genuine pop=0 verified track must NOT be chosen
+        # while a more popular track is available. This covers the regression
+        # where softmax sampling leaked popularity-0 tracks into Daily Discovery.
+        high = self._item(1, 2023, 0, None, "80")
+        low = self._item(2, 2023, 0, None, "0")
+        with patch("numpy.random.normal", return_value=0.0):
+            sel = smartplaylists.select_unrated(
+                self._ps(), [high, low], 1, playlist_type="daily_discovery",
+            )
+        assert [t.plex_ratingkey for t in sel] == [1]
 
-        def fake_weighted(ps, tracks, count, playlist_type=None):
-            calls.append(([t.plex_ratingkey for t in tracks], count, playlist_type))
-            return tracks[:count]
-
-        monkeypatch.setattr(smartplaylists, "select_tracks_weighted", fake_weighted)
-        verified1 = self._item(1, 2000, 0, None, "10")
-        verified2 = self._item(2, 2000, 0, None, "0")
-        unverified1 = self._item(3, 2000, 0, None, None)
-        unverified2 = self._item(4, 2000, 0, None, "invalid")
-
-        selected = smartplaylists.select_unrated(
-            self._ps(), [verified1, unverified1, verified2, unverified2], 3,
-            playlist_type="forgotten_gems",
-        )
-
-        assert [t.plex_ratingkey for t in selected] == [1, 2, 3]
-        assert calls == [
-            ([1, 2], 3, "forgotten_gems"),
-            ([3, 4], 1, "forgotten_gems"),
-        ]
-
-    def test_all_unverified_still_uses_playlist_weights(self, monkeypatch):
-        calls = []
-
-        def fake_weighted(ps, tracks, count, playlist_type=None):
-            calls.append(([t.plex_ratingkey for t in tracks], count, playlist_type))
-            return list(reversed(tracks))[:count]
-
-        monkeypatch.setattr(smartplaylists, "select_tracks_weighted", fake_weighted)
-        items = [
-            self._item(1, 1990, 0, None, None),
-            self._item(2, 2000, 0, None, None),
-        ]
-        selected = smartplaylists.select_unrated(
-            self._ps(), items, 1, playlist_type="forgotten_gems",
-        )
-
-        assert [t.plex_ratingkey for t in selected] == [2]
-        assert calls == [([1, 2], 1, "forgotten_gems")]
+    def test_unverified_fill_uses_theme_weights(self):
+        # When verified tracks are exhausted, the unverified fallback is still
+        # theme-ranked (forgotten_gems prefers the older track), not taken in
+        # pool order.
+        old = self._item(1, 1995, 0, None, None)
+        new = self._item(2, 2024, 0, None, None)
+        with patch("numpy.random.normal", return_value=0.0):
+            sel = smartplaylists.select_unrated(
+                self._ps(), [old, new], 1, playlist_type="forgotten_gems",
+            )
+        assert [t.plex_ratingkey for t in sel] == [1]
 
     def test_empty_and_zero_count(self):
         ps = self._ps()
