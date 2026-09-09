@@ -130,6 +130,34 @@ beetsplug/
 | `plex_lastratedat` | DateType | Last rated |
 | `plex_updated` | DateType | Last sync |
 
+### Data model gotchas (verified live on arsmusic)
+
+- **Genres live in `item.genres` — a multi-value beets field that returns a `list`**
+  (e.g. `['Bollywood', 'Soundtrack']`). It is stored in the `items.genres` column
+  (~63k rows) and is what `smartplaylists._genres_of(item)`
+  (`_normalized_strings(getattr(item, 'genres', None))`) consumes.
+- **`item.genre` (singular) is NOT a recognized beets field** — reading it raises
+  `AttributeError: no such field 'genre'`. Do not use it. The orphaned
+  `items.genre` column (3,624 rows, mostly `Rajasthani`; note the skew) and the
+  item_attributes `genre` key (61 rows) are stale/unused and misleading.
+  Always read genres via `item.genres` (list).
+- **`year` is a standard `items` column** (`SELECT id, year FROM items`), NOT in
+  item_attributes.
+- **Flex fields are strings** in `item_attributes` (`entity_id, key, value`, joined
+  on `items.id`); must parse, e.g. `float(x or 0)`. Map beets items ↔ Plex via
+  `plex_ratingkey` (in item_attributes).
+- **`plex_lastviewedat` is stored as a `'YYYY-MM-DD HH:MM:SS'` datetime string for
+  played tracks and `'0.0'` when never played** (Plex `lastViewedAt=None`) — NOT a
+  unix epoch or NULL. Beets parses it to a `datetime` on `item.plex_lastviewedat`;
+  in raw SQL treat `'0.0'`/empty as never played. Use `smartplaylists._last_viewed_ts()`
+  (handles both datetime and float).
+- **Plex playlists can be STALE after logic changes** — validate by regenerating
+  (`beet plex_smartplaylists`, config `clear_playlist` controls clearing first),
+  not by reading an existing Plex playlist.
+- `genres`/`genre` values may be `\n`-joined in raw SQL (`LIKE '%;%'` finds 0 rows);
+  beets already parses them into a list via `item.genres`, so match against the
+  parsed list, never raw string equality on one joined string.
+
 ## Config Options
 
 - **Plex** (`config["plex"]`): `host`, `port`, `token`, `library_name`, `secure`, `ignore_cert_errors`
