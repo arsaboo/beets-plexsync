@@ -8,11 +8,13 @@ Canonical agent brief. `CLAUDE.md` and `gemini.md` point here so they stay in sy
 - **Python**: 3.11 locally; plugin requires `>=3.10`
 - **Beets**: `>=2.13.0` (tested against 2.13.1)
 - **Platform**: Windows 11 (Unix shell syntax in bash: forward slashes, `/dev/null`)
-- **Tests**: `conda run -n py311 python -m pytest -v`
+- **Tests**: `conda run -n py311 python -m pytest -v`. Scratch scripts importing `beetsplug.plex` must run from the repo root; the `beetsplug` installed in `py311` has no `plex` subpackage (pytest works because rootdir is on `sys.path`).
 - **Single test**: `conda run -n py311 python -m pytest tests/test_cache.py -v`
 - **Compile check**: `conda run -n py311 python -c "import os, py_compile; [py_compile.compile(os.path.join(r,f)) for r,_,fs in os.walk('beetsplug') for f in fs if f.endswith('.py')]; print('OK')"`
 - **Test extra**: `pip install -e .[test]` (pytest)
 - **Remote** (optional live checks): `arsaboo@192.168.2.188`. **No conda on the remote** — run Python directly: `ssh arsaboo@192.168.2.188` then use the system `python3` (Python 3.10.12; beets installed under `~/.local/lib/python3.10/site-packages`) or the `beet` CLI at `/home/arsaboo/.local/bin/beet`. The library DB is `~/.config/beets/musiclibrary.blb`. Plugin code lives under `~/.local/lib/python3.10/site-packages/beetsplug` (the `plexsync` plugin is loaded from there). Beets version on remote is 2.13.1. `~/.local/lib` paths can be queried directly, e.g.: `python3 -c "from beets.library import Library; lib=Library('/home/arsaboo/.config/beets/musiclibrary.blb'); ..."`.
+- **Deploy to remote**: push to `main`, then on arsmusic `python3 -m pip install --upgrade --force-reinstall --no-deps git+https://github.com/arsaboo/beets-plexsync.git`. Confirm with `md5sum` of the installed file vs local `git show HEAD:<path> | md5sum` (compare the blob, not the working copy).
+- **Remote `beet` queries**: `~regex:` patterns (`~album:"^(A|B)$"`) and `id:1,2,3` lists match nothing there — the deprecated `limit` plugin (warns on every remote `beet` call) is the suspect. Select items in a script instead.
 
 ## Project Overview
 
@@ -143,17 +145,29 @@ beetsplug/
   Always read genres via `item.genres` (list).
 - **`year` is a standard `items` column** (`SELECT id, year FROM items`), NOT in
   item_attributes.
-- **Flex fields are strings** in `item_attributes` (`entity_id, key, value`, joined
-  on `items.id`); must parse, e.g. `float(x or 0)`. Map beets items ↔ Plex via
+- **Flex fields are strings** in `item_attributes` (`entity_id, key, value`; join on
+  `items.id = item_attributes.entity_id`, *not* `item_attributes.id`, which is the
+  row id); must parse, e.g. `float(x or 0)`. Map beets items ↔ Plex via
   `plex_ratingkey` (in item_attributes).
 - **`plex_lastviewedat` is stored as a `'YYYY-MM-DD HH:MM:SS'` datetime string for
   played tracks and `'0.0'` when never played** (Plex `lastViewedAt=None`) — NOT a
   unix epoch or NULL. Beets parses it to a `datetime` on `item.plex_lastviewedat`;
   in raw SQL treat `'0.0'`/empty as never played. Use `smartplaylists._last_viewed_ts()`
   (handles both datetime and float).
+- **`plex_userrating` is a *cached* Plex rating and can stay stale forever**:
+  `plexsync` without `-f` skips any item already carrying the field (even `'0.0'`)
+  and `plexsyncrecent` only walks `lastViewedAt>>Nd`, so a rating given without a
+  play never reaches beets. `min_rating` treats 0 as unrated, so such rows leak
+  low-rated tracks into playlists; `smartplaylists._enforce_live_rating_floor()`
+  re-checks the final picks live (one `batch_fetch_plex_items` ≈ 0.5 s / 100 keys)
+  and is not redundant with `_filter_beets_items`.
+- **`plex_lastratedat` is `0.0` even for rated tracks** — Plex audio exposes no
+  rating timestamp, so "recently rated" cannot be derived from beets data.
 - **Plex playlists can be STALE after logic changes** — validate by regenerating
   (`beet plex_smartplaylists`, config `clear_playlist` controls clearing first),
-  not by reading an existing Plex playlist.
+  not by reading an existing Plex playlist. Playlist `updatedAt` is not derived
+  from its items and any Plex client/API session can bump it, so it does not
+  identify who wrote the playlist.
 - `genres`/`genre` values may be `\n`-joined in raw SQL (`LIKE '%;%'` finds 0 rows);
   beets already parses them into a list via `item.genres`, so match against the
   parsed list, never raw string equality on one joined string.
