@@ -897,6 +897,69 @@ def _filter_beets_items(items, filters, exclusion_days=None, preferred_genres=No
     return result
 
 
+def _enforce_live_rating_floor(ps, items, filters, playlist_label=""):
+    """Drop final picks Plex now rates below ``min_rating``.
+
+    Cached ``plex_userrating`` can lag Plex indefinitely - a rating given
+    without a play event is never fetched - so re-check the few final picks
+    live in one batched request. Drops only ``0 < rating < min_rating``;
+    unrated and unresolvable tracks pass, as in ``_filter_beets_items``.
+    Returns *items* unchanged when there is no floor or Plex is unreachable,
+    which can leave the playlist short but never fails a run.
+    """
+    if not items or not isinstance(filters, dict) or "min_rating" not in filters:
+        return items
+    try:
+        min_rating = float(filters["min_rating"])
+    except (TypeError, ValueError):
+        return items
+    if min_rating <= 0:
+        return items
+
+    plex = getattr(ps, "plex", None)
+    if plex is None:
+        ps._log.debug("No Plex connection; skipping live rating check for {}", playlist_label)
+        return items
+
+    keys = [str(i.plex_ratingkey) for i in items if getattr(i, "plex_ratingkey", None)]
+    if not keys:
+        return items
+
+    from beetsplug.plex.operations import batch_fetch_plex_items
+
+    try:
+        fetched = batch_fetch_plex_items(plex, keys, ps._log)
+    except Exception as exc:  # noqa: BLE001 - stale data beats a failed run
+        ps._log.warning(
+            "Live rating check failed for {} ({}); keeping all {} picks",
+            playlist_label, exc, len(items),
+        )
+        return items
+
+    live = {}
+    for track in fetched:
+        try:
+            live[str(track.ratingKey)] = float(getattr(track, "userRating", 0) or 0)
+        except (TypeError, ValueError, AttributeError):
+            continue
+
+    kept = []
+    dropped = 0
+    for item in items:
+        rating = live.get(str(getattr(item, "plex_ratingkey", "") or ""))
+        if rating is not None and 0 < rating < min_rating:
+            dropped += 1
+            continue
+        kept.append(item)
+
+    if dropped:
+        ps._log.info(
+            "Live Plex ratings dropped {} pick(s) below floor {} for {} ({} kept)",
+            dropped, min_rating, playlist_label, len(kept),
+        )
+    return kept
+
+
 def _beets_candidates_from_lookup(plex_lookup):
     """Return only lookup items carrying a usable Plex rating key.
 
@@ -1323,6 +1386,9 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
     # Ensure we don't exceed max_tracks
     if len(selected_items) > max_tracks:
         selected_items = selected_items[:max_tracks]
+
+    # Re-check the picks against Plex: beets' cached ratings can be stale.
+    selected_items = _enforce_live_rating_floor(ps, selected_items, filters, playlist_name)
 
     import random
     random.shuffle(selected_items)

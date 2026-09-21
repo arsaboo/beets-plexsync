@@ -551,3 +551,130 @@ class BeetsCentricGenerationTest:
         assert len(added["tracks"]) == 100
         assert sum(smartplaylists._rating_of(t) > 0 for t in added["tracks"]) == 95
         assert sum(smartplaylists._rating_of(t) == 0 for t in added["tracks"]) == 5
+
+
+def _fake_log():
+    return types.SimpleNamespace(
+        debug=lambda *a, **k: None,
+        info=lambda *a, **k: None,
+        warning=lambda *a, **k: None,
+        error=lambda *a, **k: None,
+    )
+
+
+def _fetch_returning(ratings, calls=None, error=None):
+    """batch_fetch_plex_items stand-in backed by {ratingKey: userRating}."""
+    def _fetch(plex, keys, logger, extra_exceptions=()):
+        if calls is not None:
+            calls.append(list(keys))
+        if error is not None:
+            raise error
+        # A list because SimpleNamespace is unhashable; the code iterates it.
+        return [
+            types.SimpleNamespace(ratingKey=int(k), userRating=ratings[int(k)])
+            for k in keys if int(k) in ratings
+        ]
+    return _fetch
+
+
+class LiveRatingFloorTest:
+    """beets' plex_userrating can lag Plex; the floor is re-checked live."""
+
+    @staticmethod
+    def _ps(plex="plex"):
+        ps = types.SimpleNamespace(_log=_fake_log())
+        if plex is not None:
+            ps.plex = object() if plex == "plex" else plex
+        return ps
+
+    @staticmethod
+    def _item(key, beets_rating=0):
+        return types.SimpleNamespace(plex_ratingkey=key, title=f"Track {key}",
+                                     plex_userrating=beets_rating)
+
+    def test_drops_only_live_ratings_below_floor(self, monkeypatch):
+        ratings = {1: 1.0, 2: 0, 3: 6.0, 4: 2.0, 5: 3.0}
+        monkeypatch.setattr("beetsplug.plex.operations.batch_fetch_plex_items",
+                            _fetch_returning(ratings))
+        # Key 6 is never returned by Plex (deleted/unresolvable) -> kept.
+        items = [self._item(k) for k in (1, 2, 3, 4, 5, 6)]
+        kept = smartplaylists._enforce_live_rating_floor(self._ps(), items, {"min_rating": 3}, "DD")
+        assert [i.plex_ratingkey for i in kept] == [2, 3, 5, 6]
+
+    def test_no_floor_configured_never_contacts_plex(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr("beetsplug.plex.operations.batch_fetch_plex_items",
+                            _fetch_returning({}, calls))
+        items = [self._item(1)]
+        for filters in ({}, {"exclude": {"genres": ["Religious"]}}, None):
+            assert smartplaylists._enforce_live_rating_floor(
+                self._ps(), items, filters, "DD") is items
+        assert calls == []
+
+    def test_zero_and_unusable_floors_skip_the_check(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr("beetsplug.plex.operations.batch_fetch_plex_items",
+                            _fetch_returning({}, calls))
+        items = [self._item(1)]
+        for floor in (0, None, "lots"):
+            assert smartplaylists._enforce_live_rating_floor(
+                self._ps(), items, {"min_rating": floor}, "DD") is items
+        assert calls == []
+
+    def test_without_plex_connection_all_picks_survive(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr("beetsplug.plex.operations.batch_fetch_plex_items",
+                            _fetch_returning({1: 1.0}, calls))
+        items = [self._item(1)]
+        ps = types.SimpleNamespace(_log=_fake_log())  # no .plex at all
+        assert smartplaylists._enforce_live_rating_floor(ps, items, {"min_rating": 3}, "DD") is items
+        assert calls == []
+
+    def test_plex_outage_keeps_everything(self, monkeypatch):
+        monkeypatch.setattr("beetsplug.plex.operations.batch_fetch_plex_items",
+                            _fetch_returning({}, error=RuntimeError("Plex down")))
+        items = [self._item(1), self._item(2)]
+        assert smartplaylists._enforce_live_rating_floor(
+            self._ps(), items, {"min_rating": 3}, "DD") is items
+
+    def test_stale_picks_are_dropped_at_generation_time(self, monkeypatch):
+        monkeypatch.setattr(smartplaylists, "get_plexsync_config", lambda *a, **k: {})
+        added = {}
+        ps = types.SimpleNamespace(
+            _log=_fake_log(),
+            plex=object(),
+            _plex_clear_playlist=lambda name: None,
+            _plex_add_playlist_item=lambda tracks, name: added.update(
+                tracks=list(tracks), name=name,
+            ),
+        )
+
+        def _item(key, rating, popularity):
+            return types.SimpleNamespace(
+                plex_ratingkey=key, title=f"Track {key}", artist=f"Artist {key}",
+                album="Album", genres=["Punjabi"], year=2000, plex_userrating=rating,
+                plex_lastviewedat=None, plex_viewcount="0",
+                spotify_track_popularity=str(popularity),
+            )
+
+        rated = [_item(i, "6", 50 + (i % 40)) for i in range(1, 96)]
+        unrated = [_item(i, None, i - 5) for i in range(96, 107)]
+        lookup = {item.plex_ratingkey: item for item in rated + unrated}
+        # beets still says 6 for the rated picks; Plex now says 1.
+        ratings = {i: 1.0 for i in range(1, 96)}
+        ratings.update({i: 0 for i in range(96, 107)})
+        monkeypatch.setattr("beetsplug.plex.operations.batch_fetch_plex_items",
+                            _fetch_returning(ratings))
+
+        smartplaylists.generate_unified_playlist(
+            ps, None,
+            {"name": "Forgotten Gems", "max_tracks": 100, "discovery_ratio": 5,
+             "exclusion_days": 90,
+             "filters": {"include": {"genres": ["Punjabi"]}, "min_rating": 5}},
+            lookup, ["Rock"], [], "forgotten_gems",
+        )
+
+        unrated_keys = {t.plex_ratingkey for t in unrated}
+        assert {t.plex_ratingkey for t in added["tracks"]} <= unrated_keys
+        assert len(added["tracks"]) == 5
+        assert all(t.plex_userrating in (None, 0) for t in added["tracks"])
