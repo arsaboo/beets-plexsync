@@ -36,5 +36,6 @@ setup(
         'scipy',
         'numpy',
         'pytz',
+        'enlighten',
     ],
 )
