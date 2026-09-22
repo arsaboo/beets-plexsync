@@ -62,10 +62,12 @@ class SpotifyTransferTest:
             def _build_plex_lookup_and_vector_index(self, lib):
                 return {1: beets_item}
 
-            def add_tracks_to_spotify_playlist(self, playlist, tracks):
-                self.sent = (playlist, tracks)
+            def add_tracks_to_spotify_playlist(
+                    self, playlist, tracks, *, allow_removals=True):
+                self.sent = (playlist, tracks, allow_removals)
 
-            def _search_spotify_track(self, beets_item):  # pragma: no cover
+            def _search_spotify_track(
+                    self, beets_item, *, raise_on_error=False):  # pragma: no cover
                 return 'alt-track'
 
             def create_progress_counter(self, *a, **kw):
@@ -79,7 +81,7 @@ class SpotifyTransferTest:
         self.transfer.plex_to_spotify(plugin, lib, 'Mix')
 
         assert plugin.called_auth
-        assert plugin.sent == ('Mix', ['spotify:track:123'])
+        assert plugin.sent == ('Mix', ['spotify:track:123'], True)
 
     def test_falls_back_to_search_when_unplayable(self):
         logger = DummyLogger()
@@ -111,11 +113,12 @@ class SpotifyTransferTest:
             def _build_plex_lookup_and_vector_index(self, lib):
                 return {1: beets_item}
 
-            def _search_spotify_track(self, beets_item):
+            def _search_spotify_track(self, beets_item, *, raise_on_error=False):
                 return 'fallback'
 
-            def add_tracks_to_spotify_playlist(self, playlist, tracks):
-                self.sent = tracks
+            def add_tracks_to_spotify_playlist(
+                    self, playlist, tracks, *, allow_removals=True):
+                self.sent = (tracks, allow_removals)
 
             def create_progress_counter(self, *a, **kw):
                 return None
@@ -127,6 +130,132 @@ class SpotifyTransferTest:
         )
         self.transfer.plex_to_spotify(plugin, lib, 'Mix')
 
-        assert plugin.sent == ['fallback']
+        assert plugin.sent == (['fallback'], True)
+
+    def test_empty_resolution_never_updates_destination(self):
+        logger = DummyLogger()
+
+        class Plugin:
+            def __init__(self):
+                self._log = logger
+                self.plex = types.SimpleNamespace(
+                    playlist=lambda name: types.SimpleNamespace(
+                        items=lambda: [types.SimpleNamespace(
+                            ratingKey=1, parentTitle='Album', title='Song'
+                        )]
+                    )
+                )
+                self.sp = types.SimpleNamespace()
+                self.called = False
+
+            def authenticate_spotify(self):
+                pass
+
+            def _build_plex_lookup_and_vector_index(self, lib):
+                return {}
+
+            def add_tracks_to_spotify_playlist(self, *args, **kwargs):
+                self.called = True
+
+            def create_progress_counter(self, *args, **kwargs):
+                return None
+
+        plugin = Plugin()
+        result = self.transfer.plex_to_spotify(
+            plugin, types.SimpleNamespace(items=lambda *a, **k: []), 'Mix'
+        )
+
+        assert result is False
+        assert not plugin.called
+
+    def test_partial_resolution_uses_add_only_mode(self):
+        logger = DummyLogger()
+        beets_item = types.SimpleNamespace(
+            plex_ratingkey=1,
+            spotify_track_id='known',
+            artist='Artist',
+            album='Album',
+            title='Song',
+        )
+        plex_items = [
+            types.SimpleNamespace(ratingKey=1, parentTitle='Album', title='Song'),
+            types.SimpleNamespace(ratingKey=2, parentTitle='Album', title='Missing'),
+        ]
+
+        class Plugin:
+            def __init__(self):
+                self._log = logger
+                self.plex = types.SimpleNamespace(
+                    playlist=lambda name: types.SimpleNamespace(items=lambda: plex_items)
+                )
+                self.sp = types.SimpleNamespace(
+                    tracks=lambda ids: {'tracks': [
+                        {'id': 'known', 'is_playable': True, 'available_markets': ['US']}
+                    ]}
+                )
+
+            def authenticate_spotify(self):
+                pass
+
+            def _build_plex_lookup_and_vector_index(self, lib):
+                return {1: beets_item}
+
+            def add_tracks_to_spotify_playlist(
+                    self, playlist, tracks, *, allow_removals=True):
+                self.sent = (tracks, allow_removals)
+                return True
+
+            def create_progress_counter(self, *args, **kwargs):
+                return None
+
+        plugin = Plugin()
+        assert self.transfer.plex_to_spotify(
+            plugin, types.SimpleNamespace(items=lambda *a, **k: []), 'Mix'
+        )
+        assert plugin.sent == (['known'], False)
+
+    def test_availability_failure_retains_known_id_and_disables_removals(self):
+        logger = DummyLogger()
+        beets_item = types.SimpleNamespace(
+            plex_ratingkey=1,
+            spotify_track_id='known',
+            artist='Artist',
+            album='Album',
+            title='Song',
+        )
+
+        class Plugin:
+            def __init__(self):
+                self._log = logger
+                self.plex = types.SimpleNamespace(
+                    playlist=lambda name: types.SimpleNamespace(
+                        items=lambda: [types.SimpleNamespace(
+                            ratingKey=1, parentTitle='Album', title='Song'
+                        )]
+                    )
+                )
+                self.sp = types.SimpleNamespace(
+                    tracks=lambda ids: (_ for _ in ()).throw(RuntimeError('offline'))
+                )
+
+            def authenticate_spotify(self):
+                pass
+
+            def _build_plex_lookup_and_vector_index(self, lib):
+                return {1: beets_item}
+
+            def add_tracks_to_spotify_playlist(
+                    self, playlist, tracks, *, allow_removals=True):
+                self.sent = (tracks, allow_removals)
+                return True
+
+            def create_progress_counter(self, *args, **kwargs):
+                return None
+
+        plugin = Plugin()
+        assert self.transfer.plex_to_spotify(
+            plugin, types.SimpleNamespace(items=lambda *a, **k: []), 'Mix'
+        )
+        assert plugin.sent == (['known'], False)
 
 

@@ -69,6 +69,26 @@ _QUERY_TITLE_BY_FROM_RE = re.compile(
 )
 _FROM_CLAUSE_RE = re.compile(r'\(from\s+"?([^")]+)"?\)', re.IGNORECASE)
 
+# (generator attribute name, needs_preferred_attributes) - single source of
+# truth for which smart playlist IDs consume get_preferred_attributes()
+# output, so the "compute attributes" and "skip on failure" checks can't
+# drift apart. The generator is looked up on sp_mod by name at call time
+# (not bound here) so tests can monkeypatch sp_mod.generate_* directly.
+_SMART_PLAYLIST_GENERATORS = {
+    "daily_discovery": ("generate_daily_discovery", True),
+    "forgotten_gems": ("generate_forgotten_gems", True),
+    "recent_hits": ("generate_recent_hits", False),
+    "fresh_favorites": ("generate_fresh_favorites", False),
+    "70s80s_flashback": ("generate_70s80s_flashback", False),
+    "highly_rated": ("generate_highly_rated_tracks", False),
+    "most_played": ("generate_most_played_tracks", False),
+}
+_PREFERRED_ATTRIBUTE_PLAYLIST_IDS = {
+    playlist_id
+    for playlist_id, (_, needs_attrs) in _SMART_PLAYLIST_GENERATORS.items()
+    if needs_attrs
+}
+
 
 class PlexSync(BeetsPlugin):
     """Define plexsync class."""
@@ -1152,6 +1172,7 @@ class PlexSync(BeetsPlugin):
             use_local_candidates=False,
             use_cache=False,
             playlist_id=None,
+            raise_on_error=True,
         )
         if track is None:
             self._log.debug("Track {} not found in Plex library", item)
@@ -1163,7 +1184,13 @@ class PlexSync(BeetsPlugin):
 
     def _plex_add_playlist_item(self, items, playlist):
         """Add items to Plex playlist."""
-        plex_ops.plex_add_playlist_item(self.plex, items, playlist, self._log)
+        return plex_ops.plex_add_playlist_item(self.plex, items, playlist, self._log)
+
+    def _plex_replace_playlist_items(self, items, playlist):
+        """Safely reconcile a Plex playlist to an ordered target."""
+        return plex_ops.plex_replace_playlist_items(
+            self.plex, items, playlist, self._log
+        )
 
     def _plex_playlist_to_collection(self, playlist):
         """Convert a Plex playlist to a Plex collection."""
@@ -1354,6 +1381,7 @@ class PlexSync(BeetsPlugin):
         use_local_candidates=True,
         playlist_id=None,
         use_cache=True,
+        raise_on_error=False,
     ):
         return plex_search.search_plex_song(
             self,
@@ -1363,6 +1391,7 @@ class PlexSync(BeetsPlugin):
             use_local_candidates=use_local_candidates,
             playlist_id=playlist_id,
             use_cache=use_cache,
+            raise_on_error=raise_on_error,
         )
 
     def _process_matches(self, tracks, song, manual_search):
@@ -1564,20 +1593,28 @@ class PlexSync(BeetsPlugin):
             "{} songs to be added in Plex library: {}", len(song_list), song_list
         )
         matched_songs = []
-        for song in song_list:
-            found = self.search_plex_song(song)
-            if found is not None:
-                matched_songs.append(found)
-        self._log.debug("Songs matched in Plex library: {}", matched_songs)
-        if clear:
-            try:
-                self._plex_clear_playlist(playlist)
-            except exceptions.NotFound:
-                self._log.debug(f"Unable to clear playlist {playlist}")
         try:
-            self._plex_add_playlist_item(matched_songs, playlist)
+            for song in song_list:
+                found = self.search_plex_song(song, raise_on_error=clear)
+                if found is not None:
+                    matched_songs.append(found)
+        except plex_search.PlexSearchError as exc:
+            self._log.error(
+                "Plex search failed; preserving existing {} playlist: {}",
+                playlist,
+                exc,
+            )
+            return
+        self._log.debug("Songs matched in Plex library: {}", matched_songs)
+        try:
+            if clear:
+                updated = self._plex_replace_playlist_items(matched_songs, playlist)
+            else:
+                updated = self._plex_add_playlist_item(matched_songs, playlist)
+            if not updated:
+                self._log.warning("Plex playlist {} was not changed", playlist)
         except Exception as e:
-            self._log.error("Unable to add songs to playlist. Error: {}", e)
+            self._log.error("Unable to update playlist {}. Error: {}", playlist, e)
 
     def setup_llm(self):
         """Setup LLM client using OpenAI-compatible API."""
@@ -1644,11 +1681,20 @@ class PlexSync(BeetsPlugin):
         """Transfer Plex playlist to Spotify using plex_lookup with optional query filtering."""
         spotify_transfer.plex_to_spotify(self, lib, playlist, query_args)
 
-    def _search_spotify_track(self, beets_item):
-        return spotify_provider.search_spotify_track(self, beets_item)
+    def _search_spotify_track(self, beets_item, *, raise_on_error=False):
+        return spotify_provider.search_spotify_track(
+            self, beets_item, raise_on_error=raise_on_error
+        )
 
-    def add_tracks_to_spotify_playlist(self, playlist_name, track_uris):
-        return spotify_provider.add_tracks_to_spotify_playlist(self, playlist_name, track_uris)
+    def add_tracks_to_spotify_playlist(
+        self, playlist_name, track_uris, *, allow_removals=True
+    ):
+        return spotify_provider.add_tracks_to_spotify_playlist(
+            self,
+            playlist_name,
+            track_uris,
+            allow_removals=allow_removals,
+        )
 
 
 
@@ -1871,13 +1917,20 @@ class PlexSync(BeetsPlugin):
         plex_lookup = self._build_plex_lookup_and_vector_index(lib)
         self._log.debug("Found {} tracks in lookup dictionary", len(plex_lookup))
 
-        # Get preferred attributes once if needed for smart playlists
+        # Get preferred attributes once if needed for smart playlists. If this
+        # shared prerequisite fails, skip only the two playlists that depend on
+        # it rather than generating them with materially different criteria.
         preferred_genres = None
-        similar_tracks = None
-        if any(p.get("id") in ["daily_discovery", "forgotten_gems"] for p in playlists_config):
-            preferred_genres, similar_tracks = sp_mod.get_preferred_attributes(self)
-            self._log.debug("Using preferred genres: {}", preferred_genres)
-            self._log.debug("Processing {} pre-filtered similar tracks", len(similar_tracks))
+        similar_tracks = []
+        preferred_attributes_failed = False
+        if any(p.get("id") in _PREFERRED_ATTRIBUTE_PLAYLIST_IDS for p in playlists_config):
+            try:
+                preferred_genres, similar_tracks = sp_mod.get_preferred_attributes(self)
+                self._log.debug("Using preferred genres: {}", preferred_genres)
+                self._log.debug("Processing {} pre-filtered similar tracks", len(similar_tracks))
+            except Exception as exc:  # noqa: BLE001 - isolate shared Plex failures
+                preferred_attributes_failed = True
+                self._log.error("Unable to compute preferred Plex attributes: {}", exc)
 
         # Process each playlist
         progress = self.create_progress_counter(
@@ -1885,44 +1938,73 @@ class PlexSync(BeetsPlugin):
             desc="Playlists",
             unit="list",
         )
+        completed = 0
+        unchanged = 0
+        failed = 0
+        skipped = 0
         try:
             for p in playlists_config:
                 playlist_type = p.get("type", "smart")
                 playlist_id = p.get("id")
                 playlist_name = p.get("name", "Unnamed playlist")
+                try:
+                    if (
+                        preferred_attributes_failed
+                        and playlist_id in _PREFERRED_ATTRIBUTE_PLAYLIST_IDS
+                    ):
+                        skipped += 1
+                        self._log.error(
+                            "Skipping {} because preferred Plex attributes are unavailable",
+                            playlist_name,
+                        )
+                        continue
 
-                if (playlist_type == "imported"):
-                    playlist_import.generate_imported_playlist(self, lib, p, plex_lookup)
-                elif playlist_id in ["daily_discovery", "forgotten_gems", "recent_hits", "fresh_favorites", "70s80s_flashback", "highly_rated", "most_played"]:
-                    if playlist_id == "daily_discovery":
-                        sp_mod.generate_daily_discovery(self, lib, p, plex_lookup, preferred_genres, similar_tracks)
-                    elif playlist_id == "forgotten_gems":
-                        sp_mod.generate_forgotten_gems(self, lib, p, plex_lookup, preferred_genres, similar_tracks)
-                    elif playlist_id == "recent_hits":
-                        sp_mod.generate_recent_hits(self, lib, p, plex_lookup, preferred_genres, similar_tracks)
-                    elif playlist_id == "fresh_favorites":
-                        sp_mod.generate_fresh_favorites(self, lib, p, plex_lookup, preferred_genres, similar_tracks)
-                    elif playlist_id == "70s80s_flashback":
-                        sp_mod.generate_70s80s_flashback(self, lib, p, plex_lookup, preferred_genres, similar_tracks)
-                    elif playlist_id == "highly_rated":
-                        sp_mod.generate_highly_rated_tracks(self, lib, p, plex_lookup, preferred_genres, similar_tracks)
-                    elif playlist_id == "most_played":
-                        sp_mod.generate_most_played_tracks(self, lib, p, plex_lookup, preferred_genres, similar_tracks)
-                else:
-                    self._log.warning(
-                        "Unrecognized playlist configuration '{}' - type: '{}', id: '{}'. "
-                        "Valid types are 'imported' or 'smart'. "
-                        "Valid smart playlist IDs are 'daily_discovery', 'forgotten_gems', 'recent_hits', 'fresh_favorites', '70s80s_flashback', 'highly_rated', and 'most_played'.",
-                        playlist_name, playlist_type, playlist_id
-                    )
-                if progress is not None:
-                    progress.update()
+                    result = None
+                    if playlist_type == "imported":
+                        result = playlist_import.generate_imported_playlist(
+                            self, lib, p, plex_lookup
+                        )
+                    elif playlist_id in _SMART_PLAYLIST_GENERATORS:
+                        generator_name, _ = _SMART_PLAYLIST_GENERATORS[playlist_id]
+                        generator = getattr(sp_mod, generator_name)
+                        result = generator(
+                            self, lib, p, plex_lookup, preferred_genres, similar_tracks
+                        )
+                    else:
+                        skipped += 1
+                        self._log.warning(
+                            "Unrecognized playlist configuration '{}' - type: '{}', id: '{}'. "
+                            "Valid types are 'imported' or 'smart'. Valid smart playlist IDs are "
+                            "'daily_discovery', 'forgotten_gems', 'recent_hits', 'fresh_favorites', "
+                            "'70s80s_flashback', 'highly_rated', and 'most_played'.",
+                            playlist_name, playlist_type, playlist_id,
+                        )
+                        continue
+
+                    if result:
+                        completed += 1
+                    else:
+                        unchanged += 1
+                except Exception as exc:  # noqa: BLE001 - isolate each playlist
+                    failed += 1
+                    self._log.error("Failed to update {} playlist: {}", playlist_name, exc)
+                finally:
+                    if progress is not None:
+                        progress.update()
         finally:
             if progress is not None:
                 try:
                     progress.close()
                 except Exception as exc:  # noqa: BLE001 - best effort cleanup
                     self._log.debug("Progress counter close failed: {}", exc)
+
+        self._log.info(
+            "Playlist run complete: {} updated, {} unchanged, {} failed, {} skipped",
+            completed,
+            unchanged,
+            failed,
+            skipped,
+        )
 
     def shutdown(self, lib):
         """Clean up when plugin is disabled."""

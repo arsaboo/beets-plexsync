@@ -160,8 +160,10 @@ def get_playlist_id(url: str) -> str:
     return playlist_id
 
 
-def get_playlist_tracks(plugin, playlist_id: str) -> List[Dict[str, Any]]:
-    """Return list of track items for a Spotify playlist (all pages)."""
+def get_playlist_tracks(
+    plugin, playlist_id: str, *, raise_on_error: bool = False
+) -> List[Dict[str, Any]]:
+    """Return all playlist track items, optionally propagating API failures."""
     try:
         tracks_response = plugin.sp.playlist_items(
             playlist_id, additional_types=["track"]
@@ -173,6 +175,8 @@ def get_playlist_tracks(plugin, playlist_id: str) -> List[Dict[str, Any]]:
         return tracks
     except spotipy.exceptions.SpotifyException as e:
         plugin._log.error("Failed to fetch playlist: {} - {}", playlist_id, str(e))
+        if raise_on_error:
+            raise
         return []
 
 
@@ -304,6 +308,10 @@ _SPOTIFY_SEARCH_CACHE_MAX = 5000
 _spotify_search_result_cache: Dict[str, Optional[str]] = {}
 
 
+class SpotifySearchError(RuntimeError):
+    """Spotify search was incomplete because one or more API calls failed."""
+
+
 def _cache_spotify_result(key: str, value: Optional[str]) -> None:
     """Store a result in the search cache, evicting oldest entries if full."""
     if len(_spotify_search_result_cache) >= _SPOTIFY_SEARCH_CACHE_MAX:
@@ -314,8 +322,14 @@ def _cache_spotify_result(key: str, value: Optional[str]) -> None:
     _spotify_search_result_cache[key] = value
 
 
-def search_spotify_track(plugin, beets_item) -> Optional[str]:
-    """Search for a track on Spotify with fallback strategies."""
+def search_spotify_track(
+    plugin, beets_item, *, raise_on_error: bool = False
+) -> Optional[str]:
+    """Search for a track on Spotify with fallback strategies.
+
+    When ``raise_on_error`` is true, any incomplete provider search raises
+    instead of being treated as an authoritative no-match result.
+    """
     cache_key = _spotify_search_cache_key(beets_item)
     if cache_key in _spotify_search_result_cache:
         cached = _spotify_search_result_cache[cache_key]
@@ -330,6 +344,7 @@ def search_spotify_track(plugin, beets_item) -> Optional[str]:
         lambda: f"{beets_item.title} {beets_item.artist}",
     ]
 
+    had_error = False
     for i, strategy in enumerate(search_strategies, 1):
         try:
             query = strategy()
@@ -374,21 +389,50 @@ def search_spotify_track(plugin, beets_item) -> Optional[str]:
                 plugin._log.debug("No results for strategy {}", i)
 
         except Exception as e:
+            had_error = True
             plugin._log.debug("Error in search strategy {}: {}", i, e)
             continue
+
+    if had_error:
+        if raise_on_error:
+            raise SpotifySearchError(
+                f"Spotify search was incomplete for {beets_item.artist} - {beets_item.title}"
+            )
+        # Do not persist an indeterminate result as a negative cache entry.
+        return None
 
     _cache_spotify_result(cache_key, None)
     return None
 
 
-def add_tracks_to_spotify_playlist(plugin, playlist_name: str, track_uris: List[str]) -> None:
-    """Sync new tracks to top, keep existing order below.
+def add_tracks_to_spotify_playlist(
+    plugin,
+    playlist_name: str,
+    track_uris: List[str],
+    *,
+    allow_removals: bool = True,
+) -> bool:
+    """Safely reconcile a Spotify playlist.
 
-    - Adds only the tracks missing from the current playlist at position 0
-      while preserving their relative order.
-    - Removes tracks that are no longer present in the target (optional cleanup).
-    - Uses non-overlapping 100-size chunks to avoid duplication.
+    Missing tracks are added and verified before obsolete tracks are removed.
+    ``allow_removals=False`` provides an add-only mode for incomplete source
+    resolution, preventing partial provider failures from deleting good tracks.
     """
+    # Validate before looking up or creating the destination playlist.
+    target_track_ids: List[str] = [
+        uri.replace("spotify:track:", "")
+        if isinstance(uri, str) and uri.startswith("spotify:track:")
+        else uri
+        for uri in track_uris
+        if uri
+    ]
+    if not target_track_ids:
+        plugin._log.error(
+            "Refusing to replace Spotify playlist {} with an empty target",
+            playlist_name,
+        )
+        return False
+
     user_id = plugin.sp.current_user()["id"]
     playlist_id = None
     playlists_response = plugin.sp.user_playlists(user_id, limit=50)
@@ -409,15 +453,10 @@ def add_tracks_to_spotify_playlist(plugin, playlist_name: str, track_uris: List[
             f"Playlist {playlist_name} created with id {playlist_id}"
         )
 
-    # Normalize target IDs preserving order and duplicates
-    target_track_ids: List[str] = [
-        uri.replace("spotify:track:", "") if isinstance(uri, str) and uri.startswith("spotify:track:") else uri
-        for uri in track_uris
-        if uri
-    ]
-
     # Fetch current playlist (ordered)
-    playlist_tracks = get_playlist_tracks(plugin, playlist_id)
+    playlist_tracks = get_playlist_tracks(
+        plugin, playlist_id, raise_on_error=True
+    )
     current_track_ids: List[str] = [
         t["track"]["id"] for t in playlist_tracks if t.get("track") and t["track"].get("id")
     ]
@@ -425,23 +464,17 @@ def add_tracks_to_spotify_playlist(plugin, playlist_name: str, track_uris: List[
     # Fast path: exact match (order and counts)
     if current_track_ids == target_track_ids:
         plugin._log.debug("Playlist is already in sync - no changes needed")
-        return
+        return False
 
-    # Remove tracks that are not in target at all
     current_counts = Counter(current_track_ids)
     target_counts = Counter(target_track_ids)
-    obsolete_ids = [tid for tid in current_counts.keys() if tid not in target_counts]
-    if obsolete_ids:
-        for i in range(0, len(obsolete_ids), 100):
-            chunk = obsolete_ids[i:i+100]
-            plugin.sp.user_playlist_remove_all_occurrences_of_tracks(
-                user_id, playlist_id, chunk
-            )
-        plugin._log.debug(f"Removed {len(obsolete_ids)} obsolete tracks from playlist {playlist_id}")
 
-    # Compute which tracks are missing (multiset difference), preserving order
+    # Compute which tracks are missing (multiset difference), preserving order.
     remaining_counts = Counter(
-        {tid: min(current_counts.get(tid, 0), target_counts.get(tid, 0)) for tid in set(current_counts) | set(target_counts)}
+        {
+            tid: min(current_counts.get(tid, 0), target_counts.get(tid, 0))
+            for tid in set(current_counts) | set(target_counts)
+        }
     )
     new_track_ids: List[str] = []
     temp_counts = Counter(remaining_counts)
@@ -451,11 +484,16 @@ def add_tracks_to_spotify_playlist(plugin, playlist_name: str, track_uris: List[
         else:
             new_track_ids.append(tid)
 
+    obsolete_ids = [tid for tid in current_counts if tid not in target_counts]
     plugin._log.debug(
-        f"Current={len(current_track_ids)} Target={len(target_track_ids)} New={len(new_track_ids)} Removed={len(obsolete_ids)}"
+        "Current={} Target={} New={} Removable={}",
+        len(current_track_ids),
+        len(target_track_ids),
+        len(new_track_ids),
+        len(obsolete_ids) if allow_removals else 0,
     )
 
-    # Add new tracks at top, preserving their order via reverse chunking
+    # Add and verify before any destructive cleanup.
     if new_track_ids:
         n = len(new_track_ids)
         idx = n
@@ -465,8 +503,45 @@ def add_tracks_to_spotify_playlist(plugin, playlist_name: str, track_uris: List[
             plugin.sp.user_playlist_add_tracks(user_id, playlist_id, chunk, position=0)
             idx -= 100
         plugin._log.debug(
-            f"Added {len(new_track_ids)} new tracks to top of playlist {playlist_id}"
+            "Added {} new tracks to top of playlist {}",
+            len(new_track_ids),
+            playlist_id,
         )
 
-    # Note: We are intentionally not reordering existing tracks to keep their
-    # relative order and "Date added" intact, per requirement.
+        verified_tracks = get_playlist_tracks(
+            plugin, playlist_id, raise_on_error=True
+        )
+        verified_counts = Counter(
+            item["track"]["id"]
+            for item in verified_tracks
+            if item.get("track") and item["track"].get("id")
+        )
+        missing_after_add = {
+            tid: count - verified_counts.get(tid, 0)
+            for tid, count in target_counts.items()
+            if verified_counts.get(tid, 0) < count
+        }
+        if missing_after_add:
+            raise RuntimeError(
+                f"Spotify did not add the complete target to playlist {playlist_name!r}"
+            )
+
+    if allow_removals and obsolete_ids:
+        for i in range(0, len(obsolete_ids), 100):
+            chunk = obsolete_ids[i:i + 100]
+            plugin.sp.user_playlist_remove_all_occurrences_of_tracks(
+                user_id, playlist_id, chunk
+            )
+        plugin._log.debug(
+            "Removed {} obsolete tracks from playlist {}",
+            len(obsolete_ids),
+            playlist_id,
+        )
+    elif not allow_removals and obsolete_ids:
+        plugin._log.warning(
+            "Skipped removing {} Spotify tracks because source resolution was incomplete",
+            len(obsolete_ids),
+        )
+
+    # Existing tracks intentionally retain their relative order and date added.
+    return bool(new_track_ids or (allow_removals and obsolete_ids))

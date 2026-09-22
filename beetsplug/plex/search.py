@@ -17,6 +17,11 @@ from beetsplug.plex.queues import LLMEnhancementItem, ManualPromptItem
 _ARTIST_JOINER_RE = re.compile(r"\s*(?:,|;|&| and |\+|/)\s*")
 _FEATURE_SPLIT_RE = re.compile(r"\s*(?:feat\.?|ft\.?|featuring|with)\s+", re.IGNORECASE)
 
+
+class PlexSearchError(RuntimeError):
+    """A Plex search could not determine whether a matching track exists."""
+
+
 def _split_artist_variants(artist: str | None) -> list[str]:
     """Return candidate artist strings for relaxed matching."""
     if not artist:
@@ -146,6 +151,7 @@ def search_plex_song(
     use_local_candidates=True,
     playlist_id=None,
     use_cache=True,
+    raise_on_error=False,
 ):
     """Fetch a Plex track using multi-strategy search for the given song.
 
@@ -205,7 +211,18 @@ def search_plex_song(
             if rating_key == -1 or rating_key is None:
                 if cleaned_metadata and not llm_attempted:
                     plugin._log.debug("Using cached cleaned metadata: {}", cleaned_metadata)
-                    result = search_plex_song(plugin, cleaned_metadata, False, llm_attempted=True, playlist_id=playlist_id)
+                    try:
+                        result = search_plex_song(
+                            plugin,
+                            cleaned_metadata,
+                            False,
+                            llm_attempted=True,
+                            playlist_id=playlist_id,
+                            raise_on_error=raise_on_error,
+                        )
+                    except PlexSearchError:
+                        _finish(None)
+                        raise
                     if result is not None:
                         plugin._log.debug(
                             "Cached cleaned metadata search succeeded, updating original cache: {}",
@@ -226,9 +243,12 @@ def search_plex_song(
                     cached_track = plugin.music.fetchItem(rating_key)
                     plugin._log.debug("Found cached match for: {} -> {}", song, cached_track.title)
                     return _finish(cached_track)
-            except Exception as exc:  # noqa: BLE001 - want to log original cache issue
-                plugin._log.debug("Failed to fetch cached item {}: {}", rating_key, exc)
-                plugin.cache.set(cache_key, None)
+            except Exception as exc:  # noqa: BLE001 - stale key or transient Plex error
+                plugin._log.debug(
+                    "Failed to fetch cached item {}; retrying live search: {}",
+                    rating_key,
+                    exc,
+                )
         else:
             if cached_result == -1:
                 plugin._log.debug("Found legacy cached skip result for: {}", song)
@@ -240,9 +260,12 @@ def search_plex_song(
                         "Found legacy cached match for: {} -> {}", song, cached_track.title
                     )
                     return _finish(cached_track)
-            except Exception as exc:  # noqa: BLE001 - log for debugging
-                plugin._log.debug("Failed to fetch legacy cached item {}: {}", cached_result, exc)
-                plugin.cache.set(cache_key, None)
+            except Exception as exc:  # noqa: BLE001 - stale key or transient Plex error
+                plugin._log.debug(
+                    "Failed to fetch legacy cached item {}; retrying live search: {}",
+                    cached_result,
+                    exc,
+                )
 
     candidate_variants: list[tuple[dict[str, str], float]] = []
     local_candidates = []
@@ -321,7 +344,11 @@ def search_plex_song(
                     llm_attempted=True,
                     use_local_candidates=False,
                     playlist_id=playlist_id,
+                    raise_on_error=raise_on_error,
                 )
+            except PlexSearchError:
+                _finish(None)
+                raise
             except RecursionError as exc:  # pragma: no cover - defensive
                 plugin._log.debug("Variant recursion failed for {}: {}", variant_song, exc)
                 continue
@@ -371,6 +398,7 @@ def search_plex_song(
 
     tracks = []
     search_strategies_tried: list[str] = []
+    search_incomplete = False
     if search_strategies_marker:
         search_strategies_tried.append(search_strategies_marker)
     
@@ -509,6 +537,7 @@ def search_plex_song(
                         ]
                         tracks = filtered_tracks
             except Exception as exc:  # noqa: BLE001 - log but continue
+                search_incomplete = True
                 plugin._log.debug("Artist+fuzzy search strategy failed: {}", exc)
 
         if len(tracks) == 0 and song.get("album"):
@@ -560,16 +589,22 @@ def search_plex_song(
                         len(tracks),
                     )
             except Exception as exc:  # noqa: BLE001 - log but continue
+                search_incomplete = True
                 plugin._log.debug("Fuzzy search strategy failed: {}", exc)
 
-    except Exception as exc:  # noqa: BLE001 - catch plexapi errors and continue
+    except Exception as exc:  # noqa: BLE001 - caller chooses fail-open or explicit error
         plugin._log.debug(
             "Error during multi-strategy search for {} - {}. Error: {}",
             song.get("album", ""),
             song.get("title", ""),
             exc,
         )
-        return _finish(None)
+        _finish(None)
+        if raise_on_error:
+            raise PlexSearchError(
+                f"Plex search failed for {song.get('artist', '')} - {song.get('title', '')}"
+            ) from exc
+        return None
 
     if len(tracks) == 1:
         result = tracks[0]
@@ -662,6 +697,12 @@ def search_plex_song(
             "Best match score {} below threshold for: {}", best_match[1], song["title"]
         )
 
+    if search_incomplete and raise_on_error:
+        _finish(None)
+        raise PlexSearchError(
+            f"Plex search was incomplete for {song.get('artist', '')} - {song.get('title', '')}"
+        )
+
     cleaned_metadata_for_negative = None
     _candidate_confirmations = getattr(plugin, "_candidate_confirmations", None)
     _has_good_candidates = bool(
@@ -709,7 +750,18 @@ def search_plex_song(
                 }
                 plugin._log.debug("Using LLM cleaned metadata: {}", cleaned_song)
 
-                result = search_plex_song(plugin, cleaned_song, False, llm_attempted=True, playlist_id=playlist_id)
+                try:
+                    result = search_plex_song(
+                        plugin,
+                        cleaned_song,
+                        False,
+                        llm_attempted=True,
+                        playlist_id=playlist_id,
+                        raise_on_error=raise_on_error,
+                    )
+                except PlexSearchError:
+                    _finish(None)
+                    raise
                 if result is not None:
                     plugin._log.debug(
                         "LLM-cleaned search succeeded, caching for original query: {}",
@@ -832,6 +884,9 @@ def search_plex_song(
         song,
         ", ".join(search_strategies_tried) if search_strategies_tried else "none",
     )
+    if search_incomplete:
+        # A timed-out strategy is not evidence that the track is absent.
+        return _finish(None)
     if cleaned_metadata_for_negative is not None:
         cache_result(cache_key, None, cleaned_metadata_for_negative)
     else:

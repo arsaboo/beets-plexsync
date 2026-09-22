@@ -4,9 +4,10 @@ from __future__ import annotations
 
 
 def _batch_check_availability(plugin, track_ids):
-    """Check availability of Spotify tracks in batches of 50.
+    """Check availability in batches of 50.
 
-    Returns a dict mapping track_id -> bool (True = playable).
+    Values are ``True`` (playable), ``False`` (authoritatively unavailable),
+    or ``None`` (the provider check failed and must not authorize removals).
     """
     availability = {}
     ids_to_check = [tid for tid in track_ids if tid]
@@ -29,9 +30,8 @@ def _batch_check_availability(plugin, track_ids):
                 availability[tid] = playable
         except Exception as exc:
             plugin._log.debug("Batch availability check failed: {}", exc)
-            # Mark all in this batch as unknown (will fall through to search)
             for tid in batch:
-                availability[tid] = False
+                availability[tid] = None
     return availability
 
 
@@ -57,9 +57,11 @@ def plex_to_spotify(plugin, lib, playlist, query_args=None):
 
     # Collect beets items in playlist order, filtering as needed
     ordered_beets_items = []
+    resolution_incomplete = False
     for item in plex_playlist_items:
         beets_item = plex_lookup.get(item.ratingKey)
         if not beets_item:
+            resolution_incomplete = True
             plugin._log.debug(
                 "Library not synced. Item not found in Beets: {} - {}",
                 item.parentTitle,
@@ -92,7 +94,10 @@ def plex_to_spotify(plugin, lib, playlist, query_args=None):
     try:
         for beets_item in ordered_beets_items:
             plugin._log.debug("Beets item: {}", beets_item)
-            spotify_track_id = _resolve_spotify_track(plugin, beets_item, availability)
+            spotify_track_id, had_error = _resolve_spotify_track(
+                plugin, beets_item, availability
+            )
+            resolution_incomplete = resolution_incomplete or had_error
             if spotify_track_id:
                 spotify_tracks.append(spotify_track_id)
             else:
@@ -131,7 +136,24 @@ def plex_to_spotify(plugin, lib, playlist, query_args=None):
             len(spotify_tracks) - len(deduplicated_tracks)
         )
 
-    plugin.add_tracks_to_spotify_playlist(playlist, deduplicated_tracks)
+    if not deduplicated_tracks:
+        plugin._log.error(
+            "Refusing to update Spotify playlist {} because no tracks resolved",
+            playlist,
+        )
+        return False
+
+    if resolution_incomplete:
+        plugin._log.warning(
+            "Spotify resolution was incomplete; updating {} in add-only mode",
+            playlist,
+        )
+    return plugin.add_tracks_to_spotify_playlist(
+        playlist,
+        deduplicated_tracks,
+        allow_removals=not resolution_incomplete,
+    )
+
 
 def _resolve_spotify_track(plugin, beets_item, availability=None):
     """Resolve a Spotify track ID for a beets item.
@@ -143,6 +165,7 @@ def _resolve_spotify_track(plugin, beets_item, availability=None):
         availability = {}
 
     spotify_track_id = None
+    had_error = False
     try:
         spotify_track_id = getattr(beets_item, 'spotify_track_id', None)
         plugin._log.debug("Spotify track id in beets: {}", spotify_track_id)
@@ -150,7 +173,15 @@ def _resolve_spotify_track(plugin, beets_item, availability=None):
         if spotify_track_id:
             # Use batch-checked availability if present
             if spotify_track_id in availability:
-                if not availability[spotify_track_id]:
+                availability_status = availability[spotify_track_id]
+                if availability_status is None:
+                    # Keep the known ID but prevent destructive cleanup.
+                    had_error = True
+                    plugin._log.debug(
+                        "Availability check failed for {}; retaining cached ID",
+                        spotify_track_id,
+                    )
+                elif not availability_status:
                     plugin._log.debug(
                         "Track {} is not playable (batch check), searching for alternatives",
                         spotify_track_id,
@@ -172,17 +203,25 @@ def _resolve_spotify_track(plugin, beets_item, availability=None):
                             spotify_track_id,
                         )
                         spotify_track_id = None
-                except Exception as exc:  # noqa: BLE001 - log but continue
+                except Exception as exc:  # noqa: BLE001 - retain known ID safely
+                    had_error = True
                     plugin._log.debug(
-                        "Error checking track availability {}: {}",
+                        "Error checking track availability {}; retaining cached ID: {}",
                         spotify_track_id,
                         exc,
                     )
-                    spotify_track_id = None
-    except Exception:
+    except Exception as exc:  # noqa: BLE001 - malformed local metadata
         spotify_track_id = None
-        plugin._log.debug("Spotify track_id not found in beets")
+        had_error = True
+        plugin._log.debug("Spotify track_id lookup failed in beets: {}", exc)
 
     if not spotify_track_id:
-        spotify_track_id = plugin._search_spotify_track(beets_item)
-    return spotify_track_id
+        try:
+            spotify_track_id = plugin._search_spotify_track(
+                beets_item, raise_on_error=True
+            )
+        except Exception as exc:  # noqa: BLE001 - caller must suppress removals
+            had_error = True
+            plugin._log.error("Spotify search failed for {}: {}", beets_item, exc)
+            spotify_track_id = None
+    return spotify_track_id, had_error

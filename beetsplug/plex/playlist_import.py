@@ -74,7 +74,15 @@ def _deduplicate_plex_tracks(tracks):
     return unique
 
 
-def _match_retry_and_drain(plugin, songs, manual_search, playlist_id, progress_desc):
+def _match_retry_and_drain(
+    plugin,
+    songs,
+    manual_search,
+    playlist_id,
+    progress_desc,
+    *,
+    raise_on_error=False,
+):
     """Match songs to Plex tracks with LLM retry and manual prompt draining.
 
     Returns (matched, unmatched): a deduplicated list of matched Plex tracks,
@@ -94,7 +102,10 @@ def _match_retry_and_drain(plugin, songs, manual_search, playlist_id, progress_d
     unmatched = []
     try:
         for song in songs_to_process:
-            found = plugin.search_plex_song(song, manual_search, playlist_id=playlist_id)
+            search_kwargs = {"playlist_id": playlist_id}
+            if raise_on_error:
+                search_kwargs["raise_on_error"] = True
+            found = plugin.search_plex_song(song, manual_search, **search_kwargs)
             if found is not None:
                 matched.append(found)
             else:
@@ -118,7 +129,10 @@ def _match_retry_and_drain(plugin, songs, manual_search, playlist_id, progress_d
         # drain phase ordering.
         still_unmatched = []
         for song in unmatched:
-            found = plugin.search_plex_song(song, False, playlist_id=playlist_id)
+            search_kwargs = {"playlist_id": playlist_id}
+            if raise_on_error:
+                search_kwargs["raise_on_error"] = True
+            found = plugin.search_plex_song(song, False, **search_kwargs)
             if found is not None:
                 matched.append(found)
             else:
@@ -203,7 +217,7 @@ def generate_imported_playlist(plugin, lib, playlist_config, plex_lookup=None):
     
     if not sources:
         plugin._log.warning("No sources defined for imported playlist {}", playlist_name)
-        return
+        return False
     
     plugin._log.info("Generating imported playlist {} from {} sources", playlist_name, len(sources))
     all_tracks = []
@@ -213,11 +227,14 @@ def generate_imported_playlist(plugin, lib, playlist_config, plex_lookup=None):
         unit="source",
     )
     
+    source_errors = 0
+    empty_sources = 0
     try:
         for source in sources:
             try:
                 tracks = []
                 src_desc = None
+                source_attempted = True
                 # String source (URL or file)
                 if isinstance(source, str):
                     src_desc = source
@@ -248,6 +265,7 @@ def generate_imported_playlist(plugin, lib, playlist_config, plex_lookup=None):
                         plugin._log.info("Importing from Tidal URL")
                         tracks = import_tidal_playlist(source, plugin.cache)
                     else:
+                        source_attempted = False
                         plugin._log.warning("Unsupported string source: {}", source)
                 # Dict source (typed)
                 elif isinstance(source, dict):
@@ -282,15 +300,21 @@ def generate_imported_playlist(plugin, lib, playlist_config, plex_lookup=None):
                         plugin._log.info("Importing from POST endpoint")
                         tracks = import_post_playlist(source, plugin.cache)
                     else:
+                        source_attempted = False
                         plugin._log.warning("Unsupported source type: {}", source_type)
                 else:
+                    source_attempted = False
                     src_desc = str(type(source))
                     plugin._log.warning("Invalid source format: {}", src_desc)
 
                 if tracks:
                     plugin._log.info("Imported {} tracks from {}", len(tracks), src_desc)
                     all_tracks.extend(tracks)
+                elif source_attempted:
+                    empty_sources += 1
+                    plugin._log.warning("Source {} returned no tracks", src_desc)
             except Exception as e:
+                source_errors += 1
                 plugin._log.error("Error importing from {}: {}", src_desc or "Unknown", e)
                 continue
             finally:
@@ -306,6 +330,12 @@ def generate_imported_playlist(plugin, lib, playlist_config, plex_lookup=None):
             except Exception:
                 plugin._log.debug("Failed to close source progress for {}", playlist_name)
     
+    if clear_playlist and (source_errors or empty_sources):
+        raise RuntimeError(
+            f"{source_errors} source(s) failed and {empty_sources} returned no tracks; "
+            f"refusing partial replacement of {playlist_name!r}"
+        )
+
     unique_tracks = []
     seen = set()
     for t in all_tracks:
@@ -325,6 +355,7 @@ def generate_imported_playlist(plugin, lib, playlist_config, plex_lookup=None):
     matched_songs, unmatched_songs = _match_retry_and_drain(
         plugin, unique_tracks, manual_search, playlist_id,
         f"{playlist_name[:18]} match",
+        raise_on_error=clear_playlist,
     )
 
     plugin._log.info("Matched {} tracks in Plex", len(matched_songs))
@@ -351,20 +382,24 @@ def generate_imported_playlist(plugin, lib, playlist_config, plex_lookup=None):
         f.write(f"Unique tracks after de-duplication: {len(unique_tracks)}\n")
         if filters:
             f.write(f"Tracks after applying filters: {len(matched_songs)}\n")
-        f.write(f"Tracks matched and added: {len(unique_matched)}\n")
-        f.write(f"\nImport completed at: {_dt.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"Tracks matched: {len(unique_matched)}\n")
+        f.write(f"\nMatching completed at: {_dt.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
     
     plugin._log.info("Found {} unique tracks after filtering (see {} for details)", len(unique_matched), log_file)
     
-    if clear_playlist:
-        try:
-            plugin._plex_clear_playlist(playlist_name)
-            plugin._log.info("Cleared existing playlist {}", playlist_name)
-        except Exception:
-            plugin._log.debug("No existing playlist {} found", playlist_name)
-    
-    if unique_matched:
-        plugin._plex_add_playlist_item(unique_matched, playlist_name)
-        plugin._log.info("Successfully created playlist {} with {} tracks", playlist_name, len(unique_matched))
-    else:
+    if not unique_matched:
         plugin._log.warning("No tracks remaining after filtering for {}", playlist_name)
+        return False
+
+    if clear_playlist:
+        updated = plugin._plex_replace_playlist_items(unique_matched, playlist_name)
+    else:
+        updated = plugin._plex_add_playlist_item(unique_matched, playlist_name)
+
+    if updated:
+        plugin._log.info(
+            "Successfully updated playlist {} with {} tracks",
+            playlist_name,
+            len(unique_matched),
+        )
+    return updated

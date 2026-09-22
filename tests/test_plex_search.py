@@ -90,6 +90,96 @@ class PlexSearchTests:
         result = self.search.search_plex_song(plugin, {'title': 'Song', 'artist': 'Artist'}, manual_search=False)
         assert result is track
 
+    def test_cached_fetch_error_falls_through_without_poisoning_cache(self):
+        class RecordingCache(CacheStub):
+            def __init__(self):
+                super().__init__()
+                self.set_calls = []
+
+            def set(self, query, value, cleaned_metadata=None):
+                self.set_calls.append((query, value, cleaned_metadata))
+                super().set(query, value, cleaned_metadata)
+
+        class Music:
+            def fetchItem(self, key):
+                raise RuntimeError('temporary Plex failure')
+
+            def searchTracks(self, **kwargs):
+                return []
+
+        cache = RecordingCache()
+        song = {'title': 'Song', 'artist': 'Artist', 'album': None}
+        cache.storage[cache._make_cache_key(song)] = (42, None)
+        plugin = types.SimpleNamespace(
+            _log=DummyLogger(),
+            cache=cache,
+            music=Music(),
+            search_llm=None,
+            manual_track_search=lambda query: None,
+            _cache_result=lambda *args, **kwargs: None,
+        )
+
+        result = self.search.search_plex_song(
+            plugin, song, manual_search=False
+        )
+
+        assert result is None
+        assert cache.set_calls == []
+
+    def test_explicit_error_mode_distinguishes_search_failure(self):
+        class Music:
+            def searchTracks(self, **kwargs):
+                raise RuntimeError('Plex offline')
+
+        plugin = types.SimpleNamespace(
+            _log=DummyLogger(),
+            cache=CacheStub(),
+            music=Music(),
+            search_llm=None,
+            manual_track_search=lambda query: None,
+            _cache_result=lambda *args, **kwargs: None,
+        )
+
+        with pytest.raises(self.search.PlexSearchError):
+            self.search.search_plex_song(
+                plugin,
+                {'title': 'Song', 'artist': 'Artist'},
+                manual_search=False,
+                use_cache=False,
+                raise_on_error=True,
+            )
+        assert plugin._candidate_confirmation_depth == 0
+
+    def test_partial_strategy_failure_is_not_a_confident_miss(self):
+        calls = {"count": 0}
+
+        class Music:
+            def searchTracks(self, **kwargs):
+                calls["count"] += 1
+                if calls["count"] >= 4:
+                    raise RuntimeError("strategy timed out")
+                return []
+
+        cache = CacheStub()
+        plugin = types.SimpleNamespace(
+            _log=DummyLogger(),
+            cache=cache,
+            music=Music(),
+            search_llm=None,
+            manual_track_search=lambda query: None,
+            _cache_result=lambda *args, **kwargs: cache.set(*args, **kwargs),
+        )
+
+        result = self.search.search_plex_song(
+            plugin,
+            {"title": "Song", "artist": "Artist", "album": "Album"},
+            manual_search=False,
+            use_cache=False,
+        )
+
+        assert result is None
+        assert cache.storage == {}
+
     def test_single_track_search_caches_result(self):
         track = types.SimpleNamespace(ratingKey=7, title='Match', parentTitle='Album')
 

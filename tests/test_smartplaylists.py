@@ -522,9 +522,8 @@ class BeetsCentricGenerationTest:
         )
         ps = types.SimpleNamespace(
             _log=log,
-            _plex_clear_playlist=lambda name: None,
-            _plex_add_playlist_item=lambda tracks, name: added.update(
-                tracks=list(tracks), name=name,
+            _plex_replace_playlist_items=lambda tracks, name: (
+                added.update(tracks=list(tracks), name=name) or True
             ),
         )
         rated = [self._item(i, "6", 50 + (i % 40)) for i in range(1, 96)]
@@ -643,9 +642,8 @@ class LiveRatingFloorTest:
         ps = types.SimpleNamespace(
             _log=_fake_log(),
             plex=object(),
-            _plex_clear_playlist=lambda name: None,
-            _plex_add_playlist_item=lambda tracks, name: added.update(
-                tracks=list(tracks), name=name,
+            _plex_replace_playlist_items=lambda tracks, name: (
+                added.update(tracks=list(tracks), name=name) or True
             ),
         )
 
@@ -678,3 +676,62 @@ class LiveRatingFloorTest:
         assert {t.plex_ratingkey for t in added["tracks"]} <= unrated_keys
         assert len(added["tracks"]) == 5
         assert all(t.plex_userrating in (None, 0) for t in added["tracks"])
+
+
+class SmartPlaylistRunnerIsolationTest:
+    def _plugin(self):
+        from beetsplug.plexsync import PlexSync
+
+        plugin = types.SimpleNamespace(
+            _log=_fake_log(),
+            _build_plex_lookup_and_vector_index=lambda lib: {},
+            create_progress_counter=lambda *args, **kwargs: None,
+        )
+        plugin.run = lambda lib, configs: PlexSync._plex_smartplaylists(
+            plugin, lib, configs
+        )
+        return plugin
+
+    def test_one_playlist_failure_does_not_abort_later_playlists(self, monkeypatch):
+        calls = []
+
+        def generate(ps, lib, config, *args):
+            calls.append(config["name"])
+            if config["name"] == "First":
+                raise RuntimeError("broken")
+            return True
+
+        monkeypatch.setattr(smartplaylists, "generate_recent_hits", generate)
+        plugin = self._plugin()
+        plugin.run(None, [
+            {"id": "recent_hits", "name": "First"},
+            {"id": "recent_hits", "name": "Second"},
+        ])
+
+        assert calls == ["First", "Second"]
+
+    def test_preferred_attribute_failure_skips_only_dependent_playlists(
+            self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(
+            smartplaylists,
+            "get_preferred_attributes",
+            lambda ps: (_ for _ in ()).throw(RuntimeError("Plex offline")),
+        )
+        monkeypatch.setattr(
+            smartplaylists,
+            "generate_recent_hits",
+            lambda ps, lib, config, *args: calls.append(config["name"]) or True,
+        )
+        monkeypatch.setattr(
+            smartplaylists,
+            "generate_daily_discovery",
+            lambda *args: calls.append("daily") or True,
+        )
+        plugin = self._plugin()
+        plugin.run(None, [
+            {"id": "daily_discovery", "name": "Daily"},
+            {"id": "recent_hits", "name": "Recent"},
+        ])
+
+        assert calls == ["Recent"]

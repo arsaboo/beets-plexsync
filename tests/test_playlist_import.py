@@ -280,6 +280,26 @@ class PlaylistImportTest:
         assert plugin.added == (['match-One', 'match-Two'], 'Mix')
         assert not plugin.last_manual
 
+    def test_strict_replacement_matching_propagates_search_errors(self):
+        logger = DummyLogger()
+
+        class ErrorPlugin(PluginStub):
+            def search_plex_song(
+                    self, song, manual_search=False, playlist_id=None,
+                    raise_on_error=False):
+                assert raise_on_error
+                raise RuntimeError("Plex offline")
+
+        with pytest.raises(RuntimeError, match="Plex offline"):
+            self.module._match_retry_and_drain(
+                ErrorPlugin(logger),
+                [{"title": "One"}],
+                False,
+                "Mix",
+                "Matching",
+                raise_on_error=True,
+            )
+
     def test_add_songs_to_plex_warns_when_empty(self):
         logger = DummyLogger()
 

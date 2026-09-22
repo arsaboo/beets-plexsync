@@ -17,6 +17,15 @@ class DummyLogger:
         pass
 
 
+class DateFieldTypeTests:
+    def test_datetime_string_parses_to_epoch_when_plugin_type_is_registered(self):
+        value = PlexSync.item_types["plex_lastviewedat"].parse(
+            "2025-08-21 11:12:46"
+        )
+        assert isinstance(value, float)
+        assert value > 0
+
+
 class SearchPlexTrackTests:
     """Unit tests for PlexSync.search_plex_track's delegation to search_plex_song.
 
@@ -178,6 +187,24 @@ def _sync_plugin(search_result=None):
 
 class ApplyPlexResultTests:
     """In-memory field updates (no store/write)."""
+
+    def test_search_error_is_skipped_without_clearing_existing_fields(self):
+        item = FakeBeetsItem(title="Mapped", plex_ratingkey=123)
+        plugin = _sync_plugin()
+
+        def fail_search(_item):
+            raise RuntimeError("Plex offline")
+
+        plugin.search_plex_track = fail_search
+        returned_item, result = PlexSync._search_plex_item(
+            plugin, 1, item, True, 1
+        )
+
+        assert returned_item is item
+        assert result is PlexSync._PLEX_SEARCH_SKIP
+        assert item.plex_ratingkey == 123
+
+
 
     def test_clears_stale_plex_fields_when_no_longer_matched(self):
         item = FakeBeetsItem(

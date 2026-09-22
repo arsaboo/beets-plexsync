@@ -1395,7 +1395,7 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
 
     if not selected_items:
         ps._log.warning("No tracks matched criteria for {} playlist", playlist_name)
-        return
+        return False
 
     # Convert beets items to Plex tracks for special playlists
     if special_handling:
@@ -1417,36 +1417,44 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
                 else:
                     items_without_keys.append(item)
 
+        unresolved_items = []
         for item in items_without_keys:
             try:
                 # Use the same confidence-thresholded, multi-strategy matcher
-                # as the library sync (search_plex_track) instead of taking
-                # Plex's raw first search hit unconditionally - an
-                # unconditional tracks[0] can silently add the wrong track
-                # (or the same wrong track for two different items) when
-                # title/artist/album aren't an exact match.
+                # as the library sync instead of taking Plex's first raw hit.
                 track = ps.search_plex_track(item)
                 if track is not None:
                     plex_tracks.append(track)
-            except Exception:
-                continue
+                else:
+                    unresolved_items.append(item)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Plex resolution failed while building {playlist_name!r}"
+                ) from exc
 
+        if unresolved_items:
+            ps._log.error(
+                "Refusing partial replacement of {}: {} selected tracks could not be resolved",
+                playlist_name,
+                len(unresolved_items),
+            )
+            return False
         if not plex_tracks:
             ps._log.warning("Could not find any Plex tracks for {} playlist", playlist_name)
-            return
+            return False
 
         selected_tracks = plex_tracks
     else:
         selected_tracks = selected_items
 
-    try:
-        ps._plex_clear_playlist(playlist_name)
-        ps._log.info("Cleared existing {} playlist", playlist_name)
-    except Exception:
-        ps._log.debug("No existing {} playlist found", playlist_name)
-
-    ps._plex_add_playlist_item(selected_tracks, playlist_name)
-    ps._log.info("Successfully updated {} playlist with {} tracks", playlist_name, len(selected_tracks))
+    updated = ps._plex_replace_playlist_items(selected_tracks, playlist_name)
+    if updated:
+        ps._log.info(
+            "Successfully updated {} playlist with {} tracks",
+            playlist_name,
+            len(selected_tracks),
+        )
+    return updated
 
 
 def calculate_playlist_proportions(ps, max_tracks, discovery_ratio):
@@ -1614,27 +1622,28 @@ def apply_playlist_filters(ps, tracks, filter_config):
 
 
 def generate_daily_discovery(ps, lib, dd_config, plex_lookup, preferred_genres, similar_tracks):
-    generate_unified_playlist(ps, lib, dd_config, plex_lookup, preferred_genres, similar_tracks, "daily_discovery")
+    return generate_unified_playlist(ps, lib, dd_config, plex_lookup, preferred_genres, similar_tracks, "daily_discovery")
+
 
 def generate_forgotten_gems(ps, lib, fg_config, plex_lookup, preferred_genres, similar_tracks):
-    generate_unified_playlist(ps, lib, fg_config, plex_lookup, preferred_genres, similar_tracks, "forgotten_gems")
+    return generate_unified_playlist(ps, lib, fg_config, plex_lookup, preferred_genres, similar_tracks, "forgotten_gems")
 
 
 def generate_recent_hits(ps, lib, rh_config, plex_lookup, preferred_genres, similar_tracks):
-    generate_unified_playlist(ps, lib, rh_config, plex_lookup, preferred_genres, similar_tracks, "recent_hits")
+    return generate_unified_playlist(ps, lib, rh_config, plex_lookup, preferred_genres, similar_tracks, "recent_hits")
 
 
 def generate_fresh_favorites(ps, lib, ff_config, plex_lookup, preferred_genres, similar_tracks):
-    generate_unified_playlist(ps, lib, ff_config, plex_lookup, preferred_genres, similar_tracks, "fresh_favorites")
+    return generate_unified_playlist(ps, lib, ff_config, plex_lookup, preferred_genres, similar_tracks, "fresh_favorites")
 
 
 def generate_70s80s_flashback(ps, lib, fb_config, plex_lookup, preferred_genres, similar_tracks):
-    generate_unified_playlist(ps, lib, fb_config, plex_lookup, preferred_genres, similar_tracks, "70s80s_flashback")
+    return generate_unified_playlist(ps, lib, fb_config, plex_lookup, preferred_genres, similar_tracks, "70s80s_flashback")
 
 
 def generate_highly_rated_tracks(ps, lib, hr_config, plex_lookup, preferred_genres, similar_tracks):
-    generate_unified_playlist(ps, lib, hr_config, plex_lookup, preferred_genres, similar_tracks, "highly_rated")
+    return generate_unified_playlist(ps, lib, hr_config, plex_lookup, preferred_genres, similar_tracks, "highly_rated")
 
 
 def generate_most_played_tracks(ps, lib, mp_config, plex_lookup, preferred_genres, similar_tracks):
-    generate_unified_playlist(ps, lib, mp_config, plex_lookup, preferred_genres, similar_tracks, "most_played")
+    return generate_unified_playlist(ps, lib, mp_config, plex_lookup, preferred_genres, similar_tracks, "most_played")
