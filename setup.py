@@ -33,7 +33,6 @@ setup(
         'instructor>=1.0',
         'tavily-python',
         'exa_py',
-        'brave-search',
         'scipy',
         'numpy',
         'pytz',
