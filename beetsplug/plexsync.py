@@ -51,7 +51,7 @@ from beetsplug.ai.llm import (
 )
 from beetsplug.core.matching import clean_string, plex_track_distance
 from beetsplug.core.vector_index import BeetsVectorIndex, read_item_metadata
-from beetsplug.utils.helpers import plex_key
+from beetsplug.utils.helpers import media_identity, plex_key, plex_media_path
 from beetsplug.providers.apple import import_apple_playlist
 from beetsplug.providers.jiosaavn import import_jiosaavn_playlist
 from beetsplug.plex.queues import (
@@ -1049,15 +1049,63 @@ class PlexSync(BeetsPlugin):
                 self._log.debug("Cleared stale Plex fields for: {}", item)
             return cleared
 
+        library_dir = getattr(getattr(item, "_db", None), "directory", None)
+        verdict = media_identity(item, plex_track, library_dir)
+        if verdict == "different":
+            # The candidate is provably another copy of this song (compilation,
+            # re-release), so neither its ratings nor its play history belong to
+            # this item. Leave the item exactly as it is.
+            self._log.warning(
+                "Plex match {} is {} not {}; keeping stored data",
+                plex_track.ratingKey,
+                plex_media_path(plex_track),
+                item,
+            )
+            return False
+
         item.plex_guid = plex_track.guid
         item.plex_ratingkey = plex_track.ratingKey
-        item.plex_userrating = plex_track.userRating
-        item.plex_skipcount = plex_track.skipCount
-        item.plex_viewcount = plex_track.viewCount
-        item.plex_lastviewedat = plex_track.lastViewedAt
-        item.plex_lastratedat = plex_track.lastRatedAt
+        stats = (
+            ("plex_userrating", plex_track.userRating),
+            ("plex_skipcount", plex_track.skipCount),
+            ("plex_viewcount", plex_track.viewCount),
+            ("plex_lastviewedat", plex_track.lastViewedAt),
+            ("plex_lastratedat", plex_track.lastRatedAt),
+        )
+        if verdict != "unknown":
+            for field, value in stats:
+                setattr(item, field, value)
+        else:
+            # No path evidence either way, so an absent statistic must not erase
+            # what a verified sync already recorded.
+            for field, value in stats:
+                if value or field not in item:
+                    setattr(item, field, value)
         item.plex_updated = time.time()
         return True
+
+    def _resolve_plex_track_by_key(self, item):
+        """Return the Plex item ``item`` already points at, when verifiable.
+
+        A stored ``plex_ratingkey`` names one specific file, so resolving it
+        beats a metadata search that can land on another copy of the same song
+        and carry that copy's ratings and play history. Returns None when there
+        is no key, the key no longer resolves, or the file behind it differs.
+        """
+        key = plex_key(getattr(item, "plex_ratingkey", None))
+        if key is None:
+            return None
+        try:
+            track = self.music.fetchItem(key)
+        except Exception as exc:  # noqa: BLE001 - stale key or transient Plex error
+            self._log.debug("Stored Plex key {} unavailable for {}: {}", key, item, exc)
+            return None
+        if media_identity(item, track, getattr(getattr(item, "_db", None), "directory", None)) == "different":
+            self._log.debug(
+                "Stored Plex key {} points at another file than {}; searching Plex by metadata", key, item
+            )
+            return None
+        return track
 
     def _search_plex_item(self, index, item, force, items_len):
         """Plex HTTP search only. Returns (item, plex_track | None | SKIP)."""
@@ -1066,7 +1114,10 @@ class PlexSync(BeetsPlugin):
             self._log.debug("Plex rating already present for: {}", item)
             return item, self._PLEX_SEARCH_SKIP
         try:
-            return item, self.search_plex_track(item)
+            track = self._resolve_plex_track_by_key(item)
+            if track is None:
+                track = self.search_plex_track(item)
+            return item, track
         except Exception as exc:  # noqa: BLE001 - keep the rest of the sync going
             self._log.error("Error searching Plex for {}: {}", item, exc)
             return item, self._PLEX_SEARCH_SKIP

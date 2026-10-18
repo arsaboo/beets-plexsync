@@ -179,6 +179,9 @@ def _sync_plugin(search_result=None):
     plugin._apply_plex_result = lambda item, track: PlexSync._apply_plex_result(
         plugin, item, track
     )
+    plugin._resolve_plex_track_by_key = lambda item: (
+        PlexSync._resolve_plex_track_by_key(plugin, item)
+    )
     plugin._search_plex_item = lambda index, item, force, items_len: (
         PlexSync._search_plex_item(plugin, index, item, force, items_len)
     )
