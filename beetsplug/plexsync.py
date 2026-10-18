@@ -43,7 +43,12 @@ from plexapi import exceptions
 from plexapi.server import PlexServer
 
 from beetsplug.core.cache import Cache
-from beetsplug.ai.llm import SongRecommendations
+from beetsplug.ai.llm import (
+    SongRecommendations,
+    normalize_reasoning_effort,
+    reasoning_kwargs,
+    reasoning_rejected,
+)
 from beetsplug.core.matching import clean_string, plex_track_distance
 from beetsplug.core.vector_index import BeetsVectorIndex, read_item_metadata
 from beetsplug.providers.apple import import_apple_playlist
@@ -209,11 +214,13 @@ class PlexSync(BeetsPlugin):
                 "api_key": "",
                 "model": "gpt-3.5-turbo",
                 "base_url": "",  # Optional, for other providers
+                "reasoning_effort": "",  # none|minimal|low|medium|high|xhigh|max; empty = server default
                 "search": {
                     "provider": "",  # Auto-detect: uses OpenAI if llm.api_key is set, otherwise Ollama
                     "api_key": "",  # Will use base key if empty
                     "base_url": "",  # Will use base base_url if empty
                     "model": "",  # Will use base model if empty (for OpenAI) or default (for Ollama)
+                    "reasoning_effort": "",  # Will use base reasoning_effort if empty
                 }
             }
         )
@@ -1668,14 +1675,27 @@ class PlexSync(BeetsPlugin):
         """
         messages = [{"role": "system", "content": sys_prompt}]
         messages.append({"role": "user", "content": prompt})
+        effort = normalize_reasoning_effort(config["llm"]["reasoning_effort"].get())
         try:
             self._log.info("Sending request to LLM service")
             chat = self.llm_client.chat.completions.create(
-                model=model, messages=messages, temperature=0.7
+                model=model, messages=messages, temperature=0.7, **reasoning_kwargs(effort)
             )
         except Exception as e:
-            self._log.error("Unable to connect to LLM service. Error: {}", e)
-            return
+            if effort and reasoning_rejected(e):
+                self._log.warning(
+                    "LLM service rejected reasoning_effort='{}'; retrying without it", effort
+                )
+                try:
+                    chat = self.llm_client.chat.completions.create(
+                        model=model, messages=messages, temperature=0.7
+                    )
+                except Exception as retry_exc:
+                    self._log.error("Unable to connect to LLM service. Error: {}", retry_exc)
+                    return
+            else:
+                self._log.error("Unable to connect to LLM service. Error: {}", e)
+                return
         reply = chat.choices[0].message.content
         tokens = chat.usage.total_tokens
         self._log.debug("LLM service used {} tokens and replied: {}", tokens, reply)

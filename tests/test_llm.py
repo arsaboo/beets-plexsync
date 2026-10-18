@@ -51,6 +51,7 @@ class LLMSearchTest:
                         'api_key': '',
                         'base_url': '',
                         'model': '',
+                        'reasoning_effort': '',
                     },
                 }
             },
@@ -107,3 +108,48 @@ class LLMSearchTest:
         # Agno is also not available in test environment, so ollama_agent will be None
         # This test just verifies the attribute exists
         assert hasattr(toolkit, 'ollama_agent')
+
+    def test_normalize_reasoning_effort(self):
+        norm = self.llm.normalize_reasoning_effort
+        assert norm('') is None
+        assert norm(None) is None
+        assert norm('  Low ') == 'low'
+        assert norm('NONE') == 'none'
+        assert norm('unlimited') is None
+
+    def test_reasoning_kwargs(self):
+        assert self.llm.reasoning_kwargs(None) == {}
+        assert self.llm.reasoning_kwargs('low') == {'reasoning_effort': 'low'}
+        assert self.llm.reasoning_kwargs('none') == {
+            'reasoning_effort': 'none',
+            'extra_body': {'thinking': {'type': 'disabled'}},
+        }
+
+    def test_reasoning_rejected_detection(self):
+        assert self.llm.reasoning_rejected(Exception("Unsupported parameter: 'reasoning_effort'"))
+        assert self.llm.reasoning_rejected(Exception("thinking is not supported"))
+        assert not self.llm.reasoning_rejected(Exception('connection reset by peer'))
+
+    def test_unknown_reasoning_effort_is_ignored(self):
+        toolkit = self.llm.MusicSearchTools(provider='openai', reasoning_effort='unlimited')
+        assert toolkit.reasoning_effort is None
+        assert toolkit._reasoning_kwargs() == {}
+
+    def test_reasoning_kwargs_for_openai_provider(self):
+        toolkit = self.llm.MusicSearchTools(
+            provider='openai', api_key='k', base_url='http://x/v1', reasoning_effort='minimal'
+        )
+        assert toolkit._reasoning_kwargs() == {'reasoning_effort': 'minimal'}
+
+    def test_ollama_provider_ignores_reasoning_effort(self):
+        toolkit = self.llm.MusicSearchTools(provider='ollama', reasoning_effort='none')
+        assert toolkit.reasoning_effort == 'none'
+        assert toolkit._reasoning_kwargs() == {}
+
+    def test_disable_reasoning_stops_sending_controls(self):
+        toolkit = self.llm.MusicSearchTools(
+            provider='openai', api_key='k', base_url='http://x/v1', reasoning_effort='none'
+        )
+        toolkit._disable_reasoning(Exception("Unsupported parameter: 'reasoning_effort'"))
+        assert toolkit._reasoning_rejected is True
+        assert toolkit._reasoning_kwargs() == {}

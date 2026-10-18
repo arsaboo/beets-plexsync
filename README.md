@@ -259,6 +259,14 @@ spotify:
       brave_api_key: "your-brave-api-key"
   ```
 
+  Reasoning models can be capped with `reasoning_effort` (`none`, `minimal`,
+  `low`, `medium`, `high`, `xhigh`, `max`; empty = server default). Set it at
+  `llm.reasoning_effort` for `beet plexsonic`, or `llm.search.reasoning_effort`
+  for search and metadata extraction, which falls back to `llm.reasoning_effort`
+  when empty. On OpenAI-compatible backends a value of `none` both asks for no
+  reasoning and sends a nested "thinking disabled" hint, since some servers only
+  honour that spelling; Ollama ignores the option (use a `:no_think` tag there).
+
   Common pitfall: setting only `llm.search.provider: "ollama"` does not change `beet plexsonic`; that command reads only top-level `llm.*` values.
   
   **Advanced: Override search-specific settings**:

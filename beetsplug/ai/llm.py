@@ -65,11 +65,13 @@ except ImportError:
 
 # Add default configuration for LLM search
 config['llm'].add({
+    'reasoning_effort': '',  # none|minimal|low|medium|high|xhigh|max; empty = server default
     'search': {
         'provider': '',  # Auto-detect: uses OpenAI if llm.api_key is set, otherwise Ollama
         'api_key': '',  # Will fall back to llm.api_key if empty
         'base_url': '',  # Will fall back to llm.base_url if empty
         'model': '',  # Will fall back to llm.model if empty (when using OpenAI), or 'qwen3:latest' for Ollama
+        'reasoning_effort': '',  # Will fall back to llm.reasoning_effort if empty
         'ollama_host': 'http://localhost:11434',
         'tavily_api_key': '',
         'searxng_host': '',
@@ -77,6 +79,43 @@ config['llm'].add({
         'brave_api_key': '',
     }
 })
+
+
+# Allowed reasoning_effort values; anything else is ignored.
+VALID_REASONING_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+
+
+def normalize_reasoning_effort(value):
+    """Validate a configured reasoning effort; unknown values are ignored."""
+    if not value or not isinstance(value, str):
+        return None
+    effort = value.strip().lower()
+    if not effort:
+        return None
+    if effort not in VALID_REASONING_EFFORTS:
+        logger.warning(
+            "Ignoring unknown reasoning_effort '{}'; valid values: {}",
+            effort,
+            ", ".join(VALID_REASONING_EFFORTS),
+        )
+        return None
+    return effort
+
+
+def reasoning_kwargs(effort):
+    """Request kwargs for OpenAI-compatible endpoints (agno forwards these as-is)."""
+    if not effort:
+        return {}
+    kwargs = {"reasoning_effort": effort}
+    if effort == "none":
+        kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+    return kwargs
+
+
+def reasoning_rejected(exc):
+    """True when the server refused reasoning controls."""
+    text = str(exc).lower()
+    return "reasoning_effort" in text or "thinking" in text
 
 
 class SongBasicInfo(BaseModel):
@@ -114,7 +153,7 @@ class MusicSearchTools:
     # Class variable to track last Brave Search request time
     _last_brave_request_time = 0
 
-    def __init__(self, tavily_api_key=None, searxng_host=None, model_id=None, ollama_host=None, exa_api_key=None, brave_api_key=None, provider='ollama', api_key=None, base_url=None):
+    def __init__(self, tavily_api_key=None, searxng_host=None, model_id=None, ollama_host=None, exa_api_key=None, brave_api_key=None, provider='ollama', api_key=None, base_url=None, reasoning_effort=None):
         """Initialize music search tools with available search providers.
 
         Args:
@@ -127,6 +166,7 @@ class MusicSearchTools:
             provider: LLM provider ('ollama' or 'openai')
             api_key: API key for OpenAI-compatible providers
             base_url: Base URL for OpenAI-compatible providers
+            reasoning_effort: Optional reasoning effort cap (OpenAI-compatible providers)
         """
         self.name = "music_search_tools"
         self.provider = provider
@@ -134,6 +174,10 @@ class MusicSearchTools:
         self.ollama_host = ollama_host or "http://localhost:11434"
         self.api_key = api_key
         self.base_url = base_url
+        self.reasoning_effort = normalize_reasoning_effort(reasoning_effort)
+        # Latched after a provider refuses reasoning controls.
+        self._reasoning_rejected = False
+        self._tool_args = (tavily_api_key, searxng_host, exa_api_key, brave_api_key)
         self.search_agent = None
 
         # Initialize LLM agent for extraction (required for all search methods)
@@ -144,6 +188,32 @@ class MusicSearchTools:
 
         # Log available search providers
         self._log_available_providers()
+
+    def _reasoning_kwargs(self):
+        """Reasoning kwargs for this provider, or {} when not applicable."""
+        if not self.reasoning_effort or self._reasoning_rejected:
+            return {}
+        if self.provider == 'ollama':
+            # Ollama has no reasoning_effort field.
+            logger.debug("reasoning_effort is not supported for the ollama provider; ignoring")
+            return {}
+        return reasoning_kwargs(self.reasoning_effort)
+
+    def _disable_reasoning(self, exc) -> None:
+        """Stop sending reasoning controls after a provider rejects them."""
+        if self._reasoning_rejected:
+            return
+        self._reasoning_rejected = True
+        logger.warning(
+            "Provider rejected reasoning_effort='{}' ({}); continuing without reasoning controls",
+            self.reasoning_effort,
+            exc,
+        )
+        try:
+            self._init_llm_agent()
+            self._init_search_agent(*self._tool_args)
+        except Exception as rebuild_exc:  # noqa: BLE001 - keep search alive
+            logger.debug("Failed to rebuild agents without reasoning controls: {}", rebuild_exc)
 
     def _create_model(self):
         """Create a model (Ollama or OpenAI-compatible) based on provider settings.
@@ -169,6 +239,7 @@ class MusicSearchTools:
                     model_args["api_key"] = self.api_key
                 if self.base_url:
                     model_args["base_url"] = self.base_url
+                model_args.update(self._reasoning_kwargs())
                 model = OpenAILike(**model_args)
                 logger.debug("Initializing OpenAI-compatible agent with model {}", self.model_id)
                 return model
@@ -294,6 +365,22 @@ class MusicSearchTools:
             provider_type = "OpenAI-compatible" if self.provider != 'ollama' else "Ollama"
             logger.info("Using {} model '{}' for result extraction and tool selection", provider_type, self.model_id)
 
+    def _content_from_response(self, response) -> str:
+        """Extract response text, unwrapping tool JSON payloads."""
+        content = getattr(response, 'content', str(response))
+
+        # Handle JSON string responses from tools like Tavily
+        try:
+            data = json.loads(content)
+            if isinstance(data, dict) and "answer" in data:
+                return data["answer"]
+            if isinstance(data, dict) and "results" in data:
+                return json.dumps(data["results"])
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+        return content
+
     def _search(self, song_name: str) -> Optional[str]:
         """Query the search agent for song information.
 
@@ -313,25 +400,17 @@ class MusicSearchTools:
 
         query = f"{song_name} song album, title, and artist. Please respond in English only."
         logger.debug("Unified search querying: {}", query)
-        try:
-            response = self.search_agent.run(query, timeout=30)  # Increased timeout from 20 to 30 seconds
-            content = getattr(response, 'content', str(response))
-
-            # Handle JSON string responses from tools like Tavily
+        for attempt in (1, 2):
             try:
-                data = json.loads(content)
-                if isinstance(data, dict) and "answer" in data:
-                    return data["answer"]
-                if isinstance(data, dict) and "results" in data:
-                    return json.dumps(data["results"])
-            except (json.JSONDecodeError, TypeError):
-                # Not a JSON string, so return content as is
-                pass
-
-            return content
-        except Exception as e:
-            logger.warning("Unified search failed: {}", e)
-            return None
+                response = self.search_agent.run(query, timeout=30)
+                return self._content_from_response(response)
+            except Exception as e:
+                if attempt == 1 and self._reasoning_kwargs() and reasoning_rejected(e):
+                    self._disable_reasoning(e)
+                    continue
+                logger.warning("Unified search failed: {}", e)
+                return None
+        return None
 
     def _get_search_results(self, song_name: str) -> Dict[str, str]:
         """Get search results from available search engines."""
@@ -416,6 +495,28 @@ class MusicSearchTools:
 
 
 
+    def _extract_with_instructor(self, prompt: str):
+        """Run structured extraction, retrying once without reasoning controls."""
+        messages = [{"role": "user", "content": prompt}]
+        for index, kwargs in enumerate((self._reasoning_kwargs(), {})):
+            try:
+                response = self.instructor_client.chat.completions.create(
+                    model=self.model_id,
+                    response_model=SongBasicInfo,
+                    messages=messages,
+                    max_retries=2,
+                    **kwargs
+                )
+                logger.debug("Successfully extracted song info using instructor")
+                return response
+            except Exception as e:
+                if index == 0 and kwargs and reasoning_rejected(e):
+                    self._disable_reasoning(e)
+                    continue
+                logger.warning("instructor extraction failed: {}. Falling back to Agno.", e)
+                return None
+        return None
+
     def _extract_song_details(self, content: str, song_name: str) -> SongBasicInfo:
         """Extract structured song details from search results.
 
@@ -434,18 +535,10 @@ class MusicSearchTools:
 
         # Use instructor if available (preferred path with guaranteed structured output)
         if self.instructor_client:
-            try:
-                response = self.instructor_client.chat.completions.create(
-                    model=self.model_id,
-                    response_model=SongBasicInfo,
-                    messages=[{"role": "user", "content": prompt}],
-                    max_retries=2
-                )
-                logger.debug("Successfully extracted song info using instructor")
+            response = self._extract_with_instructor(prompt)
+            if response is not None:
                 return response
-            except Exception as e:
-                logger.warning("instructor extraction failed: {}. Falling back to Agno.", e)
-                # Fall through to Agno fallback
+            # Fall through to Agno fallback
         
         # Fallback to Agno agent (less reliable structured output)
         if not self.ollama_agent:
@@ -543,6 +636,11 @@ def initialize_search_toolkit():
         else:
             model_id = "qwen3:latest"
 
+    # Prefer search-specific reasoning effort.
+    reasoning_effort = config["llm"]["search"]["reasoning_effort"].get()
+    if not reasoning_effort:
+        reasoning_effort = config["llm"]["reasoning_effort"].get()
+
     # Get Ollama-specific configuration
     ollama_host = config["llm"]["search"]["ollama_host"].get() or "http://localhost:11434"
 
@@ -565,7 +663,8 @@ def initialize_search_toolkit():
             brave_api_key=brave_api_key,
             provider=provider,
             api_key=api_key,
-            base_url=base_url
+            base_url=base_url,
+            reasoning_effort=reasoning_effort
         )
     except Exception as e:
         logger.error("Failed to initialize search toolkit: {}", e)
