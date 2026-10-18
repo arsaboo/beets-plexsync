@@ -45,7 +45,7 @@ from plexapi.server import PlexServer
 from beetsplug.core.cache import Cache
 from beetsplug.ai.llm import SongRecommendations
 from beetsplug.core.matching import clean_string, plex_track_distance
-from beetsplug.core.vector_index import BeetsVectorIndex
+from beetsplug.core.vector_index import BeetsVectorIndex, read_item_metadata
 from beetsplug.providers.apple import import_apple_playlist
 from beetsplug.providers.jiosaavn import import_jiosaavn_playlist
 from beetsplug.plex.queues import (
@@ -329,6 +329,21 @@ class PlexSync(BeetsPlugin):
         if current_index is not None:
             return current_index
 
+        vector_index = BeetsVectorIndex()
+        rows = read_item_metadata(db_path) if db_path else None
+        if rows is not None:
+            for metadata in rows:
+                item_id = metadata.get("id")
+                if item_id is None:
+                    continue
+                vector_index.add_item(item_id, metadata)
+            self._update_vector_index(vector_index, db_path=db_path)
+            return vector_index
+
+        self._log.debug(
+            "Raw library read unavailable for {}; falling back to the ORM",
+            db_path or "<unknown library>",
+        )
         source_lib = lib
         close_after = False
         if source_lib is None:
@@ -345,7 +360,6 @@ class PlexSync(BeetsPlugin):
                 return None
 
         try:
-            vector_index = BeetsVectorIndex()
             for item in source_lib.items():
                 metadata = self._extract_vector_metadata(item)
                 item_id = metadata.get("id")
