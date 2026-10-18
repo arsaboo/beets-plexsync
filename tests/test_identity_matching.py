@@ -183,3 +183,96 @@ class ApplyResultTests:
         assert item.plex_guid == "stored-guid"
         assert item.plex_userrating == 6.0
         assert item.plex_viewcount == 3
+
+
+SIBLING_01 = "/data/music/Hindi Music/S/OST (2017)/OST (2017) - Jogi [01].mp3"
+SIBLING_06 = "/data/music/Hindi Music/S/OST (2017)/OST (2017) - Jogi [06].mp3"
+REL_SIBLING_06 = b"Hindi Music/S/OST (2017)/OST (2017) - Jogi [06].mp3"
+
+
+class ResolveByPathTests:
+    """Two tracks sharing a title on one album cannot be told apart by metadata."""
+
+    def _plugin(self, tracks, key_track=None):
+        album = types.SimpleNamespace(title="OST (2017)", tracks=lambda: tracks)
+        return types.SimpleNamespace(
+            _log=types.SimpleNamespace(
+                debug=lambda *a, **k: None, warning=lambda *a, **k: None,
+                info=lambda *a, **k: None, error=lambda *a, **k: None,
+            ),
+            music=types.SimpleNamespace(
+                searchAlbums=lambda title: [album],
+                fetchItem=lambda key: key_track,
+            ),
+        )
+
+    def test_walks_the_album_to_the_exact_file(self):
+        plugin = self._plugin([
+            plex_track(key=1, file=SIBLING_01, title="Jogi"),
+            plex_track(key=6, file=SIBLING_06, title="Jogi"),
+        ])
+        item = item_with(path=REL_SIBLING_06, plex_ratingkey="1")
+        found = PlexSync._resolve_plex_track_by_path(plugin, item)
+        assert found is not None and found.ratingKey == 6
+
+    def test_no_matching_track_returns_none(self):
+        plugin = self._plugin([plex_track(key=1, file=SIBLING_01)])
+        item = item_with(path=REL_SIBLING_06)
+        assert PlexSync._resolve_plex_track_by_path(plugin, item) is None
+
+    def test_missing_path_or_album_returns_none(self):
+        plugin = self._plugin([])
+        assert PlexSync._resolve_plex_track_by_path(
+            plugin, item_with(path=None)) is None
+        assert PlexSync._resolve_plex_track_by_path(
+            plugin, FakeItem(title="x", path=REL)) is None
+
+
+class SearchItemRepairTests:
+    def _sync_plugin(self, search_candidate, album_tracks, key_track=None):
+        plugin = types.SimpleNamespace(
+            _log=types.SimpleNamespace(
+                debug=lambda *a, **k: None, warning=lambda *a, **k: None,
+                info=lambda *a, **k: None, error=lambda *a, **k: None,
+            ),
+            _PLEX_SEARCH_SKIP=PlexSync._PLEX_SEARCH_SKIP,
+            search_plex_track=lambda item: search_candidate,
+            music=types.SimpleNamespace(
+                searchAlbums=lambda title: [
+                    types.SimpleNamespace(title="OST (2017)", tracks=lambda: album_tracks)
+                ],
+                fetchItem=lambda key: key_track,
+            ),
+            _media_verdict=PlexSync._media_verdict,
+        )
+        plugin._resolve_plex_track_by_key = lambda item: (
+            PlexSync._resolve_plex_track_by_key(plugin, item)
+        )
+        plugin._resolve_plex_track_by_path = lambda item: (
+            PlexSync._resolve_plex_track_by_path(plugin, item)
+        )
+        plugin._apply_plex_result = lambda item, track: PlexSync._apply_plex_result(
+            plugin, item, track
+        )
+        return plugin
+
+    def test_contradicted_candidate_is_replaced_by_the_path_match(self):
+        wrong = plex_track(key=1, file=SIBLING_01, title="Jogi", userRating=9.0)
+        right = plex_track(key=6, file=SIBLING_06, title="Jogi", userRating=3.0)
+        plugin = self._sync_plugin(wrong, [wrong, right], key_track=wrong)
+        item = item_with(path=REL_SIBLING_06, plex_ratingkey="1")
+
+        _, track = PlexSync._search_plex_item(plugin, 1, item, True, 1)
+        assert PlexSync._apply_plex_result(plugin, item, track) is True
+        assert item.plex_ratingkey == 6
+        assert item.plex_userrating == 3.0
+
+    def test_unrepairable_candidate_is_not_applied(self):
+        wrong = plex_track(key=1, file=SIBLING_01, title="Jogi", userRating=9.0)
+        plugin = self._sync_plugin(wrong, [wrong], key_track=wrong)
+        item = item_with(path=REL_SIBLING_06, plex_ratingkey="1", plex_userrating=4.0)
+
+        _, track = PlexSync._search_plex_item(plugin, 1, item, True, 1)
+        assert PlexSync._apply_plex_result(plugin, item, track) is False
+        assert item.plex_userrating == 4.0
+        assert item.plex_ratingkey == "1"

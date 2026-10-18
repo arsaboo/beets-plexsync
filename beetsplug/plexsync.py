@@ -51,7 +51,12 @@ from beetsplug.ai.llm import (
 )
 from beetsplug.core.matching import clean_string, plex_track_distance
 from beetsplug.core.vector_index import BeetsVectorIndex, read_item_metadata
-from beetsplug.utils.helpers import media_identity, plex_key, plex_media_path
+from beetsplug.utils.helpers import (
+    media_identity,
+    plex_key,
+    plex_media_path,
+    same_media_file,
+)
 from beetsplug.providers.apple import import_apple_playlist
 from beetsplug.providers.jiosaavn import import_jiosaavn_playlist
 from beetsplug.plex.queues import (
@@ -1107,6 +1112,41 @@ class PlexSync(BeetsPlugin):
             return None
         return track
 
+    @staticmethod
+    def _media_verdict(item, plex_track):
+        return media_identity(
+            item, plex_track, getattr(getattr(item, "_db", None), "directory", None)
+        )
+
+    def _resolve_plex_track_by_path(self, item):
+        """Return the Plex track that is literally the file behind ``item``.
+
+        Tracks that share a title on one album are indistinguishable by metadata,
+        so walk the album's tracks and compare media paths instead. Costs one
+        album search plus one track listing, so callers use it only to repair a
+        candidate that path identity already contradicted.
+        """
+        beets_path = getattr(item, "path", None)
+        album = str(getattr(item, "album", "") or "").strip()
+        if beets_path is None or not album:
+            return None
+        library_dir = getattr(getattr(item, "_db", None), "directory", None)
+        try:
+            albums = self.music.searchAlbums(title=album)
+        except Exception as exc:  # noqa: BLE001 - transient Plex error
+            self._log.debug("Album lookup failed for {}: {}", album, exc)
+            return None
+        for candidate in albums[:5]:
+            try:
+                tracks = candidate.tracks()
+            except Exception as exc:  # noqa: BLE001 - partially readable album
+                self._log.debug("Track listing failed for album {}: {}", candidate.title, exc)
+                continue
+            for track in tracks:
+                if same_media_file(beets_path, plex_media_path(track), library_dir):
+                    return track
+        return None
+
     def _search_plex_item(self, index, item, force, items_len):
         """Plex HTTP search only. Returns (item, plex_track | None | SKIP)."""
         self._log.info("Processing {}/{} tracks - {} ", index, items_len, item)
@@ -1117,6 +1157,10 @@ class PlexSync(BeetsPlugin):
             track = self._resolve_plex_track_by_key(item)
             if track is None:
                 track = self.search_plex_track(item)
+            if track is not None and self._media_verdict(item, track) == "different":
+                # A same-title sibling was matched; resolve by file path instead of
+                # accepting another track's statistics.
+                track = self._resolve_plex_track_by_path(item) or track
             return item, track
         except Exception as exc:  # noqa: BLE001 - keep the rest of the sync going
             self._log.error("Error searching Plex for {}: {}", item, exc)

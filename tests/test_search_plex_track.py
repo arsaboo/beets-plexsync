@@ -182,6 +182,10 @@ def _sync_plugin(search_result=None):
     plugin._resolve_plex_track_by_key = lambda item: (
         PlexSync._resolve_plex_track_by_key(plugin, item)
     )
+    plugin._resolve_plex_track_by_path = lambda item: (
+        PlexSync._resolve_plex_track_by_path(plugin, item)
+    )
+    plugin._media_verdict = staticmethod(PlexSync._media_verdict)
     plugin._search_plex_item = lambda index, item, force, items_len: (
         PlexSync._search_plex_item(plugin, index, item, force, items_len)
     )
