@@ -60,7 +60,7 @@ class SpotifyTransferTest:
                 self.called_auth = True
 
             def _build_plex_lookup_and_vector_index(self, lib):
-                return {'1': beets_item}
+                return {1: beets_item}
 
             def add_tracks_to_spotify_playlist(
                     self, playlist, tracks, *, allow_removals=True):
@@ -111,7 +111,7 @@ class SpotifyTransferTest:
                 pass
 
             def _build_plex_lookup_and_vector_index(self, lib):
-                return {'1': beets_item}
+                return {1: beets_item}
 
             def _search_spotify_track(self, beets_item, *, raise_on_error=False):
                 return 'fallback'
@@ -198,7 +198,7 @@ class SpotifyTransferTest:
                 pass
 
             def _build_plex_lookup_and_vector_index(self, lib):
-                return {'1': beets_item}
+                return {1: beets_item}
 
             def add_tracks_to_spotify_playlist(
                     self, playlist, tracks, *, allow_removals=True):
@@ -242,7 +242,7 @@ class SpotifyTransferTest:
                 pass
 
             def _build_plex_lookup_and_vector_index(self, lib):
-                return {'1': beets_item}
+                return {1: beets_item}
 
             def add_tracks_to_spotify_playlist(
                     self, playlist, tracks, *, allow_removals=True):

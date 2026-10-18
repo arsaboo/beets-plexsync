@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from unittest.mock import patch
 
 from beetsplug.plex import smartplaylists
+from beetsplug.utils.helpers import plex_key
 
 
 def _plex_track(key, title="Plex Track"):
@@ -27,14 +28,14 @@ class DedupeByRatingKeyTest:
     def test_keeps_library_beets_items(self):
         # Regression: beets Items must survive dedup (previously dropped
         # because they lack a .ratingKey attribute).
-        lookup = {"1": _beets_item(1), "2": _beets_item(2)}
+        lookup = {1: _beets_item(1), 2: _beets_item(2)}
         tracks = [_plex_track(1), _beets_item(2)]
         result = smartplaylists._dedupe_by_rating_key(tracks, lookup)
         assert [t.plex_ratingkey for t in result] == ["1", "2"]
 
     def test_normalizes_plex_tracks_to_beets_items(self):
         item = _beets_item(1)
-        lookup = {"1": item}
+        lookup = {1: item}
         result = smartplaylists._dedupe_by_rating_key([_plex_track(1)], lookup)
         assert result == [item]
         assert all(not hasattr(t, "ratingKey") for t in result)
@@ -42,7 +43,7 @@ class DedupeByRatingKeyTest:
     def test_drops_cross_type_duplicates(self):
         # Same rating key via a Plex Track and a beets Item -> one entry.
         item1, item2 = _beets_item(1), _beets_item(2)
-        lookup = {"1": item1, "2": item2}
+        lookup = {1: item1, 2: item2}
         tracks = [_plex_track(1), _beets_item(2), _beets_item(1)]
         result = smartplaylists._dedupe_by_rating_key(tracks, lookup)
         assert [t.plex_ratingkey for t in result] == ["1", "2"]
@@ -50,7 +51,7 @@ class DedupeByRatingKeyTest:
 
     def test_drops_unresolvable_plex_tracks(self):
         # A Plex Track with no beets counterpart is dropped, not kept.
-        lookup = {"1": _beets_item(1)}
+        lookup = {1: _beets_item(1)}
         result = smartplaylists._dedupe_by_rating_key([_plex_track(99), _beets_item(1)], lookup)
         assert [t.plex_ratingkey for t in result] == ["1"]
 
@@ -469,7 +470,7 @@ class FilterBeetsItemsTest:
         )
         fake_lib = types.SimpleNamespace(items=lambda: [unsynced, synced])
         lookup = PlexSync._build_plex_lookup_and_vector_index(fake_plugin, fake_lib)
-        assert lookup == {"7": synced}
+        assert lookup == {7: synced}
 
     def test_forgotten_gems_keeps_unrated_never_played(self):
         # Regression: the exact Forgotten Gems config must keep an unrated,
@@ -529,7 +530,7 @@ class BeetsCentricGenerationTest:
         )
         rated = [self._item(i, "6", 50 + (i % 40)) for i in range(1, 96)]
         unrated = [self._item(i, None, i - 5) for i in range(96, 106)]
-        lookup = {item.plex_ratingkey: item for item in rated + unrated}
+        lookup = {plex_key(item.plex_ratingkey): item for item in rated + unrated}
         playlist = {
             "name": "Forgotten Gems",
             "max_tracks": 100,
@@ -658,7 +659,7 @@ class LiveRatingFloorTest:
 
         rated = [_item(i, "6", 50 + (i % 40)) for i in range(1, 96)]
         unrated = [_item(i, None, i - 5) for i in range(96, 107)]
-        lookup = {item.plex_ratingkey: item for item in rated + unrated}
+        lookup = {plex_key(item.plex_ratingkey): item for item in rated + unrated}
         # beets still says 6 for the rated picks; Plex now says 1.
         ratings = {i: 1.0 for i in range(1, 96)}
         ratings.update({i: 0 for i in range(96, 107)})

@@ -525,8 +525,7 @@ class PlexSync(BeetsPlugin):
         if not rating_key:
             return None
         try:
-            # plexapi resolves integer rating keys; the beets field is a string.
-            track = self.music.fetchItem(int(rating_key))
+            track = self.music.fetchItem(rating_key)
         except Exception as exc:  # noqa: BLE001
             self._log.debug(
                 "Failed to fetch Plex item for cached ratingKey {}: {}", rating_key, exc

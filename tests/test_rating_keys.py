@@ -1,8 +1,9 @@
 """Rating-key type convention across the beets/Plex boundary.
 
 beets stores the `plex_ratingkey` flexible attribute as a string, while plexapi
-returns `ratingKey` as an int and rejects strings. Anything that keys a dict or
-calls fetchItem must normalize, or lookups silently miss.
+returns `ratingKey` as an int and rejects strings when fetching. `plex_key`
+reduces both to an int (GUID keys stay text), so dict lookups meet and
+fetchItem receives a type it accepts.
 """
 
 import types
@@ -13,10 +14,14 @@ from beetsplug.utils.helpers import plex_key
 
 
 class PlexKeyTest:
-    def test_normalizes_both_sources_to_str(self):
-        assert plex_key(303) == "303"
-        assert plex_key("303") == "303"
-        assert plex_key(" 303 ") == "303"
+    def test_normalizes_both_sources_to_int(self):
+        assert plex_key(303) == 303
+        assert plex_key("303") == 303
+        assert plex_key(" 303 ") == 303
+
+    def test_guid_keys_stay_text(self):
+        guid = "plex://track/5d77709a0fedc45dab1c0b34"
+        assert plex_key(guid) == guid
 
     def test_absent_and_placeholder_keys_are_none(self):
         assert plex_key(None) is None
@@ -30,7 +35,7 @@ class PlexKeyTest:
 
 
 class LookupKeyTest:
-    def test_builder_keys_on_str_from_int_flex_value(self):
+    def test_builder_keys_numeric_and_skips_placeholders(self):
         synced = types.SimpleNamespace(plex_ratingkey=7, title="T", artist="A", album="A")
         unsynced = types.SimpleNamespace(plex_ratingkey="0.0", title="U", artist="A", album="A")
         fake_plugin = types.SimpleNamespace(
@@ -41,15 +46,15 @@ class LookupKeyTest:
 
         lookup = PlexSync._build_plex_lookup_and_vector_index(fake_plugin, fake_lib)
 
-        assert list(lookup) == ["7"]
+        assert list(lookup) == [7]
         assert lookup.get(plex_key(7)) is synced
         assert plex_key(0) not in lookup
 
-    def test_dedupe_resolves_int_plex_key_against_str_lookup(self):
+    def test_dedupe_resolves_plex_key_against_lookup(self):
         item = types.SimpleNamespace(plex_ratingkey="7", title="T", plex_userrating=0)
         track = types.SimpleNamespace(ratingKey=7, title="T")
 
-        result = smartplaylists._dedupe_by_rating_key([track], {"7": item})
+        result = smartplaylists._dedupe_by_rating_key([track], {7: item})
 
         assert result == [item]
 

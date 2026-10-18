@@ -7,6 +7,7 @@ from beets import ui
 from beets.util.color import colorize
 
 from beetsplug.core.config import get_plexsync_config
+from beetsplug.utils.helpers import plex_key
 from beetsplug.utils.prompt_logging import prompt_guard
 from beetsplug.ai.llm import search_track_info
 from beetsplug.core.matching import clean_text_for_matching, get_fuzzy_score
@@ -239,8 +240,9 @@ def search_plex_song(
                 return _finish(None)
 
             try:
-                if rating_key:
-                    cached_track = plugin.music.fetchItem(rating_key)
+                key = plex_key(rating_key)
+                if key:
+                    cached_track = plugin.music.fetchItem(key)
                     plugin._log.debug("Found cached match for: {} -> {}", song, cached_track.title)
                     return _finish(cached_track)
             except Exception as exc:  # noqa: BLE001 - stale key or transient Plex error
@@ -254,8 +256,9 @@ def search_plex_song(
                 plugin._log.debug("Found legacy cached skip result for: {}", song)
                 return _finish(None)
             try:
-                if cached_result:
-                    cached_track = plugin.music.fetchItem(cached_result)
+                key = plex_key(cached_result)
+                if key:
+                    cached_track = plugin.music.fetchItem(key)
                     plugin._log.debug(
                         "Found legacy cached match for: {} -> {}", song, cached_track.title
                     )
