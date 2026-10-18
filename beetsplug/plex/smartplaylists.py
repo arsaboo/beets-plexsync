@@ -13,6 +13,7 @@ import copy
 
 from beets import config
 from beetsplug.core.config import get_config_value, get_plexsync_config
+from beetsplug.utils.helpers import plex_key
 
 # Module-level random number generator to avoid global seeding
 import numpy as np
@@ -1011,7 +1012,9 @@ def _dedupe_by_rating_key(tracks, plex_lookup):
     unique_tracks = []
     seen_keys = set()
     for track in tracks:
-        key = getattr(track, 'ratingKey', None) or getattr(track, 'plex_ratingkey', None)
+        key = plex_key(
+            getattr(track, 'ratingKey', None) or getattr(track, 'plex_ratingkey', None)
+        )
         if not key or key in seen_keys:
             continue
         seen_keys.add(key)
@@ -1314,7 +1317,7 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
             sonic_items = []
             for plex_track in similar_tracks:
                 try:
-                    beets_item = plex_lookup.get(plex_track.ratingKey)
+                    beets_item = plex_lookup.get(plex_key(plex_track.ratingKey))
                     if beets_item:
                         sonic_items.append(beets_item)
                 except Exception as e:

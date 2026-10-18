@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Utilities for transferring Plex playlists to Spotify."""
 
+from beetsplug.utils.helpers import plex_key
 
 def _batch_check_availability(plugin, track_ids):
     """Check availability in batches of 50.
@@ -48,7 +49,11 @@ def plex_to_spotify(plugin, lib, playlist, query_args=None):
     if query_args:
         query_items = lib.items(query_args)
         query_rating_keys = {
-            item.plex_ratingkey for item in query_items if hasattr(item, 'plex_ratingkey')
+            key
+            for key in (
+                plex_key(getattr(item, "plex_ratingkey", None)) for item in query_items
+            )
+            if key
         }
         plugin._log.info(
             "Query matched {} beets items, filtering playlist accordingly",
@@ -59,7 +64,7 @@ def plex_to_spotify(plugin, lib, playlist, query_args=None):
     ordered_beets_items = []
     resolution_incomplete = False
     for item in plex_playlist_items:
-        beets_item = plex_lookup.get(item.ratingKey)
+        beets_item = plex_lookup.get(plex_key(item.ratingKey))
         if not beets_item:
             resolution_incomplete = True
             plugin._log.debug(
@@ -68,7 +73,7 @@ def plex_to_spotify(plugin, lib, playlist, query_args=None):
                 item.title,
             )
             continue
-        if query_rating_keys is not None and item.ratingKey not in query_rating_keys:
+        if query_rating_keys is not None and plex_key(item.ratingKey) not in query_rating_keys:
             continue
         ordered_beets_items.append(beets_item)
 

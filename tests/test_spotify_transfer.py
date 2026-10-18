@@ -34,7 +34,7 @@ class SpotifyTransferTest:
 
         class LibraryItem:
             def __init__(self, rating_key, spotify_id, artist, album, title):
-                self.plex_ratingkey = rating_key
+                self.plex_ratingkey = str(rating_key)
                 self.spotify_track_id = spotify_id
                 self.artist = artist
                 self.album = album
@@ -60,7 +60,7 @@ class SpotifyTransferTest:
                 self.called_auth = True
 
             def _build_plex_lookup_and_vector_index(self, lib):
-                return {1: beets_item}
+                return {'1': beets_item}
 
             def add_tracks_to_spotify_playlist(
                     self, playlist, tracks, *, allow_removals=True):
@@ -88,7 +88,7 @@ class SpotifyTransferTest:
 
         class LibraryItem:
             def __init__(self, rating_key, spotify_id, artist, album, title):
-                self.plex_ratingkey = rating_key
+                self.plex_ratingkey = str(rating_key)
                 self.spotify_track_id = spotify_id
                 self.artist = artist
                 self.album = album
@@ -111,7 +111,7 @@ class SpotifyTransferTest:
                 pass
 
             def _build_plex_lookup_and_vector_index(self, lib):
-                return {1: beets_item}
+                return {'1': beets_item}
 
             def _search_spotify_track(self, beets_item, *, raise_on_error=False):
                 return 'fallback'
@@ -171,7 +171,7 @@ class SpotifyTransferTest:
     def test_partial_resolution_uses_add_only_mode(self):
         logger = DummyLogger()
         beets_item = types.SimpleNamespace(
-            plex_ratingkey=1,
+            plex_ratingkey='1',
             spotify_track_id='known',
             artist='Artist',
             album='Album',
@@ -198,7 +198,7 @@ class SpotifyTransferTest:
                 pass
 
             def _build_plex_lookup_and_vector_index(self, lib):
-                return {1: beets_item}
+                return {'1': beets_item}
 
             def add_tracks_to_spotify_playlist(
                     self, playlist, tracks, *, allow_removals=True):
@@ -217,7 +217,7 @@ class SpotifyTransferTest:
     def test_availability_failure_retains_known_id_and_disables_removals(self):
         logger = DummyLogger()
         beets_item = types.SimpleNamespace(
-            plex_ratingkey=1,
+            plex_ratingkey='1',
             spotify_track_id='known',
             artist='Artist',
             album='Album',
@@ -242,7 +242,7 @@ class SpotifyTransferTest:
                 pass
 
             def _build_plex_lookup_and_vector_index(self, lib):
-                return {1: beets_item}
+                return {'1': beets_item}
 
             def add_tracks_to_spotify_playlist(
                     self, playlist, tracks, *, allow_removals=True):

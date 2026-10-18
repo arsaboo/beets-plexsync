@@ -5,6 +5,22 @@ import re
 from beets.util.color import colorize
 
 
+def plex_key(value):
+    """Normalize a Plex rating key for cross-source lookups.
+
+    beets stores ``plex_ratingkey`` as a string while plexapi returns ints, so
+    the two sides only meet once reduced to one type. ``'0'``/``'0.0'`` are the
+    placeholders beets uses for an unsynced item. Returns None when there is no
+    usable key.
+    """
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text or text in ("0", "0.0"):
+        return None
+    return text
+
+
 def parse_title(title_orig):
     """Parse title to separate movie soundtrack information."""
     if '(From "' in title_orig:

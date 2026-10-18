@@ -153,6 +153,14 @@ beetsplug/
   `items.id = item_attributes.entity_id`, *not* `item_attributes.id`, which is the
   row id); must parse, e.g. `float(x or 0)`. Map beets items ↔ Plex via
   `plex_ratingkey` (in item_attributes).
+- **`plex_ratingkey` is a `str` on the beets side and an `int` on the Plex side**
+  (`Item._fields` does not apply the plugin's `types.INTEGER`), and
+  `plexapi.fetchItem()` rejects strings with `InvalidURL`. Keying `plex_lookup` or
+  calling `fetchItem` without normalizing silently matches nothing. Use
+  `utils.helpers.plex_key()` (also treats `'0'`/`'0.0'` as unset) for dict keys and
+  `int(plex_key(...))` for `fetchItem`. Regression coverage: `tests/test_rating_keys.py`
+  — keep test fixtures at production types (beets `str`, Plex `int`), same-typed
+  fixtures hide this class of bug.
 - **Date flex fields have different SQL and model representations**: raw SQL may
   show `plex_lastviewedat`/`plex_lastratedat` as `'YYYY-MM-DD HH:MM:SS'` or numeric
   strings (`'0.0'` means absent). With the plugin loaded, beets `DateType` exposes

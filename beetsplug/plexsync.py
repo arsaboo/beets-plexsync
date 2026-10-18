@@ -51,6 +51,7 @@ from beetsplug.ai.llm import (
 )
 from beetsplug.core.matching import clean_string, plex_track_distance
 from beetsplug.core.vector_index import BeetsVectorIndex, read_item_metadata
+from beetsplug.utils.helpers import plex_key
 from beetsplug.providers.apple import import_apple_playlist
 from beetsplug.providers.jiosaavn import import_jiosaavn_playlist
 from beetsplug.plex.queues import (
@@ -520,11 +521,12 @@ class PlexSync(BeetsPlugin):
         original_song: Dict[str, str],
         cache_key: Optional[str] = None,
     ):
-        rating_key = candidate.metadata.get("plex_ratingkey")
+        rating_key = plex_key(candidate.metadata.get("plex_ratingkey"))
         if not rating_key:
             return None
         try:
-            track = self.music.fetchItem(rating_key)
+            # plexapi resolves integer rating keys; the beets field is a string.
+            track = self.music.fetchItem(int(rating_key))
         except Exception as exc:  # noqa: BLE001
             self._log.debug(
                 "Failed to fetch Plex item for cached ratingKey {}: {}", rating_key, exc
@@ -1236,7 +1238,7 @@ class PlexSync(BeetsPlugin):
         to_write = []
         with lib.transaction():
             for track in tracks:
-                beets_item = plex_lookup.get(track.ratingKey)
+                beets_item = plex_lookup.get(plex_key(track.ratingKey))
                 if not beets_item:
                     self._log.debug("Track {} not found in beets", track.ratingKey)
                     continue
@@ -1924,9 +1926,11 @@ class PlexSync(BeetsPlugin):
         vector_index = BeetsVectorIndex()
 
         for item in lib.items():
-            rating_key = getattr(item, "plex_ratingkey", None)
-            if rating_key:
-                plex_lookup[rating_key] = item
+            # Keys are normalized to str: beets stores plex_ratingkey as a
+            # string, plexapi hands back ints.
+            key = plex_key(getattr(item, "plex_ratingkey", None))
+            if key:
+                plex_lookup[key] = item
 
             metadata = self._extract_vector_metadata(item)
             item_id = metadata.get("id")
