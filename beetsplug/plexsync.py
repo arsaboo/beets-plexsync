@@ -1121,16 +1121,30 @@ class PlexSync(BeetsPlugin):
     def _resolve_plex_track_by_path(self, item):
         """Return the Plex track that is literally the file behind ``item``.
 
-        Tracks that share a title on one album are indistinguishable by metadata,
-        so walk the album's tracks and compare media paths instead. Costs one
-        album search plus one track listing, so callers use it only to repair a
-        candidate that path identity already contradicted.
+        Tracks that share a title on one album are indistinguishable by
+        metadata, so compare media paths of the candidates instead. Search by
+        track title first (the album title can differ between beets and Plex,
+        and album search then returns unrelated albums), then fall back to
+        walking the album.
         """
         beets_path = getattr(item, "path", None)
-        album = str(getattr(item, "album", "") or "").strip()
-        if beets_path is None or not album:
+        if beets_path is None:
             return None
         library_dir = getattr(getattr(item, "_db", None), "directory", None)
+        title = str(getattr(item, "title", "") or "").strip()
+        if title:
+            try:
+                candidates = self.music.searchTracks(title=title, limit=25)
+            except Exception as exc:  # noqa: BLE001 - transient Plex error
+                self._log.debug("Track search failed for {}: {}", title, exc)
+                candidates = []
+            for track in candidates:
+                if same_media_file(beets_path, plex_media_path(track), library_dir):
+                    return track
+
+        album = str(getattr(item, "album", "") or "").strip()
+        if not album:
+            return None
         try:
             albums = self.music.searchAlbums(title=album)
         except Exception as exc:  # noqa: BLE001 - transient Plex error

@@ -228,6 +228,25 @@ class ResolveByPathTests:
             plugin, FakeItem(title="x", path=REL)) is None
 
 
+    def test_track_title_search_can_locate_the_file_without_the_album(self):
+        album_title_miss = types.SimpleNamespace(
+            title="Unrelated Album",
+            tracks=lambda: [plex_track(key=1, file="/data/music/X/Y (2001) - Z.flac")],
+        )
+        plugin = types.SimpleNamespace(
+            _log=types.SimpleNamespace(debug=lambda *a, **k: None),
+            music=types.SimpleNamespace(
+                searchTracks=lambda title, limit: [
+                    plex_track(key=1, file=SIBLING_01, title="Jogi"),
+                    plex_track(key=6, file=SIBLING_06, title="Jogi"),
+                ],
+                searchAlbums=lambda title: [album_title_miss],
+            ),
+        )
+        item = item_with(path=REL_SIBLING_06)
+        found = PlexSync._resolve_plex_track_by_path(plugin, item)
+        assert found is not None and found.ratingKey == 6
+
 class SearchItemRepairTests:
     def _sync_plugin(self, search_candidate, album_tracks, key_track=None):
         plugin = types.SimpleNamespace(
