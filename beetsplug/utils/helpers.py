@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import math
 import os
 import re
+from datetime import datetime
 
 from beets.util.color import colorize
 
@@ -23,6 +25,34 @@ def plex_key(value):
     if text.isdigit():
         return int(text)
     return text
+
+
+def parse_timestamp(value):
+    """Coerce a stored Plex timestamp to epoch seconds, or None when absent.
+
+    beets' ``DateType`` writes these columns as ``'YYYY-MM-DD HH:MM:SS'`` text
+    but hands them back as plain strings, while direct assignments and older
+    rows hold epoch numbers. Every form has to parse, or a track with real play
+    history reads as never played.
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.timestamp()
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        stamp = float(value)
+        return stamp if stamp > 0 and math.isfinite(stamp) else None
+    text = str(value).strip()
+    if not text or text in ("0", "0.0"):
+        return None
+    try:
+        stamp = float(text)
+    except ValueError:
+        try:
+            stamp = datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            return None
+    return stamp if stamp > 0 and math.isfinite(stamp) else None
 
 
 def plex_media_path(track):

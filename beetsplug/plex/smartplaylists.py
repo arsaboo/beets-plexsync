@@ -13,7 +13,7 @@ import copy
 
 from beets import config
 from beetsplug.core.config import get_config_value, get_plexsync_config
-from beetsplug.utils.helpers import plex_key
+from beetsplug.utils.helpers import parse_timestamp, plex_key
 
 # Module-level random number generator to avoid global seeding
 import numpy as np
@@ -356,17 +356,7 @@ def _compute_context_stats(tracks, base_time):
             ratings.append(0.0)
 
         # Days since played
-        ts = getattr(t, 'plex_lastviewedat', None)
-        if ts is None:
-            # Assume not played in last year for normalization default
-            days_since.append(365)
-        else:
-            try:
-                dt = datetime.fromtimestamp(float(ts))
-                days = max((base_time - dt).days, 0)
-                days_since.append(min(days, 1095))
-            except (ValueError, TypeError, OSError, OverflowError):
-                days_since.append(365)
+        days_since.append(_days_since_played(t, base_time, default=365))
 
         # Play count
         try:
@@ -435,11 +425,7 @@ def calculate_track_score(ps, track, base_time=None, tracks_context=None, playli
         else:
             days_since_played = 365  # Default to one year ago
     else:
-        try:
-            days = (base_time - datetime.fromtimestamp(float(last_played))).days
-            days_since_played = min(days, 1095)
-        except (ValueError, TypeError, OSError, OverflowError):
-            days_since_played = 365
+        days_since_played = _days_since_played(track, base_time, default=365)
 
     if tracks_context_stats is not None:
         rating_mean = tracks_context_stats['rating_mean']
@@ -457,15 +443,7 @@ def calculate_track_score(ps, track, base_time=None, tracks_context=None, playli
         # Safe days computation for context
         all_days = []
         for t in tracks_context:
-            ts = getattr(t, 'plex_lastviewedat', None)
-            if ts is None:
-                all_days.append(365)
-            else:
-                try:
-                    dt = datetime.fromtimestamp(float(ts))
-                    all_days.append(min((base_time - dt).days, 1095))
-                except (ValueError, TypeError, OSError, OverflowError):
-                    all_days.append(365)
+            all_days.append(_days_since_played(t, base_time, default=365))
         all_play_counts = [int(getattr(t, 'plex_viewcount', 0) or 0) for t in tracks_context]
         all_popularity = [_popularity_of(t) or 0.0 for t in tracks_context]
         all_ages = []
@@ -585,14 +563,9 @@ def select_tracks_weighted(ps, tracks, num_tracks, playlist_type=None):
                     age_values.append(max(base_time.year - year_int, 0))
                 except (TypeError, ValueError):
                     pass
-            last_played_ts = getattr(tr, 'plex_lastviewedat', None)
-            if last_played_ts:
-                try:
-                    last_played_dt = datetime.fromtimestamp(float(last_played_ts))
-                    delta_days = max((base_time - last_played_dt).days, 0)
-                    days_since_played_values.append(delta_days)
-                except (ValueError, TypeError, OSError, OverflowError):
-                    pass
+            days_played = _days_since_played(tr, base_time)
+            if days_played is not None:
+                days_since_played_values.append(days_played)
         avg_rating = (sum(rating_values) / len(rating_values)) if rating_values else None
         avg_plays = (sum(play_values) / len(play_values)) if play_values else None
         avg_age = (sum(age_values) / len(age_values)) if age_values else None
@@ -623,13 +596,11 @@ def select_tracks_weighted(ps, tracks, num_tracks, playlist_type=None):
                     except (ValueError, TypeError):
                         age = "N/A"
 
-                last_played_timestamp = getattr(tr, 'plex_lastviewedat', None)
-                last_played = "Never"
-                if last_played_timestamp:
-                    try:
-                        last_played = datetime.fromtimestamp(last_played_timestamp).strftime('%Y-%m-%d')
-                    except (ValueError, OSError):
-                        last_played = "Invalid Date"
+                played_ts = _last_viewed_ts(tr)
+                if played_ts is None:
+                    last_played = "Never"
+                else:
+                    last_played = datetime.fromtimestamp(played_ts).strftime('%Y-%m-%d')
 
                 ps._log.debug(
                     " • {} - {} (Score: {:.2f}, Rating: {}, Plays: {}, Age: {}, Last Played: {})",
@@ -769,17 +740,22 @@ def _popularity_of(item):
 def _last_viewed_ts(item):
     """Last-played epoch (float) for an item, or None when never played.
 
-    Plex represents "never played" as a null lastViewedAt (beets stores None);
-    the exclusion filter keys off exactly that.
+    Plex represents "never played" as a null lastViewedAt; beets then holds
+    nothing, a placeholder zero, or the formatted date text written by
+    ``DateType``, all of which ``parse_timestamp`` resolves.
     """
-    raw = getattr(item, "plex_lastviewedat", None)
-    if raw is None:
-        return None
-    try:
-        timestamp = raw.timestamp() if isinstance(raw, datetime) else float(raw)
-    except (TypeError, ValueError, OSError, OverflowError):
-        return None
-    return timestamp if math.isfinite(timestamp) else None
+    return parse_timestamp(getattr(item, "plex_lastviewedat", None))
+
+
+def _days_since_played(item, base_time, default=None, cap=1095):
+    """Whole days since ``item`` was last played, clamped to ``cap``.
+
+    Returns ``default`` when the item carries no usable timestamp.
+    """
+    timestamp = _last_viewed_ts(item)
+    if timestamp is None:
+        return default
+    return min(max((base_time - datetime.fromtimestamp(timestamp)).days, 0), cap)
 
 
 def _filter_beets_items(items, filters, exclusion_days=None, preferred_genres=None,

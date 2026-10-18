@@ -737,3 +737,48 @@ class SmartPlaylistRunnerIsolationTest:
         ])
 
         assert calls == ["Recent"]
+
+
+class LastViewedTimestampTests:
+    """beets' DateType writes 'YYYY-MM-DD HH:MM:SS' and reads it back as a
+    plain string, while direct assignments hold epoch numbers. Every form must
+    parse, or a track with real play history reads as never played."""
+
+    LOCAL = datetime(2026, 10, 16, 19, 23, 57)
+
+    def _item(self, value):
+        return types.SimpleNamespace(plex_lastviewedat=value)
+
+    def test_beets_date_text(self):
+        assert smartplaylists._last_viewed_ts(
+            self._item("2026-10-16 19:23:57")
+        ) == self.LOCAL.timestamp()
+
+    def test_iso_text_with_fraction_and_offset(self):
+        assert smartplaylists._last_viewed_ts(
+            self._item("2026-10-16T19:23:57.000000")
+        ) == self.LOCAL.timestamp()
+
+    def test_epoch_number_as_text_and_number(self):
+        expected = self.LOCAL.timestamp()
+        assert smartplaylists._last_viewed_ts(self._item(str(expected))) == expected
+        assert smartplaylists._last_viewed_ts(self._item(expected)) == expected
+
+    def test_datetime_object(self):
+        assert smartplaylists._last_viewed_ts(self._item(self.LOCAL)) == self.LOCAL.timestamp()
+
+    def test_absent_and_placeholder_forms(self):
+        for value in (None, "", "0", "0.0", 0, 0.0, "not a date"):
+            assert smartplaylists._last_viewed_ts(self._item(value)) is None
+
+    def test_days_since_played_reads_date_text(self):
+        base = datetime(2026, 10, 20, 12, 0, 0)
+        item = self._item("2026-10-16 19:23:57")
+        assert smartplaylists._days_since_played(item, base, default=365) == 3
+
+    def test_days_since_played_default_and_cap(self):
+        base = datetime(2026, 10, 20, 12, 0, 0)
+        assert smartplaylists._days_since_played(self._item(None), base, default=365) == 365
+        assert smartplaylists._days_since_played(
+            self._item("1990-01-01 00:00:00"), base, cap=1095
+        ) == 1095
