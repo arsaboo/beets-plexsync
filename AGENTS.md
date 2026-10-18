@@ -157,8 +157,9 @@ beetsplug/
   (`Item._fields` does not apply the plugin's `types.INTEGER`), and
   `plexapi.fetchItem()` rejects strings with `InvalidURL`. Keying `plex_lookup` or
   calling `fetchItem` without normalizing silently matches nothing. Use
-  `utils.helpers.plex_key()` (also treats `'0'`/`'0.0'` as unset) for dict keys and
-  `int(plex_key(...))` for `fetchItem`. Regression coverage: `tests/test_rating_keys.py`
+  `utils.helpers.plex_key()` everywhere — it yields an `int` for numeric keys (so its
+  output is safe to hand to `fetchItem`), keeps GUID keys as text, and treats
+  `'0'`/`'0.0'` as unset. Regression coverage: `tests/test_rating_keys.py`
   — keep test fixtures at production types (beets `str`, Plex `int`), same-typed
   fixtures hide this class of bug.
 - **Date flex fields have different SQL and model representations**: raw SQL may
