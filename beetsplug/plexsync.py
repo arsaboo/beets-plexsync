@@ -214,7 +214,6 @@ class PlexSync(BeetsPlugin):
                     "api_key": "",  # Will use base key if empty
                     "base_url": "",  # Will use base base_url if empty
                     "model": "",  # Will use base model if empty (for OpenAI) or default (for Ollama)
-                    "embedding_model": "snowflake-arctic-embed2:latest"  # Embedding model
                 }
             }
         )

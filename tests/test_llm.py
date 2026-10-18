@@ -51,7 +51,6 @@ class LLMSearchTest:
                         'api_key': '',
                         'base_url': '',
                         'model': '',
-                        'embedding_model': 'snowflake-arctic-embed2:latest',
                     },
                 }
             },
