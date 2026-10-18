@@ -34,6 +34,14 @@ beets-plexsync is a [beets](https://github.com/beetbox/beets) plugin (`PlexSync`
 - List trade-offs when multiple approaches exist
 - Follow existing module boundaries (providers, plex, core, ai)
 
+### Commit Style
+
+- Single-line imperative subject, matching existing history (capitalized, no
+  prefix, no trailing period)
+- No body unless a one-line rationale is unavoidable; never prose paragraphs
+- No library-specific counts, timings or benchmarks in messages — those belong
+  in the PR or chat
+
 ### Critical Constraints
 
 - **NEVER modify cache keys** (`Cache._make_cache_key` pipe format `title|artist|album` in `core/cache.py`). Changing keys invalidates the existing SQLite cache.
@@ -162,10 +170,26 @@ beetsplug/
   `'0'`/`'0.0'` as unset. Regression coverage: `tests/test_rating_keys.py`
   — keep test fixtures at production types (beets `str`, Plex `int`), same-typed
   fixtures hide this class of bug.
-- **Date flex fields have different SQL and model representations**: raw SQL may
-  show `plex_lastviewedat`/`plex_lastratedat` as `'YYYY-MM-DD HH:MM:SS'` or numeric
-  strings (`'0.0'` means absent). With the plugin loaded, beets `DateType` exposes
-  them as float epochs. Use `smartplaylists._last_viewed_ts()` for last-played logic.
+- **`items.path` is a BLOB and is relative to the library directory**: raw SQL
+  `path LIKE '%…%'` matches nothing against a BLOB; decode with `os.fsdecode` in
+  Python and join against the library directory before touching the filesystem.
+- **Date flex fields store three different forms**: `plex_lastviewedat` and
+  `plex_lastratedat` arrive as `'YYYY-MM-DD HH:MM:SS'` text (what `DateType`
+  writes), as epoch-number text (direct assignments and older rows), or as
+  `'0.0'`/NULL for never played. Attribute access hands back a plain **string**,
+  not a `datetime` or float, and `float()` raises on the date text — so a bare
+  `float(value)` silently reports a played track as never played. Route every
+  read through `utils.helpers.parse_timestamp()`
+  (`smartplaylists._last_viewed_ts()` and `_days_since_played()`); regression
+  coverage: `LastViewedTimestampTests` in `tests/test_smartplaylists.py`.
+- **Bind Plex data to file identity, not metadata similarity**:
+  `utils.helpers.media_identity(item, track, library_dir)` returns
+  `same`/`moved`/`different`/`unknown`. `plexsync` resolves a stored
+  `plex_ratingkey` first and discards `different` candidates instead of applying
+  them. Albums whose metadata repeats a track title (beets' `%tunique{}` appends
+  `[NN]` to the filename, `%aunique{}` a `[label]`/id to the album folder) are
+  indistinguishable to a title/artist/album search, which is how one track's
+  rating and play counts used to land on a sibling track.
 - **`plex_userrating` is a *cached* Plex rating and can stay stale forever**:
   `plexsync` without `-f` skips any item already carrying the field (even `'0.0'`)
   and `plexsyncrecent` only walks `lastViewedAt>>Nd`, so a rating given without a
