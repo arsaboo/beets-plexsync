@@ -1,6 +1,6 @@
 # beets-plexsync - Project Context
 
-Canonical agent brief. `CLAUDE.md` and `gemini.md` point here so they stay in sync.
+Canonical agent brief for this repository.
 
 ## Environment
 
@@ -39,7 +39,11 @@ beets-plexsync is a [beets](https://github.com/beetbox/beets) plugin (`PlexSync`
 - **NEVER modify cache keys** (`Cache._make_cache_key` pipe format `title|artist|album` in `core/cache.py`). Changing keys invalidates the existing SQLite cache.
 - Keep public APIs and method signatures stable when possible
 - Maintain beets plugin architecture and CLI compatibility
-- Preserve vector index behavior (`core/vector_index.py`)
+- Preserve vector index behavior (`core/vector_index.py`). The corpus is read with
+  `read_item_metadata()` (raw SQLite over `items` + `item_attributes`): iterating
+  `Library.items()` for the same columns costs minutes and >1 GB on a 63k library, so do
+  not "simplify" it back to the ORM. Value semantics (weights, thresholds) live in
+  `TOKEN_WEIGHTS`/`MIN_SCORE_DEFAULT` and are covered by `tests/test_vector_index.py`.
 - Minimize Spotify API calls — batch `sp.tracks()` (50 at once) and cache
 - spotipy is configured with retries/backoff for rate limits
 - Provider HTTP: `beetsplug._utils.requests.TimeoutAndRetrySession` (timeout, 429/5xx retry)
@@ -64,7 +68,7 @@ beetsplug/
 │   ├── cache.py             # SQLite cache (track lookups, playlists, Spotify)
 │   ├── config.py            # get_config_value, get_plexsync_config
 │   ├── matching.py          # fuzzy matching, plex_track_distance (local weights)
-│   └── vector_index.py      # In-memory cosine-similarity index
+│   └── vector_index.py      # In-memory cosine index (numpy), raw-SQL corpus read
 ├── plex/
 │   ├── search.py            # Multi-strategy Plex track search
 │   ├── manual_search.py     # Interactive manual search UI
@@ -177,7 +181,7 @@ beetsplug/
 
 - **Plex** (`config["plex"]`): `host`, `port`, `token`, `library_name`, `secure`, `ignore_cert_errors`
 - **PlexSync** (`config["plexsync"]`): `tokenfile`, `manual_search`, `max_tracks`, `exclusion_days`, `history_days`, `discovery_ratio`, `use_llm_search`, `llm.background_enhancement`, `search.manual_prompt_queue_enabled`, `search.manual_prompt_queue_limit`
-- **LLM** (`config["llm"]`): `api_key`, `model`, `base_url`, `search.provider`, `search.api_key`, `search.base_url`, `search.model`, `search.embedding_model`
+- **LLM** (`config["llm"]`): `api_key`, `model`, `base_url`, `reasoning_effort`, `search.provider`, `search.api_key`, `search.base_url`, `search.model`, `search.reasoning_effort` (empty search values inherit from `llm`)
 - **Spotify** (`config["spotify"]`): `client_id`, `client_secret`
 
 ## Search Pipeline (`plex/search.py`)
@@ -208,10 +212,13 @@ Imported playlists via `plexsync.playlists`. Flags: `--only`, `--import-failed`/
 
 ## LLM Configuration
 
-- `beet plexsonic` uses top-level `llm.*` (`api_key`, `model`, `base_url`)
+- `beet plexsonic` uses top-level `llm.*` (`api_key`, `model`, `base_url`, `reasoning_effort`)
 - `llm.search.*` only when `plexsync.use_llm_search` is enabled
 - If `llm.api_key` is set: OpenAI-compatible via agno; else Ollama
 - Search toolkit: `searxng_host`, `exa_api_key`, `brave_api_key`, `tavily_api_key`
+- `reasoning_effort` (`none`..`max`, empty = server default) is passed through agno to
+  OpenAI-compatible backends; `llm.search.reasoning_effort` falls back to `llm.reasoning_effort`.
+  A backend that rejects the parameter is detected once and then omitted for the process.
 
 ## Dependencies (key)
 
