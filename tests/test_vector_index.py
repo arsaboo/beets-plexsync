@@ -3,6 +3,7 @@ import os
 import sqlite3
 import tempfile
 import types
+from contextlib import nullcontext
 
 import pytest
 
@@ -252,7 +253,9 @@ def test_ensure_vector_index_falls_back_to_orm():
     _make_db(db_path, with_tables=False)
 
     try:
-        lib = types.SimpleNamespace(path=db_path, items=lambda: iter(()))
+        lib = types.SimpleNamespace(
+            path=db_path, items=lambda: iter(()), music_dir_context=nullcontext
+        )
         index = PlexSync._ensure_vector_index(plugin, lib)
         assert index is not None
         assert len(index) == 0

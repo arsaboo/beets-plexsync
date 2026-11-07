@@ -25,14 +25,13 @@ import json
 import confuse
 import enlighten
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Dict, List, Optional, Tuple
 
-from beets import config, context, ui
+from beets import config, ui
 from beets.util.color import colorize
 from beets.dbcore import types
 from beets.dbcore.types import DateType
@@ -52,7 +51,10 @@ from beetsplug.ai.llm import (
 from beetsplug.core.matching import clean_string, plex_track_distance
 from beetsplug.core.vector_index import BeetsVectorIndex, read_item_metadata
 from beetsplug.utils.helpers import (
+    materialize_paths,
     media_identity,
+    music_dir_context,
+    music_dir_of,
     plex_key,
     plex_media_path,
     same_media_file,
@@ -365,21 +367,26 @@ class PlexSync(BeetsPlugin):
             try:
                 from beets.library import Library
 
-                source_lib = Library(db_path)
+                # Omitting the directory makes Library() default to ~/Music and
+                # rebind the active music dir; mirror beets' own construction.
+                source_lib = Library(
+                    db_path, config["directory"].as_filename(), set_music_dir=False
+                )
                 close_after = True
             except Exception as exc:  # noqa: BLE001
                 self._log.debug("Failed to open beets library at {}: {}", db_path, exc)
                 return None
 
         try:
-            for item in source_lib.items():
-                metadata = self._extract_vector_metadata(item)
-                item_id = metadata.get("id")
-                if item_id is None:
-                    continue
-                vector_index.add_item(item_id, metadata)
-            self._update_vector_index(vector_index, db_path=db_path)
-            return vector_index
+            with source_lib.music_dir_context():
+                for item in source_lib.items():
+                    metadata = self._extract_vector_metadata(item)
+                    item_id = metadata.get("id")
+                    if item_id is None:
+                        continue
+                    vector_index.add_item(item_id, metadata)
+                self._update_vector_index(vector_index, db_path=db_path)
+                return vector_index
         finally:
             if close_after:
                 try:
@@ -1193,6 +1200,12 @@ class PlexSync(BeetsPlugin):
         if not items_len:
             return
 
+        # Pool workers inherit no context and beets caches the first path
+        # resolution per item, so pin paths while the library dir is bound.
+        music_dir = music_dir_of(items[0])
+        with music_dir_context(music_dir):
+            materialize_paths(items)
+
         progress = self.create_progress_counter(
             items_len,
             "Syncing Plex library",
@@ -1240,9 +1253,7 @@ class PlexSync(BeetsPlugin):
         if not to_store:
             return
 
-        music_dir = getattr(getattr(to_store[0], "_db", None), "directory", None)
-        dir_cm = context.music_dir(music_dir) if music_dir else nullcontext()
-        with dir_cm:
+        with music_dir_context(music_dir):
             if write:
                 for item in to_store:
                     try:
@@ -1372,9 +1383,8 @@ class PlexSync(BeetsPlugin):
                     continue
 
         if to_write:
-            music_dir = getattr(getattr(to_write[0], "_db", None), "directory", None)
-            dir_cm = context.music_dir(music_dir) if music_dir else nullcontext()
-            with dir_cm:
+            with music_dir_context(music_dir_of(to_write[0])):
+                materialize_paths(to_write)
                 for beets_item in to_write:
                     try:
                         beets_item.try_write()

@@ -3,9 +3,58 @@ from __future__ import annotations
 import math
 import os
 import re
+from contextlib import contextmanager
 from datetime import datetime
 
+from beets import context
 from beets.util.color import colorize
+
+
+def _fsbytes(value):
+    if not value:
+        return None
+    return value if isinstance(value, bytes) else os.fsencode(str(value))
+
+
+def music_dir_of(item, default=None):
+    """Return the library directory ``item``'s relative paths hang off."""
+    for candidate in (
+        getattr(getattr(item, "_db", None), "directory", None),
+        default,
+        context.get_music_dir(),
+    ):
+        if candidate:
+            return _fsbytes(candidate)
+    return None
+
+
+@contextmanager
+def music_dir_context(music_dir):
+    """Bind ``music_dir`` as beets' active music directory (no-op if unknown).
+
+    beets resolves stored relative item paths against this directory.
+    """
+    target = _fsbytes(music_dir)
+    if not target:
+        yield
+        return
+    previous = context.get_music_dir()
+    context.set_music_dir(target)
+    try:
+        yield
+    finally:
+        if previous:
+            context.set_music_dir(previous)
+
+
+def materialize_paths(items):
+    """Resolve item paths while the music directory is bound.
+
+    beets caches the first resolution on the item, and thread pool workers
+    inherit no context, so a path first read there stays relative forever.
+    """
+    for item in items:
+        getattr(item, "path", None)
 
 
 def plex_key(value):
