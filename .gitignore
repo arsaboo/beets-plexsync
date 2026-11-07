@@ -155,3 +155,4 @@ cython_debug/
 
 # Project context notes not meant for GitHub
 agents.md
+AGENTS.md
