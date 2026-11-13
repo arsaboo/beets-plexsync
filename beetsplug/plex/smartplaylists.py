@@ -5,8 +5,9 @@ and Plex/beets objects. Behavior preserved.
 """
 
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Tuple
+from typing import Any, Dict, List, Tuple
 import math
 import time
 import copy
@@ -20,6 +21,23 @@ import numpy as np
 _module_rng = np.random.default_rng()
 
 
+
+
+@dataclass
+class PlexSnapshot:
+    """One beets library scan, shared by every playlist in a run.
+
+    ``lookup`` maps a Plex rating key to a single representative beets item
+    (last write wins on the scan order, i.e. the highest item id) and backs the
+    rating-key lookups the generators do.
+
+    ``items`` is every Plex-synced item in scan order, including several items
+    that share one rating key. Playlists that score the whole pool must see all
+    copies and choose their own representative, so they cannot use ``lookup``.
+    """
+
+    lookup: Dict[Any, Any] = field(default_factory=dict)
+    items: List[Any] = field(default_factory=list)
 
 
 def _resolve_min_year(ps, playlist_config, default_max_age_years, playlist_label):
@@ -1133,7 +1151,8 @@ def _apply_min_popularity(ps, items, min_popularity, playlist_label):
     return kept
 
 
-def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_genres, similar_tracks, playlist_type):
+def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_genres,
+                             similar_tracks, playlist_type, beets_items=None):
     """
     Unified function to generate different types of smart playlists.
 
@@ -1145,6 +1164,8 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
         preferred_genres: List of preferred genres
         similar_tracks: List of similar tracks to recently played
         playlist_type: Type of playlist to generate (e.g., 'daily_discovery', 'forgotten_gems')
+        beets_items: Plex-synced items from this run's shared scan; omit to
+            scan ``lib`` here instead
     """
     playlist_name = playlist_config.get("name", f"{playlist_type.replace('_', ' ').title()}")
     ps._log.info("Generating {} playlist", playlist_name)
@@ -1194,11 +1215,15 @@ def generate_unified_playlist(ps, lib, playlist_config, plex_lookup, preferred_g
     special_handling = playlist_type in ["70s80s_flashback", "highly_rated", "most_played"]
 
     if special_handling:
-        # For special playlist types that work with beets items instead of Plex tracks
-        all_beets_items = []
-        for item in lib.items():
-            if hasattr(item, "plex_ratingkey") and item.plex_ratingkey:
-                all_beets_items.append(item)
+        # For special playlist types that work with beets items instead of Plex
+        # tracks. These score the whole Plex-synced pool, so they need every
+        # copy rather than the lookup's one-per-rating-key representative; the
+        # runner shares one scan across the run and scanning here is the
+        # fallback for direct callers.
+        pool = beets_items if beets_items is not None else lib.items()
+        all_beets_items = [
+            item for item in pool if getattr(item, "plex_ratingkey", None)
+        ]
 
         ps._log.debug("Found {} tracks with Plex sync data", len(all_beets_items))
 
@@ -1600,29 +1625,36 @@ def apply_playlist_filters(ps, tracks, filter_config):
     return filtered_tracks
 
 
-def generate_daily_discovery(ps, lib, dd_config, plex_lookup, preferred_genres, similar_tracks):
-    return generate_unified_playlist(ps, lib, dd_config, plex_lookup, preferred_genres, similar_tracks, "daily_discovery")
+def generate_daily_discovery(ps, lib, dd_config, plex_lookup, preferred_genres, similar_tracks,
+                            beets_items=None):
+    return generate_unified_playlist(ps, lib, dd_config, plex_lookup, preferred_genres, similar_tracks, "daily_discovery", beets_items=beets_items)
 
 
-def generate_forgotten_gems(ps, lib, fg_config, plex_lookup, preferred_genres, similar_tracks):
-    return generate_unified_playlist(ps, lib, fg_config, plex_lookup, preferred_genres, similar_tracks, "forgotten_gems")
+def generate_forgotten_gems(ps, lib, fg_config, plex_lookup, preferred_genres, similar_tracks,
+                           beets_items=None):
+    return generate_unified_playlist(ps, lib, fg_config, plex_lookup, preferred_genres, similar_tracks, "forgotten_gems", beets_items=beets_items)
 
 
-def generate_recent_hits(ps, lib, rh_config, plex_lookup, preferred_genres, similar_tracks):
-    return generate_unified_playlist(ps, lib, rh_config, plex_lookup, preferred_genres, similar_tracks, "recent_hits")
+def generate_recent_hits(ps, lib, rh_config, plex_lookup, preferred_genres, similar_tracks,
+                        beets_items=None):
+    return generate_unified_playlist(ps, lib, rh_config, plex_lookup, preferred_genres, similar_tracks, "recent_hits", beets_items=beets_items)
 
 
-def generate_fresh_favorites(ps, lib, ff_config, plex_lookup, preferred_genres, similar_tracks):
-    return generate_unified_playlist(ps, lib, ff_config, plex_lookup, preferred_genres, similar_tracks, "fresh_favorites")
+def generate_fresh_favorites(ps, lib, ff_config, plex_lookup, preferred_genres, similar_tracks,
+                            beets_items=None):
+    return generate_unified_playlist(ps, lib, ff_config, plex_lookup, preferred_genres, similar_tracks, "fresh_favorites", beets_items=beets_items)
 
 
-def generate_70s80s_flashback(ps, lib, fb_config, plex_lookup, preferred_genres, similar_tracks):
-    return generate_unified_playlist(ps, lib, fb_config, plex_lookup, preferred_genres, similar_tracks, "70s80s_flashback")
+def generate_70s80s_flashback(ps, lib, fb_config, plex_lookup, preferred_genres, similar_tracks,
+                              beets_items=None):
+    return generate_unified_playlist(ps, lib, fb_config, plex_lookup, preferred_genres, similar_tracks, "70s80s_flashback", beets_items=beets_items)
 
 
-def generate_highly_rated_tracks(ps, lib, hr_config, plex_lookup, preferred_genres, similar_tracks):
-    return generate_unified_playlist(ps, lib, hr_config, plex_lookup, preferred_genres, similar_tracks, "highly_rated")
+def generate_highly_rated_tracks(ps, lib, hr_config, plex_lookup, preferred_genres, similar_tracks,
+                                beets_items=None):
+    return generate_unified_playlist(ps, lib, hr_config, plex_lookup, preferred_genres, similar_tracks, "highly_rated", beets_items=beets_items)
 
 
-def generate_most_played_tracks(ps, lib, mp_config, plex_lookup, preferred_genres, similar_tracks):
-    return generate_unified_playlist(ps, lib, mp_config, plex_lookup, preferred_genres, similar_tracks, "most_played")
+def generate_most_played_tracks(ps, lib, mp_config, plex_lookup, preferred_genres, similar_tracks,
+                               beets_items=None):
+    return generate_unified_playlist(ps, lib, mp_config, plex_lookup, preferred_genres, similar_tracks, "most_played", beets_items=beets_items)

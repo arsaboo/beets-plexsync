@@ -466,11 +466,12 @@ class FilterBeetsItemsTest:
         unsynced = self._item("unsynced", None)
         fake_plugin = types.SimpleNamespace(
             _log=types.SimpleNamespace(debug=lambda *a, **k: None),
-            _extract_vector_metadata=lambda item: {"id": None},
         )
         fake_lib = types.SimpleNamespace(items=lambda: [unsynced, synced])
-        lookup = PlexSync._build_plex_lookup_and_vector_index(fake_plugin, fake_lib)
-        assert lookup == {7: synced}
+        snapshot = PlexSync._build_plex_snapshot(fake_plugin, fake_lib)
+
+        assert snapshot.lookup == {7: synced}
+        assert snapshot.items == [synced]
 
     def test_forgotten_gems_keeps_unrated_never_played(self):
         # Regression: the exact Forgotten Gems config must keep an unrated,
@@ -686,7 +687,7 @@ class SmartPlaylistRunnerIsolationTest:
 
         plugin = types.SimpleNamespace(
             _log=_fake_log(),
-            _build_plex_lookup_and_vector_index=lambda lib: {},
+            _build_plex_snapshot=lambda lib: smartplaylists.PlexSnapshot(),
             create_progress_counter=lambda *args, **kwargs: None,
         )
         plugin.run = lambda lib, configs: PlexSync._plex_smartplaylists(
@@ -697,7 +698,7 @@ class SmartPlaylistRunnerIsolationTest:
     def test_one_playlist_failure_does_not_abort_later_playlists(self, monkeypatch):
         calls = []
 
-        def generate(ps, lib, config, *args):
+        def generate(ps, lib, config, *args, **kwargs):
             calls.append(config["name"])
             if config["name"] == "First":
                 raise RuntimeError("broken")
@@ -723,12 +724,12 @@ class SmartPlaylistRunnerIsolationTest:
         monkeypatch.setattr(
             smartplaylists,
             "generate_recent_hits",
-            lambda ps, lib, config, *args: calls.append(config["name"]) or True,
+            lambda ps, lib, config, *args, **kwargs: calls.append(config["name"]) or True,
         )
         monkeypatch.setattr(
             smartplaylists,
             "generate_daily_discovery",
-            lambda *args: calls.append("daily") or True,
+            lambda *args, **kwargs: calls.append("daily") or True,
         )
         plugin = self._plugin()
         plugin.run(None, [
@@ -782,3 +783,164 @@ class LastViewedTimestampTests:
         assert smartplaylists._days_since_played(
             self._item("1990-01-01 00:00:00"), base, cap=1095
         ) == 1095
+
+
+class SharedCandidatePoolTest:
+    """The runner scans the library once; generators must not scan again."""
+
+    @staticmethod
+    def _item(key, year=1980, rating="6"):
+        return types.SimpleNamespace(
+            plex_ratingkey=str(key),
+            title=f"Track {key}",
+            artist=f"Artist {key}",
+            album="Album",
+            genres=["Punjabi"],
+            year=year,
+            plex_userrating=rating,
+            plex_lastviewedat=None,
+            plex_viewcount="0",
+            spotify_track_popularity="50",
+        )
+
+    @staticmethod
+    def _plugin(added):
+        return types.SimpleNamespace(
+            _log=_fake_log(),
+            plex=None,
+            create_progress_counter=lambda *args, **kwargs: None,
+            _plex_replace_playlist_items=lambda tracks, name: (
+                added.update(tracks=list(tracks), name=name) or True
+            ),
+        )
+
+    @staticmethod
+    def _config():
+        return {
+            "name": "Flashback",
+            "max_tracks": 3,
+            "discovery_ratio": 5,
+            "exclusion_days": 90,
+            "filters": {"include": {"genres": ["Punjabi"]}},
+        }
+
+    def _stub_fetch(self, monkeypatch):
+        monkeypatch.setattr(smartplaylists, "get_plexsync_config", lambda *a, **k: {})
+        monkeypatch.setattr(
+            "beetsplug.plex.operations.batch_fetch_plex_items",
+            lambda plex, keys, logger, extra_exceptions=(): [
+                types.SimpleNamespace(ratingKey=key, title=f"Plex {key}")
+                for key in keys
+            ],
+        )
+
+    def test_special_type_uses_the_shared_pool_without_scanning(self, monkeypatch):
+        self._stub_fetch(monkeypatch)
+        pool = [self._item(i) for i in range(1, 11)]
+        added = {}
+
+        class NoScanLib:
+            def items(self):
+                raise AssertionError("the shared pool must be reused, not re-scanned")
+
+        updated = smartplaylists.generate_unified_playlist(
+            self._plugin(added), NoScanLib(), self._config(), {}, None, [],
+            "70s80s_flashback", beets_items=pool,
+        )
+
+        assert updated
+        assert len(added["tracks"]) == 3
+
+    def test_special_type_scans_only_when_no_pool_is_supplied(self, monkeypatch):
+        self._stub_fetch(monkeypatch)
+        pool = [self._item(i) for i in range(1, 11)]
+        scanned = []
+        added = {}
+
+        class ScanLib:
+            def items(self):
+                scanned.append(True)
+                return iter(pool)
+
+        updated = smartplaylists.generate_unified_playlist(
+            self._plugin(added), ScanLib(), self._config(), {}, None, [],
+            "70s80s_flashback",
+        )
+
+        assert updated
+        assert scanned == [True]
+        assert len(added["tracks"]) == 3
+
+
+class PlexSnapshotRunnerTest:
+    def _plugin(self, snapshot, scans):
+        def build(lib):
+            scans.append(lib)
+            return snapshot
+
+        return types.SimpleNamespace(
+            _log=_fake_log(),
+            create_progress_counter=lambda *args, **kwargs: None,
+            _build_plex_snapshot=build,
+        )
+
+    def test_three_special_playlists_share_one_library_scan(self, monkeypatch):
+        from beetsplug.plexsync import PlexSync
+
+        pool = ["a", "b"]
+        snapshot = smartplaylists.PlexSnapshot(lookup={7: "a"}, items=pool)
+        scans, pools = [], []
+        for name in ("generate_70s80s_flashback", "generate_highly_rated_tracks",
+                     "generate_most_played_tracks"):
+            monkeypatch.setattr(
+                smartplaylists, name,
+                lambda *args, beets_items=None: pools.append(beets_items) or True,
+            )
+
+        PlexSync._plex_smartplaylists(self._plugin(snapshot, scans), None, [
+            {"id": "70s80s_flashback", "name": "Flashback"},
+            {"id": "highly_rated", "name": "Rated"},
+            {"id": "most_played", "name": "Played"},
+        ])
+
+        assert len(scans) == 1
+        assert pools == [pool, pool, pool]
+
+    def test_imported_only_run_skips_the_library_scan(self, monkeypatch):
+        from beetsplug.plexsync import PlexSync
+        from beetsplug.plex import playlist_import
+
+        scans = []
+        monkeypatch.setattr(
+            playlist_import, "generate_imported_playlist",
+            lambda ps, lib, config, lookup: True,
+        )
+
+        PlexSync._plex_smartplaylists(
+            self._plugin(smartplaylists.PlexSnapshot(), scans), None,
+            [
+                {"type": "imported", "id": "ghazals", "name": "Ghazal Essentials"},
+                # The type wins over the id here too, mirroring the dispatch.
+                {"type": "imported", "id": "daily_discovery", "name": "Imported Mix"},
+            ],
+        )
+
+        assert scans == []
+
+    def test_snapshot_does_not_build_the_vector_index(self):
+        from beetsplug.plexsync import PlexSync
+
+        def explode(item):
+            raise AssertionError("the vector index belongs to _ensure_vector_index")
+
+        items = [types.SimpleNamespace(plex_ratingkey=str(key)) for key in (7, 8)]
+        plugin = types.SimpleNamespace(
+            _log=_fake_log(), _extract_vector_metadata=explode,
+        )
+
+        snapshot = PlexSync._build_plex_snapshot(
+            plugin, types.SimpleNamespace(items=lambda: items)
+        )
+
+        assert list(snapshot.lookup) == [7, 8]
+        assert snapshot.items == items

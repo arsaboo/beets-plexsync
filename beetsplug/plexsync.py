@@ -2052,10 +2052,16 @@ class PlexSync(BeetsPlugin):
 
         return total_imported, total_failed
 
-    def _build_plex_lookup_and_vector_index(self, lib):
-        self._log.debug("Building lookup dictionary for Plex rating keys and vector index")
+    def _build_plex_snapshot(self, lib) -> sp_mod.PlexSnapshot:
+        """Scan the library once for the rating-key lookup and candidate pool.
+
+        The vector index is deliberately not built here: nothing in playlist
+        generation consults it, and ``_ensure_vector_index`` builds it from a raw
+        library read when a Plex search actually needs local candidates.
+        """
+        self._log.debug("Building lookup dictionary for Plex rating keys")
         plex_lookup = {}
-        vector_index = BeetsVectorIndex()
+        synced_items = []
 
         for item in lib.items():
             # Keys are normalized to str: beets stores plex_ratingkey as a
@@ -2063,27 +2069,26 @@ class PlexSync(BeetsPlugin):
             key = plex_key(getattr(item, "plex_ratingkey", None))
             if key:
                 plex_lookup[key] = item
+                synced_items.append(item)
 
-            metadata = self._extract_vector_metadata(item)
-            item_id = metadata.get("id")
-            if item_id is None:
-                continue
-            vector_index.add_item(item_id, metadata)
-
-        if len(vector_index):
-            try:
-                db_path = getattr(lib, "path", None)
-            except AttributeError:
-                db_path = None
-            self._update_vector_index(vector_index, db_path=db_path)
-
-        return plex_lookup
+        return sp_mod.PlexSnapshot(lookup=plex_lookup, items=synced_items)
 
     def _plex_smartplaylists(self, lib, playlists_config):
-        """Process all playlists at once with a single lookup dictionary."""
-        # Build lookup once for all playlists
-        self._log.info("Building Plex lookup dictionary...")
-        plex_lookup = self._build_plex_lookup_and_vector_index(lib)
+        """Process all playlists at once with a single library scan."""
+        # Imported playlists resolve their own source tracks and never read the
+        # lookup, so only run the scan when a generator actually needs it. This
+        # mirrors the dispatch below, where the type wins over the id.
+        needs_scan = any(
+            p.get("type", "smart") != "imported"
+            and p.get("id") in _SMART_PLAYLIST_GENERATORS
+            for p in playlists_config
+        )
+        if needs_scan:
+            self._log.info("Building Plex lookup dictionary...")
+            snapshot = self._build_plex_snapshot(lib)
+        else:
+            snapshot = sp_mod.PlexSnapshot()
+        plex_lookup = snapshot.lookup
         self._log.debug("Found {} tracks in lookup dictionary", len(plex_lookup))
 
         # Get preferred attributes once if needed for smart playlists. If this
@@ -2137,7 +2142,13 @@ class PlexSync(BeetsPlugin):
                         generator_name, _ = _SMART_PLAYLIST_GENERATORS[playlist_id]
                         generator = getattr(sp_mod, generator_name)
                         result = generator(
-                            self, lib, p, plex_lookup, preferred_genres, similar_tracks
+                            self,
+                            lib,
+                            p,
+                            plex_lookup,
+                            preferred_genres,
+                            similar_tracks,
+                            beets_items=snapshot.items,
                         )
                     else:
                         skipped += 1

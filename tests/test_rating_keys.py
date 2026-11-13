@@ -40,15 +40,15 @@ class LookupKeyTest:
         unsynced = types.SimpleNamespace(plex_ratingkey="0.0", title="U", artist="A", album="A")
         fake_plugin = types.SimpleNamespace(
             _log=types.SimpleNamespace(debug=lambda *a, **k: None),
-            _extract_vector_metadata=lambda item: {"id": None},
         )
         fake_lib = types.SimpleNamespace(items=lambda: [synced, unsynced])
 
-        lookup = PlexSync._build_plex_lookup_and_vector_index(fake_plugin, fake_lib)
+        snapshot = PlexSync._build_plex_snapshot(fake_plugin, fake_lib)
 
-        assert list(lookup) == [7]
-        assert lookup.get(plex_key(7)) is synced
-        assert plex_key(0) not in lookup
+        assert list(snapshot.lookup) == [7]
+        assert snapshot.lookup.get(plex_key(7)) is synced
+        assert plex_key(0) not in snapshot.lookup
+        assert snapshot.items == [synced]
 
     def test_dedupe_resolves_plex_key_against_lookup(self):
         item = types.SimpleNamespace(plex_ratingkey="7", title="T", plex_userrating=0)
