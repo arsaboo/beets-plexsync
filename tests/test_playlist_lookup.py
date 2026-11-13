@@ -11,6 +11,7 @@ from beetsplug.plex.playlist_lookup import (
     _rating_key_to_item_id,
     resolve_playlist_items,
 )
+from beetsplug.utils.helpers import plex_key
 
 
 class SilentLog:
@@ -163,3 +164,69 @@ def test_empty_id_list_query_matches_nothing(library):
     clause, subvals = IdListQuery([]).clause()
     assert clause == "0"
     assert subvals == []
+
+
+def _add_item(db_path, title, artist, album, rating_key=None, rating=None):
+    conn = sqlite3.connect(db_path)
+    cursor = conn.execute(
+        "INSERT INTO items (title, artist, album) VALUES (?, ?, ?)",
+        (title, artist, album),
+    )
+    item_id = cursor.lastrowid
+    if rating_key is not None:
+        conn.execute(
+            "INSERT INTO item_attributes (entity_id, key, value) VALUES (?, ?, ?)",
+            (item_id, "plex_ratingkey", str(rating_key)),
+        )
+    if rating is not None:
+        conn.execute(
+            "INSERT INTO item_attributes (entity_id, key, value) VALUES (?, ?, ?)",
+            (item_id, "plex_userrating", rating),
+        )
+    conn.commit()
+    conn.close()
+    return item_id
+
+
+def test_duplicate_rating_key_resolves_like_a_last_write_wins_scan(library):
+    # Two library entries claim the same Plex track. The scoped lookup has to
+    # agree with a plain lib.items() scan, which walks ids ascending and lets
+    # the last write win.
+    duplicate_id = _add_item(
+        library.path, "Alone", "Aarav", "Zebra", rating_key=100, rating="4.0"
+    )
+
+    scanned = {}
+    for item in library.items():
+        key = plex_key(getattr(item, "plex_ratingkey", None))
+        if key:
+            scanned[key] = item.id
+    assert scanned[100] == duplicate_id
+
+    selection = resolve_playlist_items(library, [PlexTrack(100)], None, SilentLog())
+    assert [item.id for item in selection.items] == [duplicate_id]
+
+
+def test_pairs_keep_the_plex_side_of_each_match(library):
+    selection = resolve_playlist_items(
+        library, [PlexTrack(100), PlexTrack(999), PlexTrack(102)], None, SilentLog()
+    )
+
+    assert [track.ratingKey for track, _item in selection.pairs] == [100, 102]
+    assert [item.id for _track, item in selection.pairs] == [
+        item.id for item in selection.items
+    ]
+    assert [item.ratingKey for item in selection.missing] == [999]
+
+
+def test_pairs_drop_the_items_a_query_rejected(library):
+    selection = resolve_playlist_items(
+        library,
+        [PlexTrack(100), PlexTrack(101)],
+        ["plex_userrating:2.."],
+        SilentLog(),
+    )
+
+    assert [(track.ratingKey, item.title) for track, item in selection.pairs] == [
+        (100, "Alone")
+    ]

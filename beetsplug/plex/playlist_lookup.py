@@ -14,7 +14,7 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Sequence
+from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 
 from beets.dbcore.query import AndQuery, Query
 from beets.library import Item, parse_query_parts, parse_query_string
@@ -47,10 +47,16 @@ class IdListQuery(Query):
 
 @dataclass
 class PlaylistSelection:
-    """Beets items for a Plex playlist, in Plex playlist order."""
+    """Beets items for a Plex playlist, in Plex playlist order.
+
+    ``pairs`` holds ``(plex item, beets item)`` in the same order, so callers
+    that need the Plex-side attributes of each match (recently played stats, for
+    example) do not have to redo the mapping. ``items`` is its second column.
+    """
 
     items: List[Any]
     missing: List[Any] = field(default_factory=list)
+    pairs: List[Tuple[Any, Any]] = field(default_factory=list)
     dropped_by_query: int = 0
     plex_total: int = 0
 
@@ -74,10 +80,14 @@ def _rating_key_to_item_id(db_path, keys: Sequence, log) -> Optional[Dict[Any, i
     key_map: Dict[Any, int] = {}
     try:
         for chunk in _chunks(text_keys, _SQL_CHUNK):
+            # Ordered by id so that a rating key carried by several library
+            # entries resolves to the highest one, which is what a plain
+            # ``lib.items()`` scan (sorted by id, last write wins) yields.
             rows = conn.execute(
                 "SELECT i.id, a.value FROM items i "
                 "JOIN item_attributes a ON a.entity_id = i.id AND a.key = ? "
-                f"WHERE a.value IN ({','.join(['?'] * len(chunk))})",
+                f"WHERE a.value IN ({','.join(['?'] * len(chunk))}) "
+                "ORDER BY i.id",
                 ("plex_ratingkey", *chunk),
             ).fetchall()
             for item_id, value in rows:
@@ -153,11 +163,11 @@ def resolve_playlist_items(lib, plex_items: Sequence[Any], query_args, log) -> P
     if key_map is None:
         key_map = _scan_rating_keys(lib, log)
 
-    candidate_ids = [
-        key_map[key]
-        for key, _item in keyed
-        if key is not None and key_map.get(key) is not None
-    ]
+    # Aligned with ``keyed``: the beets item id behind each Plex item, or None
+    # when that item has no mapping. Keeping the alignment lets the result carry
+    # the Plex side of each match without a second mapping pass.
+    aligned_ids = [key_map.get(key) if key is not None else None for key, _ in keyed]
+    candidate_ids = [item_id for item_id in aligned_ids if item_id is not None]
 
     if query_args:
         parse = parse_query_string if isinstance(query_args, str) else parse_query_parts
@@ -168,12 +178,17 @@ def resolve_playlist_items(lib, plex_items: Sequence[Any], query_args, log) -> P
 
     wanted_ids = [item_id for item_id in candidate_ids if item_id in keep]
     items_by_id = _items_by_id(lib, wanted_ids)
-    items = [items_by_id[item_id] for item_id in wanted_ids if item_id in items_by_id]
-    missing = [
-        item
-        for key, item in keyed
-        if key is None or key_map.get(key) is None
-    ]
+
+    pairs = []
+    missing = []
+    for (key, plex_item), item_id in zip(keyed, aligned_ids):
+        if item_id is None:
+            missing.append(plex_item)
+        elif item_id in keep:
+            item = items_by_id.get(item_id)
+            if item is not None:
+                pairs.append((plex_item, item))
+    items = [item for _plex_item, item in pairs]
 
     log.debug(
         "Playlist resolution: {} Plex items, {} mapped to beets, {} dropped by query",
@@ -184,6 +199,7 @@ def resolve_playlist_items(lib, plex_items: Sequence[Any], query_args, log) -> P
     return PlaylistSelection(
         items=items,
         missing=missing,
+        pairs=pairs,
         dropped_by_query=len(candidate_ids) - len(wanted_ids),
         plex_total=len(plex_items),
     )

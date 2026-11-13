@@ -1343,26 +1343,29 @@ class PlexSync(BeetsPlugin):
         plex_ops.plex_remove_playlist_item(self.plex, items, playlist, self._log)
 
     def _update_recently_played(self, lib, days=7):
-        """Update recently played track info using plex_lookup."""
+        """Update recently played track info for the tracks Plex reports."""
         tracks = self.music.search(
             filters={"track.lastViewedAt>>": f"{days}d"}, libtype="track"
         )
         self._log.info("Updating information for {} tracks", len(tracks))
+        if not tracks:
+            return
 
-        # Build lookup once for all tracks
-        plex_lookup = self._build_plex_lookup_and_vector_index(lib)
+        # Resolve just these rating keys: scanning and indexing the whole
+        # library costs minutes and nothing here needs either.
+        selection = self._resolve_playlist_items(lib, tracks)
+        if selection.missing:
+            self._log.debug(
+                "{} recently played Plex tracks have no Beets mapping",
+                len(selection.missing),
+            )
 
         # Stage DB updates inside one transaction and defer tag-file writes until
         # after it commits (mirrors _fetch_plex_info) so file I/O doesn't hold the
         # SQLite transaction open across the whole batch.
         to_write = []
         with lib.transaction():
-            for track in tracks:
-                beets_item = plex_lookup.get(plex_key(track.ratingKey))
-                if not beets_item:
-                    self._log.debug("Track {} not found in beets", track.ratingKey)
-                    continue
-
+            for track, beets_item in selection.pairs:
                 self._log.info("Updating information for {}", beets_item)
                 try:
                     beets_item.plex_userrating = track.userRating
