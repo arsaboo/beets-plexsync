@@ -108,6 +108,31 @@ def authenticate(plugin) -> None:
     )
 
 
+def current_user(plugin) -> Dict[str, Any]:
+    """Authenticated user, fetched once per process."""
+    cached = getattr(plugin, "_spotify_user_cache", None)
+    if cached is None:
+        cached = plugin.sp.current_user() or {}
+        plugin._spotify_user_cache = cached
+    return cached
+
+
+def account_market(plugin) -> Optional[str]:
+    """Market to ask Spotify about, i.e. the account's country.
+
+    Playability fields (``is_playable``, ``restrictions``) are only returned for
+    a request that carries a market, and Spotify answers with the copy of a
+    recording that is playable there. Returns None when the account's country is
+    unknown, in which case callers fall back to ``available_markets``.
+    """
+    try:
+        country = current_user(plugin).get("country")
+    except Exception as exc:  # noqa: BLE001 - market is an optimisation, not a requirement
+        plugin._log.debug("Unable to determine Spotify account market: {}", exc)
+        return None
+    return country or None
+
+
 def process_spotify_track(track: Dict[str, Any], logger) -> Optional[Dict[str, Any]]:
     """Process a single Spotify track into a standardized dict."""
     try:
@@ -323,14 +348,15 @@ def _cache_spotify_result(key: str, value: Optional[str]) -> None:
 
 
 def search_spotify_track(
-    plugin, beets_item, *, raise_on_error: bool = False
+    plugin, beets_item, *, raise_on_error: bool = False, market: Optional[str] = None
 ) -> Optional[str]:
     """Search for a track on Spotify with fallback strategies.
 
     When ``raise_on_error`` is true, any incomplete provider search raises
-    instead of being treated as an authoritative no-match result.
+    instead of being treated as an authoritative no-match result. ``market``
+    keeps the search answers on the same side of the availability answers.
     """
-    cache_key = _spotify_search_cache_key(beets_item)
+    cache_key = f"{_spotify_search_cache_key(beets_item)}|market={market or ''}"
     if cache_key in _spotify_search_result_cache:
         cached = _spotify_search_result_cache[cache_key]
         plugin._log.debug("Spotify search cache hit for {}: {}", cache_key, cached)
@@ -354,6 +380,7 @@ def search_spotify_track(
                 q=query,
                 limit=10,
                 type="track",
+                market=market,
             )
 
             if spotify_search_results["tracks"]["items"]:
@@ -411,13 +438,24 @@ def add_tracks_to_spotify_playlist(
     track_uris: List[str],
     *,
     allow_removals: bool = True,
+    id_groups: Optional[Dict[str, str]] = None,
 ) -> bool:
     """Safely reconcile a Spotify playlist.
 
     Missing tracks are added and verified before obsolete tracks are removed.
     ``allow_removals=False`` provides an add-only mode for incomplete source
     resolution, preventing partial provider failures from deleting good tracks.
+
+    ``id_groups`` maps Spotify ids that represent the same recording (an id
+    relinked by the market check and the copy Spotify returns for it) onto one
+    representative, so a track already present under another id is neither added
+    a second time nor removed as obsolete.
     """
+    groups = id_groups or {}
+
+    def group_of(track_id: str) -> str:
+        return groups.get(track_id, track_id)
+
     # Validate before looking up or creating the destination playlist.
     target_track_ids: List[str] = [
         uri.replace("spotify:track:", "")
@@ -433,7 +471,7 @@ def add_tracks_to_spotify_playlist(
         )
         return False
 
-    user_id = plugin.sp.current_user()["id"]
+    user_id = current_user(plugin)["id"]
     playlist_id = None
     playlists_response = plugin.sp.user_playlists(user_id, limit=50)
     while playlists_response:
@@ -466,27 +504,30 @@ def add_tracks_to_spotify_playlist(
         plugin._log.debug("Playlist is already in sync - no changes needed")
         return False
 
-    current_counts = Counter(current_track_ids)
-    target_counts = Counter(target_track_ids)
+    target_groups = [group_of(tid) for tid in target_track_ids]
+    current_groups = [group_of(tid) for tid in current_track_ids]
+
+    current_counts = Counter(current_groups)
+    target_counts = Counter(target_groups)
 
     # Compute which tracks are missing (multiset difference), preserving order.
-    remaining_counts = Counter(
-        {
-            tid: min(current_counts.get(tid, 0), target_counts.get(tid, 0))
-            for tid in set(current_counts) | set(target_counts)
-        }
-    )
+    remaining_counts = Counter(current_counts)
     new_track_ids: List[str] = []
-    temp_counts = Counter(remaining_counts)
-    for tid in target_track_ids:
-        if temp_counts.get(tid, 0) > 0:
-            temp_counts[tid] -= 1
+    for group, track_id in zip(target_groups, target_track_ids):
+        if remaining_counts.get(group, 0) > 0:
+            remaining_counts[group] -= 1
         else:
-            new_track_ids.append(tid)
+            new_track_ids.append(track_id)
 
-    obsolete_ids = [tid for tid in current_counts if tid not in target_counts]
-    plugin._log.debug(
-        "Current={} Target={} New={} Removable={}",
+    wanted_groups = set(target_groups)
+    obsolete_ids = [
+        track_id
+        for track_id in dict.fromkeys(current_track_ids)
+        if group_of(track_id) not in wanted_groups
+    ]
+    plugin._log.info(
+        "Spotify playlist {}: current={} target={} to_add={} to_remove={}",
+        playlist_name,
         len(current_track_ids),
         len(target_track_ids),
         len(new_track_ids),
@@ -502,7 +543,7 @@ def add_tracks_to_spotify_playlist(
             chunk = new_track_ids[start:idx]
             plugin.sp.user_playlist_add_tracks(user_id, playlist_id, chunk, position=0)
             idx -= 100
-        plugin._log.debug(
+        plugin._log.info(
             "Added {} new tracks to top of playlist {}",
             len(new_track_ids),
             playlist_id,
@@ -512,7 +553,7 @@ def add_tracks_to_spotify_playlist(
             plugin, playlist_id, raise_on_error=True
         )
         verified_counts = Counter(
-            item["track"]["id"]
+            group_of(item["track"]["id"])
             for item in verified_tracks
             if item.get("track") and item["track"].get("id")
         )
@@ -532,7 +573,7 @@ def add_tracks_to_spotify_playlist(
             plugin.sp.user_playlist_remove_all_occurrences_of_tracks(
                 user_id, playlist_id, chunk
             )
-        plugin._log.debug(
+        plugin._log.info(
             "Removed {} obsolete tracks from playlist {}",
             len(obsolete_ids),
             playlist_id,

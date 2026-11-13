@@ -73,6 +73,7 @@ from beetsplug.plex import search as plex_search
 from beetsplug.plex import playlist_import
 from beetsplug.plex import manual_search
 from beetsplug.plex import spotify_transfer
+from beetsplug.plex import playlist_lookup
 from beetsplug.plex import collage as collage_mod
 from beetsplug.plex import smartplaylists as sp_mod
 
@@ -1834,19 +1835,29 @@ class PlexSync(BeetsPlugin):
         """Transfer Plex playlist to Spotify using plex_lookup with optional query filtering."""
         spotify_transfer.plex_to_spotify(self, lib, playlist, query_args)
 
-    def _search_spotify_track(self, beets_item, *, raise_on_error=False):
+    def _search_spotify_track(self, beets_item, *, raise_on_error=False, market=None):
         return spotify_provider.search_spotify_track(
-            self, beets_item, raise_on_error=raise_on_error
+            self, beets_item, raise_on_error=raise_on_error, market=market
+        )
+
+    def _spotify_market(self):
+        return spotify_provider.account_market(self)
+
+    def _resolve_playlist_items(self, lib, plex_items, query_args=None):
+        """Beets items for a Plex playlist, in playlist order."""
+        return playlist_lookup.resolve_playlist_items(
+            lib, plex_items, query_args, self._log
         )
 
     def add_tracks_to_spotify_playlist(
-        self, playlist_name, track_uris, *, allow_removals=True
+        self, playlist_name, track_uris, *, allow_removals=True, id_groups=None
     ):
         return spotify_provider.add_tracks_to_spotify_playlist(
             self,
             playlist_name,
             track_uris,
             allow_removals=allow_removals,
+            id_groups=id_groups,
         )
 
 

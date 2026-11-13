@@ -5,9 +5,12 @@ from tests.test_playlist_import import DummyLogger
 
 
 class SpotifyClient:
-    def __init__(self, current_ids, fail_add=False):
+    def __init__(self, current_ids, fail_add=False, aliases=None):
         self.current_ids = list(current_ids)
         self.fail_add = fail_add
+        # Spotify may store a relinked copy instead of the id that was added;
+        # a None value models the track being dropped entirely.
+        self.aliases = aliases or {}
         self.events = []
 
     def current_user(self):
@@ -29,7 +32,8 @@ class SpotifyClient:
         self.events.append(("add", list(tracks)))
         if self.fail_add:
             raise RuntimeError("add failed")
-        self.current_ids[position:position] = list(tracks)
+        stored = [self.aliases.get(track, track) for track in tracks]
+        self.current_ids[position:position] = [track for track in stored if track]
 
     def user_playlist_remove_all_occurrences_of_tracks(
             self, user_id, playlist_id, tracks):
@@ -83,3 +87,60 @@ def test_empty_target_is_rejected():
     assert not add_tracks_to_spotify_playlist(Plugin(client), "Mix", [])
     assert client.current_ids == ["old"]
     assert client.events == []
+
+
+def test_relinked_target_already_in_the_playlist_is_not_added_again():
+    client = SpotifyClient(["orig"])
+    groups = {"orig": "orig", "variant": "orig"}
+
+    assert not add_tracks_to_spotify_playlist(
+        Plugin(client), "Mix", ["variant"], id_groups=groups
+    )
+
+    assert client.events == []
+    assert client.current_ids == ["orig"]
+
+
+def test_relinked_copy_in_the_playlist_is_not_obsolete():
+    client = SpotifyClient(["variant", "keep"])
+    groups = {"orig": "orig", "variant": "orig"}
+
+    assert not add_tracks_to_spotify_playlist(
+        Plugin(client), "Mix", ["keep", "orig"], id_groups=groups
+    )
+
+    assert client.events == []
+    assert client.current_ids == ["variant", "keep"]
+
+
+def test_add_is_verified_through_the_relinked_id_spotify_stored():
+    client = SpotifyClient([], aliases={"variant": "orig"})
+    groups = {"orig": "orig", "variant": "orig"}
+
+    assert add_tracks_to_spotify_playlist(
+        Plugin(client), "Mix", ["variant"], id_groups=groups
+    )
+
+    assert client.current_ids == ["orig"]
+
+
+def test_verification_still_fails_when_the_relinked_copy_is_dropped():
+    client = SpotifyClient([], aliases={"variant": None})
+    groups = {"orig": "orig", "variant": "orig"}
+
+    with pytest.raises(RuntimeError, match="did not add the complete target"):
+        add_tracks_to_spotify_playlist(
+            Plugin(client), "Mix", ["variant"], id_groups=groups
+        )
+
+
+def test_unrelated_tracks_are_still_removed_when_groups_are_supplied():
+    client = SpotifyClient(["old", "variant"])
+    groups = {"orig": "orig", "variant": "orig"}
+
+    assert add_tracks_to_spotify_playlist(
+        Plugin(client), "Mix", ["new", "orig"], id_groups=groups
+    )
+
+    assert [event[0] for event in client.events] == ["add", "remove"]
+    assert client.current_ids == ["new", "variant"]
