@@ -96,6 +96,9 @@ def _remove_playlist_keys(plex, playlist_name, keys):
     PlexAPI caches ``Playlist.items()`` and resolves removals by rating key. One
     cached object can safely remove distinct keys, but repeated keys would reuse
     the same ``playlistItemID``. Batch one occurrence per key, then refresh.
+
+    An entry that has vanished by the time a later batch runs is already gone,
+    which is the wanted outcome; callers verify the end state themselves.
     """
     pending = Counter(keys)
     if None in pending:
@@ -113,14 +116,15 @@ def _remove_playlist_keys(plex, playlist_name, keys):
         for key in list(pending):
             candidate = items_by_key.get(key)
             if candidate is None:
-                raise RuntimeError(
-                    f"ratingKey {key} disappeared while updating {playlist_name!r}"
-                )
+                del pending[key]
+                continue
             batch.append(candidate)
             pending[key] -= 1
             if pending[key] <= 0:
                 del pending[key]
-        playlist.removeItems(items=batch)
+
+        if batch:
+            playlist.removeItems(items=batch)
 
 
 def _reorder_playlist(playlist, desired_keys, logger) -> bool:
@@ -328,29 +332,46 @@ def plex_playlist_to_collection(music, playlist_name: str, logger) -> None:
 
 
 def plex_remove_playlist_item(plex, items: Iterable, playlist_name: str, logger) -> None:
-    """Remove items from a Plex playlist if present."""
-    try:
-        playlist = _fresh_playlist(plex, playlist_name)
-        playlist_items = list(playlist.items())
-    except exceptions.NotFound:
-        logger.error("{} playlist not found", playlist_name)
-        return
-
+    """Remove every occurrence of the requested tracks from a Plex playlist."""
     requested_keys = {
         key for item in items if (key := _rating_key(item)) is not None
     }
     if not requested_keys:
         return
 
-    to_remove = [item for item in playlist_items if _rating_key(item) in requested_keys]
-    logger.info("Removing {} tracks from {} playlist", len(to_remove), playlist_name)
-    if to_remove:
-        playlist.removeItems(items=to_remove)
+    try:
+        _playlist, _items, current_keys = _current_state(plex, playlist_name)
+    except exceptions.NotFound:
+        logger.error("{} playlist not found", playlist_name)
+        return
+
+    keys_to_remove = [key for key in current_keys if key in requested_keys]
+    logger.info("Removing {} tracks from {} playlist", len(keys_to_remove), playlist_name)
+    if not keys_to_remove:
+        return
+
+    # One removal per occurrence. PlexAPI resolves a rating key against its
+    # cached item list, so passing the same key twice would delete one copy
+    # twice and leave the rest in place.
+    _remove_playlist_keys(plex, playlist_name, keys_to_remove)
+
+    left = set(_current_state(plex, playlist_name)[2]) & requested_keys
+    if left:
+        logger.error(
+            "{} track(s) are still in {} after removal", len(left), playlist_name
+        )
 
 
 def plex_clear_playlist(plex, playlist_name: str) -> None:
-    """Clear all items from a Plex playlist."""
-    playlist = plex.playlist(playlist_name)
-    tracks = playlist.items()
-    if tracks:
-        playlist.removeItems(tracks)
+    """Clear all items from a Plex playlist and verify the playlist is empty."""
+    _playlist, items, keys = _current_state(plex, playlist_name)
+    if not items:
+        return
+
+    _remove_playlist_keys(plex, playlist_name, keys)
+
+    remaining = len(_current_state(plex, playlist_name)[1])
+    if remaining:
+        raise RuntimeError(
+            f"Plex playlist {playlist_name!r} still holds {remaining} track(s) after clearing"
+        )

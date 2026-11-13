@@ -5,6 +5,8 @@ from plexapi import exceptions
 
 from beetsplug.plex.operations import (
     plex_add_playlist_item,
+    plex_clear_playlist,
+    plex_remove_playlist_item,
     plex_replace_playlist_items,
 )
 from tests.test_playlist_import import DummyLogger as Logger
@@ -84,6 +86,153 @@ class FakePlex:
     def createPlaylist(self, name, items):
         self._playlist = FakePlaylist(items)
         return self._playlist
+
+
+class Track:
+    """Server-side playlist entry: unique playlistItemID plus rating key."""
+
+    def __init__(self, playlist_item_id, rating_key):
+        self.playlistItemID = playlist_item_id
+        self.ratingKey = str(rating_key)
+        self.title = f"Track {rating_key}"
+
+
+class ServerPlaylist:
+    """What the Plex server holds, plus an event log.
+
+    ``cascade`` mimics Plex pruning a playlist's other entries for a file when
+    that file leaves the library.
+    """
+
+    def __init__(self, keys, drop=True, cascade=False):
+        self.entries = [Track(i + 1, key) for i, key in enumerate(keys)]
+        self.events = []
+        self.drop = drop
+        self.cascade = cascade
+
+    def remove_by_playlist_item_id(self, playlist_item_id):
+        self.events.append(("remove", playlist_item_id))
+        if not self.drop:
+            return
+        target = next(
+            (e for e in self.entries if e.playlistItemID == playlist_item_id), None
+        )
+        if target is None:
+            return  # a stale playlistItemID is ignored, which is how copies survived
+        self.entries = [
+            e
+            for e in self.entries
+            if e.playlistItemID != playlist_item_id
+            and not (self.cascade and e.ratingKey == target.ratingKey)
+        ]
+
+
+class PlaylistView:
+    """plexapi.Playlist stand-in.
+
+    ``items()`` is cached on the object and removals resolve a rating key
+    against that cache, so a single view cannot delete two copies of the same
+    track - the behaviour that made bulk removal of duplicates unreliable.
+    """
+
+    def __init__(self, server):
+        self.server = server
+        self._cache = None
+
+    def items(self):
+        if self._cache is None:
+            self._cache = list(self.server.entries)
+        return list(self._cache)
+
+    def removeItems(self, items):
+        for item in items:
+            entry = next(
+                (e for e in self._cache if e.ratingKey == item.ratingKey), None
+            )
+            if entry is None:
+                raise exceptions.NotFound(item.ratingKey)
+            self.server.remove_by_playlist_item_id(entry.playlistItemID)
+
+
+class DedupPlex:
+    """Fresh view per playlist() call, like ``PlexServer.playlist()``."""
+
+    def __init__(self, keys, drop=True, cascade=False):
+        self.server = ServerPlaylist(keys, drop=drop, cascade=cascade)
+
+    def playlist(self, name):
+        return PlaylistView(self.server)
+
+
+def test_one_view_cannot_delete_two_copies_of_the_same_track():
+    # Documents the plexapi limitation the removal helpers work around.
+    plex = DedupPlex([1, 2, 1])
+    view = plex.playlist("Mix")
+
+    view.removeItems([entry for entry in view.items() if entry.ratingKey == "1"])
+
+    assert [e.ratingKey for e in plex.server.entries] == ["2", "1"]
+
+
+def test_remove_deletes_every_copy_of_a_track():
+    plex = DedupPlex([1, 2, 1, 3, 1])
+    log = Logger()
+
+    plex_remove_playlist_item(plex, [Track(0, 1)], "Mix", log)
+
+    assert [e.ratingKey for e in plex.server.entries] == ["2", "3"]
+    # One DELETE per occurrence, each after a refresh that re-resolves the key.
+    assert [event[0] for event in plex.server.events] == ["remove"] * 3
+    assert not [m for level, m in log.messages if level == "error"]
+
+
+def test_remove_reports_tracks_that_stayed_behind():
+    plex = DedupPlex([1, 1, 2], drop=False)
+    log = Logger()
+
+    plex_remove_playlist_item(plex, [Track(0, 1)], "Mix", log)
+
+    assert any(
+        level == "error" and "still in" in message for level, message in log.messages
+    )
+
+
+def test_clear_deletes_every_copy():
+    plex = DedupPlex([1, 1, 2, 3])
+
+    plex_clear_playlist(plex, "Mix")
+
+    assert plex.server.entries == []
+
+
+def test_removal_tolerates_entries_plex_pruned_by_itself():
+    # Plex drops playlist entries on its own when a file leaves the library, so
+    # a copy can vanish between batches. That is the wanted end state, and it
+    # must not raise or report a failure.
+    plex = DedupPlex([1, 1, 2], cascade=True)
+    log = Logger()
+
+    plex_remove_playlist_item(plex, [Track(0, 1)], "Mix", log)
+
+    assert [e.ratingKey for e in plex.server.entries] == ["2"]
+    assert [event[0] for event in plex.server.events] == ["remove"]
+    assert not [m for level, m in log.messages if level == "error"]
+
+
+def test_clear_refuses_to_claim_success_when_tracks_remain():
+    plex = DedupPlex([1, 2], drop=False)
+
+    with pytest.raises(RuntimeError, match="still holds 2"):
+        plex_clear_playlist(plex, "Mix")
+
+
+def test_remove_without_usable_keys_is_a_noop():
+    plex = DedupPlex([1, 2])
+    log = Logger()
+
+    plex_remove_playlist_item(plex, [object()], "Mix", log)
+
+    assert plex.server.events == []
 
 
 def _keys(playlist):
